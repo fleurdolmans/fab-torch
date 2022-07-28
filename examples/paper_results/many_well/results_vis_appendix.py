@@ -10,6 +10,7 @@ from examples.many_well_visualise_all_marginal_pairs import get_target_log_prob_
 from fab.utils.plotting import plot_contours, plot_marginal_pair
 from fab.target_distributions.many_well import ManyWellEnergy
 import torch
+from examples.setup_run_snf import make_normflow_snf_model, SNFModel
 
 PATH = os.getcwd()
 
@@ -27,10 +28,26 @@ def plot_marginals(cfg: DictConfig, supfig, model_name, plot_y_label):
                                      layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
                                      act_norm=cfg.flow.act_norm)
 
-    if model_name:
+    if model_name and model_name[0:3] == "snf":
+        snf = make_normflow_snf_model(dim,
+                                       n_flow_layers=cfg.flow.n_layers,
+                                       layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
+                                       act_norm=cfg.flow.act_norm,
+                                       target=target
+                                       )
+        if model_name:
+            path_to_model = f"{PATH}/models/{model_name}_seed1.pt"
+            checkpoint = torch.load(path_to_model, map_location="cpu")
+            snf.load_state_dict(checkpoint['flow'])
+        # wrap appropriately
+        snf = SNFModel(snf, target, cfg.target.dim)
+        flow = snf.flow
+
+    elif model_name:
         path_to_model = f"{PATH}/models/{model_name}_seed1.pt"
         checkpoint = torch.load(path_to_model, map_location="cpu")
         flow._nf_model.load_state_dict(checkpoint['flow'])
+
 
     samples_flow = flow.sample((n_samples,)).detach()
 
@@ -66,20 +83,25 @@ def run(cfg: DictConfig):
     rc('xtick', labelsize=11)
     rc('ytick', labelsize=11)
 
-    model_names = ["fab_buffer", "flow_kld"]
-    titles = ["FAB w/ buffer (ours)", "Flow w/ KLD"]
+    torch.set_default_dtype(torch.float64)
+    model_names = [None, "flow_nis", "flow_kld", "snf", "fab_no_buffer", "fab_buffer"]
+    titles = ["Initialisation", r"Flow w/ $D_{\alpha=2}$", "Flow w/ KLD", "SNF w/ KLD",
+              "FAB w/o buffer (ours)",
+              "FAB w/ buffer (ours)"]
 
-    width, height = 10, 6
+    width, height = 10, 15
     fig = plt.figure(constrained_layout=True, figsize=(width, height))
-    subfigs = fig.subfigures(1, 2, wspace=0.01)
+    subfigs = fig.subfigures(3, 2, wspace=0.01).flatten()
 
-    plot_marginals(cfg, subfigs[0], model_names[0], plot_y_label=True)
-    subfigs[0].suptitle(titles[0])
+    for i, (ax, model_name, title) in enumerate(zip(subfigs[:len(titles)], model_names, titles)):
+        plot_marginals(cfg, subfigs[i], model_names[i], plot_y_label=True)
+        ax.suptitle(title)
 
-    plot_marginals(cfg, subfigs[1], model_names[1], plot_y_label=False)
-    subfigs[1].suptitle(titles[1])
-
-    #fig.suptitle(' ', fontsize='xx-large')
+    # plot_marginals(cfg, subfigs[0], model_names[0], plot_y_label=True)
+    # subfigs[0].suptitle("Flow trained with FAB")
+    #
+    # plot_marginals(cfg, subfigs[1], model_names[1], plot_y_label=False)
+    # subfigs[1].suptitle("Flow trained with KLD")
     plt.show()
 
 
