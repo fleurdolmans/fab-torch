@@ -1,10 +1,10 @@
-
 from typing import Tuple
 
 import torch
 from nflows import flows
 
 from fab.trainable_distributions import TrainableDistribution
+
 
 class WrappedNFlowsModel(TrainableDistribution):
     """Wraps the distribution from nflows library

@@ -6,36 +6,39 @@ from fab.types_ import LogProbFunc
 
 
 class HamiltonianMonteCarlo(TransitionOperator):
-    def __init__(self,
-                 n_ais_intermediate_distributions: int,
-                 dim: int,
-                 base_log_prob: LogProbFunc,
-                 target_log_prob: LogProbFunc,
-                 alpha: float = None,
-                 p_target: bool = True,
-                 epsilon: float = 1.0,
-                 n_outer: int = 1,
-                 L: int = 5,
-                 mass_init: Union[float, torch.Tensor] = 1.0,
-                 target_p_accept: float = 0.65,
-                 max_grad: float = 1e3,
-                 tune_period: bool = False,
-                 common_epsilon_init_weight: float = 0.1,
-                 eval_mode: bool = False
-                 ):
+    def __init__(
+        self,
+        n_ais_intermediate_distributions: int,
+        dim: int,
+        base_log_prob: LogProbFunc,
+        target_log_prob: LogProbFunc,
+        alpha: float = None,
+        p_target: bool = True,
+        epsilon: float = 1.0,
+        n_outer: int = 1,
+        L: int = 5,
+        mass_init: Union[float, torch.Tensor] = 1.0,
+        target_p_accept: float = 0.65,
+        max_grad: float = 1e3,
+        tune_period: bool = False,
+        common_epsilon_init_weight: float = 0.1,
+        eval_mode: bool = False,
+    ):
         """
         Step tuning with p_accept if used.
         """
         super(HamiltonianMonteCarlo, self).__init__(
-            n_ais_intermediate_distributions, dim, base_log_prob, target_log_prob,
-            alpha=alpha, p_target=p_target)
+            n_ais_intermediate_distributions, dim, base_log_prob, target_log_prob, alpha=alpha, p_target=p_target
+        )
         if isinstance(mass_init, torch.Tensor):
-            assert mass_init.shape == (dim, )  # check mass_init dim is correct if a vector
+            assert mass_init.shape == (dim,)  # check mass_init dim is correct if a vector
         self.tune_period = tune_period
         # we weakly tie the step size parameters by utilising a shared component.
         self.register_buffer("common_epsilon", torch.tensor([epsilon * common_epsilon_init_weight]))
-        self.register_buffer("epsilons", torch.ones([n_ais_intermediate_distributions, n_outer]) * epsilon *
-                             (1 - common_epsilon_init_weight))
+        self.register_buffer(
+            "epsilons",
+            torch.ones([n_ais_intermediate_distributions, n_outer]) * epsilon * (1 - common_epsilon_init_weight),
+        )
         self.register_buffer("mass_vector", torch.ones(dim) * mass_init)
         self.n_outer = n_outer
         self.L = L
@@ -46,7 +49,6 @@ class HamiltonianMonteCarlo(TransitionOperator):
         self.average_distance_first_dist: torch.Tensor
         self.average_distance_last_dist: torch.Tensor
         self.eval_mode = eval_mode  # turn off step size tuning
-
 
     @property
     def uses_grad_info(self) -> bool:
@@ -63,8 +65,7 @@ class HamiltonianMonteCarlo(TransitionOperator):
             interesting_dict[f"dist0_p_accept_{i}"] = val.item()
         if self.n_ais_intermediate_distributions > 1:
             for i, val in enumerate(self.last_dist_p_accepts):
-                interesting_dict[f"dist{self.n_ais_intermediate_distributions - 1}_p_accept_{i}"]\
-                    = val.item()
+                interesting_dict[f"dist{self.n_ais_intermediate_distributions - 1}_p_accept_{i}"] = val.item()
         epsilon_first_dist_first_loop = self.get_epsilon(0, 0)
         if epsilon_first_dist_first_loop.numel() == 1:
             interesting_dict[f"epsilons_dist0_loop0"] = epsilon_first_dist_first_loop.cpu().item()
@@ -83,8 +84,9 @@ class HamiltonianMonteCarlo(TransitionOperator):
 
         interesting_dict["average_distance_dist0"] = self.average_distance_first_dist.cpu().item()
         if hasattr(self, f"average_distance_last_dist"):
-            interesting_dict[f"average_distance_dist_{self.n_ais_intermediate_distributions - 1}"] \
-                = self.average_distance_last_dist.cpu().item()
+            interesting_dict[
+                f"average_distance_dist_{self.n_ais_intermediate_distributions - 1}"
+            ] = self.average_distance_last_dist.cpu().item()
         return interesting_dict
 
     def get_epsilon(self, i: int, n: int) -> torch.Tensor:
@@ -100,24 +102,27 @@ class HamiltonianMonteCarlo(TransitionOperator):
         return self.epsilons[index, n] + self.common_epsilon
 
     def joint_log_prob(self, point: Point, p, mass_matrix, U):
-        return - U(point) - self.kinetic_energy(p, mass_matrix)
+        return -U(point) - self.kinetic_energy(p, mass_matrix)
 
-    def metropolis_acceptance_prob(self, point_proposed: Point, point_current: Point,
-                                   p_proposed: torch.Tensor, p_current: torch.Tensor,
-                                   mass_matrix: torch.Tensor, U: Callable):
+    def metropolis_acceptance_prob(
+        self,
+        point_proposed: Point,
+        point_current: Point,
+        p_proposed: torch.Tensor,
+        p_current: torch.Tensor,
+        mass_matrix: torch.Tensor,
+        U: Callable,
+    ):
         log_prob_current = self.joint_log_prob(point_current, p_current, mass_matrix, U)
         log_prob_proposed = self.joint_log_prob(point_proposed, p_proposed, mass_matrix, U)
         acceptance_prob = torch.exp(log_prob_proposed - log_prob_current)
         # reject samples with nan acceptance probability
-        acceptance_probability = torch.nan_to_num(acceptance_prob,
-                                                  nan=0.0,
-                                                  posinf=0.0,
-                                                  neginf=0.0)
+        acceptance_probability = torch.nan_to_num(acceptance_prob, nan=0.0, posinf=0.0, neginf=0.0)
         acceptance_prob = torch.clamp(acceptance_probability, min=0.0, max=1.0)
         return acceptance_prob.detach()
 
     def kinetic_energy(self, p, mass_matrix):
-        return torch.sum(p**2 / mass_matrix, dim=-1) / 2
+        return torch.sum(p ** 2 / mass_matrix, dim=-1) / 2
 
     def HMC_func(self, U, point: Point, grad_U, i):
         current_point = point
@@ -140,19 +145,19 @@ class HamiltonianMonteCarlo(TransitionOperator):
                 p = p - epsilon * grad_u / 2
 
             acceptance_probability = self.metropolis_acceptance_prob(
-                point_proposed=point, point_current=current_point,
-                p_proposed=p, p_current=current_p,
-                U=U, mass_matrix=self.mass_vector
+                point_proposed=point,
+                point_current=current_point,
+                p_proposed=p,
+                p_current=current_p,
+                U=U,
+                mass_matrix=self.mass_vector,
             )
-            accept = acceptance_probability > torch.rand(
-                acceptance_probability.shape).to(point.device)
+            accept = acceptance_probability > torch.rand(acceptance_probability.shape).to(point.device)
             current_point[accept] = point[accept]
             p_accept_mean = torch.mean(acceptance_probability)
-            self.store_info(i=i, n=n, p_accept_mean=p_accept_mean, current_x=point.x,
-                            original_x=original_point.x)
+            self.store_info(i=i, n=n, p_accept_mean=p_accept_mean, current_x=point.x, original_x=original_point.x)
             if not self.eval_mode:
-                self.adjust_step_size_p_accept(p_accept_mean=p_accept_mean,
-                                               i=i, n=n)
+                self.adjust_step_size_p_accept(p_accept_mean=p_accept_mean, i=i, n=n)
         return current_point
 
     def adjust_step_size_p_accept(self, p_accept_mean, i, n):
@@ -164,7 +169,6 @@ class HamiltonianMonteCarlo(TransitionOperator):
         else:
             self.epsilons[index, n] = self.epsilons[index, n] / 1.05
             self.common_epsilon = self.common_epsilon / 1.02
-
 
     def store_info(self, i, n, p_accept_mean, current_x, original_x):
         """Store info that will be retrieved for logging."""
@@ -178,21 +182,19 @@ class HamiltonianMonteCarlo(TransitionOperator):
             distance = torch.linalg.norm((original_x - current_x), ord=2, dim=-1)
             self.average_distance_last_dist = torch.mean(distance).detach().cpu()
 
-
     def transition(self, point: Point, i: int, beta: float) -> Point:
         """
         Perform HMC transition.
         """
 
         def U(point: Point):
-            return - self.intermediate_target_log_prob(point, beta)
+            return -self.intermediate_target_log_prob(point, beta)
 
         def grad_U(point: Point):
-            grad = - self.grad_intermediate_target_log_prob(point, beta)
+            grad = -self.grad_intermediate_target_log_prob(point, beta)
             return torch.nan_to_num(
-                torch.clamp(grad,
-                max=self.max_grad, min=-self.max_grad),
-                nan=0.0, posinf=0.0, neginf=0.0)
+                torch.clamp(grad, max=self.max_grad, min=-self.max_grad), nan=0.0, posinf=0.0, neginf=0.0
+            )
 
         point = self.HMC_func(U, point, grad_U, i)
         return point
@@ -209,7 +211,7 @@ class HamiltonianMonteCarlo(TransitionOperator):
             g.write(model_description)
         torch.save(self.state_dict(), model_path)
 
-    def load_model(self, save_path, epoch=None, device='cpu'):
+    def load_model(self, save_path, epoch=None, device="cpu"):
         if epoch is None:
             model_path = str(save_path / "HMC_model")
         else:

@@ -7,6 +7,7 @@ LogProbFunc = Callable[[torch.Tensor], torch.Tensor]
 
 class Distribution(abc.ABC):
     """Used for distributions that have a defined sampling and log probability function."""
+
     @abc.abstractmethod
     def log_prob(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -28,11 +29,9 @@ class Distribution(abc.ABC):
 
 
 class Model(object):
-
     @abc.abstractmethod
     def loss(self, batch_size: int) -> torch.Tensor:
         raise NotImplementedError
-
 
     def get_iter_info(self) -> Mapping[str, Any]:
         """Return information from latest loss iteration, for use in logging."""
@@ -47,7 +46,6 @@ class Model(object):
     def parameters(self) -> Iterator[torch.nn.Parameter]:
         """Returns the tunable parameters of the model for use inside the train loop. This is
         required for gradient norm clipping."""
-
 
     def save(self, file_path) -> None:
         """Save model to file_path."""

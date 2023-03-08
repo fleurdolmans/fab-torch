@@ -11,7 +11,7 @@ from fab.types_ import LogProbFunc, Distribution
 
 def plot_history(history):
     """Agnostic history plotter for quickly plotting a dictionary of logging info."""
-    figure, axs = plt.subplots(len(history), 1, figsize=(7, 3*len(history.keys())))
+    figure, axs = plt.subplots(len(history), 1, figsize=(7, 3 * len(history.keys())))
     if len(history.keys()) == 1:
         axs = [axs]  # make iterable
     elif len(history.keys()) == 0:
@@ -27,12 +27,14 @@ def plot_history(history):
     plt.tight_layout()
 
 
-def plot_contours(log_prob_func: LogProbFunc,
-                  ax: Optional[plt.Axes] = None,
-                  bounds: Tuple[float, float] = (-5.0, 5.0),
-                  grid_width_n_points: int = 20,
-                  n_contour_levels: Optional[int] = None,
-                  log_prob_min: float = -1000.0):
+def plot_contours(
+    log_prob_func: LogProbFunc,
+    ax: Optional[plt.Axes] = None,
+    bounds: Tuple[float, float] = (-5.0, 5.0),
+    grid_width_n_points: int = 20,
+    n_contour_levels: Optional[int] = None,
+    log_prob_min: float = -1000.0,
+):
     """Plot contours of a log_prob_func that is defined on 2D"""
     if ax is None:
         fig, ax = plt.subplots(1)
@@ -50,11 +52,13 @@ def plot_contours(log_prob_func: LogProbFunc,
         ax.contour(x_points_dim1, x_points_dim2, log_p_x)
 
 
-def plot_marginal_pair(samples: torch.Tensor,
-                  ax: Optional[plt.Axes] = None,
-                  marginal_dims: Tuple[int, int] = (0, 1),
-                  bounds: Tuple[float, float] = (-5.0, 5.0),
-                  alpha: float = 0.5):
+def plot_marginal_pair(
+    samples: torch.Tensor,
+    ax: Optional[plt.Axes] = None,
+    marginal_dims: Tuple[int, int] = (0, 1),
+    bounds: Tuple[float, float] = (-5.0, 5.0),
+    alpha: float = 0.5,
+):
     """Plot samples from marginal of distribution for a given pair of dimensions."""
     if not ax:
         fig, ax = plt.subplots(1)

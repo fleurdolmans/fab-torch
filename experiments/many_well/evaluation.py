@@ -13,7 +13,7 @@ PATH = os.getcwd()
 
 
 def evaluate_many_well(cfg: DictConfig, path_to_model: str, target, num_samples=int(5e4)):
-    test_set_exact = target.sample((num_samples, ))
+    test_set_exact = target.sample((num_samples,))
     test_set_log_prob_over_p = torch.mean(target.log_prob(test_set_exact) - target.log_Z).cpu().item()
     test_set_modes_log_prob_over_p = torch.mean(target.log_prob(target._test_set_modes) - target.log_Z)
     print(f"test set log prob under p: {test_set_log_prob_over_p:.2f}")
@@ -55,13 +55,16 @@ def main(cfg: DictConfig):
             path_to_model = f"{PATH}/models/{name}.pt"
             print(f"get results for {name}")
             eval_info = evaluate_many_well(cfg, path_to_model, target, num_samples)
-            eval_info.update(seed=seed,
-                             model_name=model_name)
+            eval_info.update(seed=seed, model_name=model_name)
             results = results.append(eval_info, ignore_index=True)
 
-
-    keys = ["eval_ess_flow", 'test_set_exact_mean_log_prob', 'test_set_modes_mean_log_prob',
-            'MSE_log_Z_estimate', "forward_kl"]
+    keys = [
+        "eval_ess_flow",
+        "test_set_exact_mean_log_prob",
+        "test_set_modes_mean_log_prob",
+        "MSE_log_Z_estimate",
+        "forward_kl",
+    ]
     print("\n *******  mean  ********************** \n")
     print(results.groupby("model_name").mean()[keys].to_latex())
     print("\n ******* std ********************** \n")
@@ -71,8 +74,9 @@ def main(cfg: DictConfig):
     print("overall results")
     print(results[["model_name", "seed"] + keys])
 
+
 FILENAME_EVAL_INFO = "/experiments/many_well/many_well_results_iclr.csv"
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -19,7 +19,7 @@ class Energy(torch.nn.Module):
     def energy(self, x, temperature=None):
         assert x.shape[-1] == self._dim, "`x` does not match `dim`"
         if temperature is None:
-            temperature = 1.
+            temperature = 1.0
         return self._energy(x) / temperature
 
     def force(self, x, temperature=None):
@@ -29,7 +29,7 @@ class Energy(torch.nn.Module):
 
 
 class DoubleWellEnergy(Energy, nn.Module):
-    def __init__(self, dim=2, a=-0.5, b=-6.0, c=1.):
+    def __init__(self, dim=2, a=-0.5, b=-6.0, c=1.0):
         assert dim == 2  # We only use the 2D version
         super().__init__(dim)
         self._a = a
@@ -63,7 +63,7 @@ class DoubleWellEnergy(Energy, nn.Module):
         if self._a == -0.5 and self._b == -6 and self._c == 1.0:
             # Define target.
             def target_log_prob(x):
-                return -x ** 4 + 6 * x ** 2 + 1 / 2 * x
+                return -(x ** 4) + 6 * x ** 2 + 1 / 2 * x
 
             TARGET_Z = 11784.50927
 
@@ -71,8 +71,7 @@ class DoubleWellEnergy(Energy, nn.Module):
             mix = torch.distributions.Categorical(self.component_mix)
             com = torch.distributions.Normal(self.means, self.scales)
 
-            proposal = torch.distributions.MixtureSameFamily(mixture_distribution=mix,
-                                                             component_distribution=com)
+            proposal = torch.distributions.MixtureSameFamily(mixture_distribution=mix, component_distribution=com)
 
             k = TARGET_Z * 3
 
@@ -81,13 +80,11 @@ class DoubleWellEnergy(Energy, nn.Module):
         else:
             raise NotImplementedError
 
-
     def sample(self, shape):
         if self._a == -0.5 and self._b == -6 and self._c == 1.0:
             dim1_samples = self.sample_first_dimension(shape)
             dim2_samples = torch.distributions.Normal(
-                torch.tensor(0.0).to(dim1_samples.device),
-                torch.tensor(1.0).to(dim1_samples.device)
+                torch.tensor(0.0).to(dim1_samples.device), torch.tensor(1.0).to(dim1_samples.device)
             ).sample(shape)
             return torch.stack([dim1_samples, dim2_samples], dim=-1)
         else:
@@ -102,11 +99,12 @@ class DoubleWellEnergy(Energy, nn.Module):
         else:
             raise NotImplementedError
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Test that rejection sampling is work as desired.
     import matplotlib.pyplot as plt
-    target = DoubleWellEnergy(2)
 
+    target = DoubleWellEnergy(2)
 
     x_linspace = torch.linspace(-4, 4, 200)
 
@@ -114,19 +112,16 @@ if __name__ == '__main__':
     samples = target.sample((10000,))
     p_1 = torch.exp(-target._energy_dim_1(x_linspace))
     # plot first dimension vs normalised log prob
-    plt.plot(x_linspace, p_1/Z_dim_1, label="p_1 normalised")
+    plt.plot(x_linspace, p_1 / Z_dim_1, label="p_1 normalised")
     plt.hist(samples[:, 0], density=True, bins=100, label="sample density")
     plt.legend()
     plt.show()
 
     # Now dimension 2.
-    Z_dim_2 = (2 * torch.pi)**0.5
+    Z_dim_2 = (2 * torch.pi) ** 0.5
     p_2 = torch.exp(-target._energy_dim_2(x_linspace))
     # plot first dimension vs normalised log prob
-    plt.plot(x_linspace, p_2/Z_dim_2, label="p_2 normalised")
+    plt.plot(x_linspace, p_2 / Z_dim_2, label="p_2 normalised")
     plt.hist(samples[:, 1], density=True, bins=100, label="sample density")
     plt.legend()
     plt.show()
-
-
-

@@ -17,13 +17,12 @@ def setup_gmm_plotter(cfg: DictConfig, target: GMM, buffer=None) -> Plotter:
             fig, axs = plt.subplots(1, 2, figsize=(8, 4))
 
         target.to("cpu")
-        plot_contours(target.log_prob, bounds=plotting_bounds, ax=axs[0], n_contour_levels=50,
-                      grid_width_n_points=200)
-        plot_contours(target.log_prob, bounds=plotting_bounds, ax=axs[1], n_contour_levels=50,
-                      grid_width_n_points=200)
+        plot_contours(target.log_prob, bounds=plotting_bounds, ax=axs[0], n_contour_levels=50, grid_width_n_points=200)
+        plot_contours(target.log_prob, bounds=plotting_bounds, ax=axs[1], n_contour_levels=50, grid_width_n_points=200)
         if cfg.training.prioritised_buffer is True and cfg.training.use_buffer is True:
-            plot_contours(target.log_prob, bounds=plotting_bounds, ax=axs[2], n_contour_levels=50,
-                          grid_width_n_points=200)
+            plot_contours(
+                target.log_prob, bounds=plotting_bounds, ax=axs[2], n_contour_levels=50, grid_width_n_points=200
+            )
         target.to(target.device)
 
         # plot flow samples
@@ -31,11 +30,11 @@ def setup_gmm_plotter(cfg: DictConfig, target: GMM, buffer=None) -> Plotter:
         plot_marginal_pair(samples_flow, ax=axs[0], bounds=plotting_bounds)
 
         # plot ais samples
-        samples_ais = fab_model.annealed_importance_sampler.sample_and_log_weights(n_samples,
-                                                                                   logging=False)[0].x
+        samples_ais = fab_model.annealed_importance_sampler.sample_and_log_weights(
+            n_samples, logging=False, purpose="plotting"
+        )[0].x
         samples_ais = samples_ais.detach()
         plot_marginal_pair(samples_ais, ax=axs[1], bounds=plotting_bounds)
-
 
         axs[0].set_title("flow samples")
         axs[1].set_title("ais samples")
@@ -46,14 +45,19 @@ def setup_gmm_plotter(cfg: DictConfig, target: GMM, buffer=None) -> Plotter:
             axs[2].set_title("buffer samples")
         # plt.show()
         return [fig]
+
     return plot
 
 
 def _run(cfg: DictConfig):
     torch.manual_seed(0)  # seed of 0 for GMM problem
-    target = GMM(dim=cfg.target.dim, n_mixes=cfg.target.n_mixes,
-                 loc_scaling=cfg.target.loc_scaling, log_var_scaling=cfg.target.log_var_scaling,
-                 use_gpu=cfg.training.use_gpu)
+    target = GMM(
+        dim=cfg.target.dim,
+        n_mixes=cfg.target.n_mixes,
+        loc_scaling=cfg.target.loc_scaling,
+        log_var_scaling=cfg.target.log_var_scaling,
+        use_gpu=cfg.training.use_gpu,
+    )
     torch.manual_seed(cfg.training.seed)
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
@@ -65,5 +69,6 @@ def _run(cfg: DictConfig):
 def run(cfg: DictConfig):
     _run(cfg)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run()

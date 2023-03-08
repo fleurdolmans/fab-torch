@@ -1,31 +1,36 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import wandb
+
 api = wandb.Api()
 
 alphas = [1.0, 1.5, 2.0, 3.0]  # 0.25, 0.5,
 
 
-def get_wandb_runs(alpha, with_buff, n_runs = 3):
-    filters = {"$and": [{"tags": "iclr_rebuttal"},
-                        {"tags": "exp2"},
-                        {"tags": "thurs"},
-                        {"config.training": {"$regex": f"'use_buffer': {with_buff},"}}
-                        ]}
+def get_wandb_runs(alpha, with_buff, n_runs=3):
+    filters = {
+        "$and": [
+            {"tags": "iclr_rebuttal"},
+            {"tags": "exp2"},
+            {"tags": "thurs"},
+            {"config.training": {"$regex": f"'use_buffer': {with_buff},"}},
+        ]
+    }
     if alpha % 1 == 0:
-        filters['$and'].append(
-            {"$or":
-                                 [{"config.fab": {"$regex": f"'alpha': {alpha},"}},
-                                  {"config.fab": {"$regex": f"'alpha': {int(alpha),}"}}
-                                  ]}
+        filters["$and"].append(
+            {
+                "$or": [
+                    {"config.fab": {"$regex": f"'alpha': {alpha},"}},
+                    {"config.fab": {"$regex": f"'alpha': {int(alpha),}"}},
+                ]
+            }
         )
     else:
-        filters['$and'].append({"config.fab": {"$regex": f"'alpha': {alpha},"}})
+        filters["$and"].append({"config.fab": {"$regex": f"'alpha': {alpha},"}})
     if not with_buff:
-        filters['$and'].append({"tags": "bug_fix"})
-    runs = api.runs(path='flow-ais-bootstrap/fab',
-                    filters=filters)
-    key = 'test_set_mean_log_prob_p_target' if with_buff else 'test_set_mean_log_prob'
+        filters["$and"].append({"tags": "bug_fix"})
+    runs = api.runs(path="flow-ais-bootstrap/fab", filters=filters)
+    key = "test_set_mean_log_prob_p_target" if with_buff else "test_set_mean_log_prob"
     runs_list = []
     i = 0
     while not len(runs_list) == n_runs:
@@ -48,14 +53,14 @@ def get_runs(alpha, with_buff: bool, n_runs=3):
     n_steps = []
     log_probs = []
     for run in runs:
-        key = 'test_set_mean_log_prob_p_target' if with_buff else 'test_set_mean_log_prob'
+        key = "test_set_mean_log_prob_p_target" if with_buff else "test_set_mean_log_prob"
         history = run.history(keys=[key])
-        n_steps.append(list(np.array(history['_step'])))
+        n_steps.append(list(np.array(history["_step"])))
         log_probs.append(list(np.array(history[key], dtype=float)))
     return np.array(n_steps), np.array(log_probs)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     fig, axs = plt.subplots(1, 2, sharey=True)
     for i, use_buff in enumerate([False, True]):
         axs[i].set_title("w buffer" if use_buff else "w/o buffer")
@@ -64,8 +69,7 @@ if __name__ == '__main__':
             n_steps, log_probs = get_runs(alpha, use_buff)
             means = np.nanmean(log_probs, axis=0)
             std = np.nanstd(log_probs, axis=0)
-            axs[i].plot(n_steps[0][np.isfinite(means)], means[np.isfinite(means)],
-                        "-o", label=fr"$\alpha={alpha}$")
+            axs[i].plot(n_steps[0][np.isfinite(means)], means[np.isfinite(means)], "-o", label=fr"$\alpha={alpha}$")
             # axs[i].set_title(fr"alpha={alpha}$")
             # axs[i].fill_between(n_steps[0][np.isfinite(means)],
             #                     (means - std)[np.isfinite(means)],

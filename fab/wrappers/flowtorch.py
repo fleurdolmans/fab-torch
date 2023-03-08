@@ -1,9 +1,9 @@
-
 from typing import Tuple
 
 import torch
 
 from fab.trainable_distributions import TrainableDistribution
+
 
 class WrappedFlowTorchModel(TrainableDistribution):
     # TODO: write

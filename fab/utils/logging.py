@@ -22,12 +22,11 @@ class Logger(abc.ABC):
         """Closes the logger, not expecting any further write."""
 
 
-
 class ListLogger(Logger):
     """Manually save the data to the class in a dict. Currently only supports scalar history
     inputs."""
-    def __init__(self, save: bool = True, save_path: str = "/tmp/logging_hist.pkl",
-                 save_period: int = 100):
+
+    def __init__(self, save: bool = True, save_path: str = "/tmp/logging_hist.pkl", save_period: int = 100):
         self.save = save
         self.save_path = save_path
         if save:
@@ -61,7 +60,7 @@ class ListLogger(Logger):
 
         self.iter += 1
         if self.save and (self.iter + 1) % self.save_period == 0:
-            pickle.dump(self.history, open(self.save_path, "wb")) # overwrite with latest version
+            pickle.dump(self.history, open(self.save_path, "wb"))  # overwrite with latest version
 
     def close(self) -> None:
         if self.save:
@@ -70,7 +69,9 @@ class ListLogger(Logger):
 
 class WandbLogger(Logger):
     def __init__(self, **kwargs: Any):
-        self.run = wandb.init(**kwargs, reinit=True)
+        name = kwargs.pop("name")  # Save required name for later
+        self.run = wandb.init(**kwargs, reinit=True)  # Init run with random name to get run number
+        wandb.run.name = name + "-" + wandb.run.name.split("-")[-1]  # Append run number to name
         self.iter: int = 0
 
     def write(self, data: Dict[str, Any]) -> None:
@@ -82,10 +83,7 @@ class WandbLogger(Logger):
 
 
 class PandasLogger(Logger):
-    def __init__(self,
-                 save: bool = True,
-                 save_path: str ="/logging_history.csv",
-                 save_period: int = 100):
+    def __init__(self, save: bool = True, save_path: str = "/logging_history.csv", save_period: int = 100):
         self.save_path = save_path
         self.save = save
         self.save_period = save_period
@@ -100,5 +98,4 @@ class PandasLogger(Logger):
 
     def close(self) -> None:
         if self.save:
-            self.dataframe.to_csv(open(self.save_path, "w")) # overwrite with latest version
-
+            self.dataframe.to_csv(open(self.save_path, "w"))  # overwrite with latest version

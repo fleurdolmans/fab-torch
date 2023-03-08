@@ -5,6 +5,7 @@ from normflows import NormalizingFlow
 
 from fab.trainable_distributions import TrainableDistribution
 
+
 class WrappedNormFlowModel(TrainableDistribution):
     """Wraps the distribution from normflows library
     (https://github.com/VincentStimper/normalizing-flows) to work in this fab library."""

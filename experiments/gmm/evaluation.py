@@ -13,12 +13,18 @@ from fab.utils.plotting import plot_contours, plot_marginal_pair
 
 PATH = os.getcwd()
 
+
 def setup_target(cfg, num_samples):
     # Setup target
     torch.manual_seed(0)  #  Always 0 for GMM problem
-    target = GMM(dim=cfg.target.dim, n_mixes=cfg.target.n_mixes,
-                 loc_scaling=cfg.target.loc_scaling, log_var_scaling=cfg.target.log_var_scaling,
-                 use_gpu=False, n_test_set_samples=num_samples)
+    target = GMM(
+        dim=cfg.target.dim,
+        n_mixes=cfg.target.n_mixes,
+        loc_scaling=cfg.target.loc_scaling,
+        log_var_scaling=cfg.target.log_var_scaling,
+        use_gpu=False,
+        n_test_set_samples=num_samples,
+    )
     if cfg.training.use_64_bit:
         target = target.double()
     return target
@@ -38,8 +44,7 @@ def evaluate(cfg: DictConfig, path_to_model, target, num_samples=int(1e4)):
         fig, ax = plt.subplots()
         samples_flow = model.flow.sample((n_samples,)).detach()
         plot_marginal_pair(samples_flow, ax=ax, bounds=plotting_bounds, alpha=alpha)
-        plot_contours(target.log_prob, bounds=plotting_bounds, ax=ax, n_contour_levels=50,
-                      grid_width_n_points=200)
+        plot_contours(target.log_prob, bounds=plotting_bounds, ax=ax, n_contour_levels=50, grid_width_n_points=200)
         plt.show()
     return eval
 
@@ -68,11 +73,10 @@ def main(cfg: DictConfig):
             name = model_name + f"_seed{seed}"
             path_to_model = f"{PATH}/models/{name}.pt"
             eval_info = evaluate(cfg, path_to_model, target, num_samples)
-            eval_info.update(seed=seed,
-                             model_name=model_name)
+            eval_info.update(seed=seed, model_name=model_name)
             results = results.append(eval_info, ignore_index=True)
 
-    keys = ["eval_ess_flow", "eval_ess_ais", "test_set_mean_log_prob", 'kl_forward']
+    keys = ["eval_ess_flow", "eval_ess_ais", "test_set_mean_log_prob", "kl_forward"]
     print("\n *******  mean  ********************** \n")
     print(results.groupby("model_name").mean()[keys])
     print("\n ******* std ********************** \n")
@@ -85,7 +89,7 @@ def main(cfg: DictConfig):
 # use base config of GMM but overwrite for specific model.
 @hydra.main(config_path="../config", config_name="gmm.yaml")
 def alpha_study(cfg: DictConfig):
-    alpha_values = [0.25,  0.5, 1.0, 1.5, 2.0, 3.0]
+    alpha_values = [0.25, 0.5, 1.0, 1.5, 2.0, 3.0]
     seeds = [0, 1, 2]
     num_samples = int(5e4)
 
@@ -99,11 +103,10 @@ def alpha_study(cfg: DictConfig):
                 name = name_without_seed + f"_seed{seed}"
                 path_to_model = f"{PATH}/models_alpha/{name}.pt"
                 eval_info = evaluate(cfg, path_to_model, target, num_samples)
-                eval_info.update(seed=seed,
-                                 model_name=name_without_seed)
+                eval_info.update(seed=seed, model_name=name_without_seed)
                 results = results.append(eval_info, ignore_index=True)
 
-    keys = ["eval_ess_flow", "eval_ess_ais", "test_set_mean_log_prob", 'kl_forward']
+    keys = ["eval_ess_flow", "eval_ess_ais", "test_set_mean_log_prob", "kl_forward"]
     print("\n *******  mean  ********************** \n")
     print(results.groupby("model_name").mean()[keys])
     print("\n ******* std ********************** \n")
@@ -116,6 +119,6 @@ def alpha_study(cfg: DictConfig):
 FILENAME_EVAL_INFO = PATH + "/gmm_results.csv"
 FILENAME_EVA_ALPHA_INFO = PATH + "/gmm_alpha_results.csv"
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # main()
     alpha_study()

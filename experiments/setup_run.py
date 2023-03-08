@@ -22,24 +22,29 @@ from fab import FABModel, HamiltonianMonteCarlo, Metropolis
 from fab.core import ALPHA_DIV_TARGET_LOSSES
 from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
-from experiments.make_flow import make_wrapped_normflow_realnvp, \
-    make_wrapped_normflow_resampled_flow, make_wrapped_normflow_snf_model
+from experiments.make_flow import (
+    make_wrapped_normflow_realnvp,
+    make_wrapped_normflow_resampled_flow,
+    make_wrapped_normflow_snf_model,
+)
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
-SetupPlotterFn = Callable[[DictConfig, TargetDistribution,
-                           Optional[Union[ReplayBuffer, PrioritisedReplayBuffer]]], Plotter]
+SetupPlotterFn = Callable[
+    [DictConfig, TargetDistribution, Optional[Union[ReplayBuffer, PrioritisedReplayBuffer]]], Plotter
+]
 
 
 def get_n_iterations(
-        n_training_iter: Union[int, None],
-        n_flow_forward_pass: Union[int, None],
-        batch_size: int,
-        loss_type: str,
-        n_transition_operator_inner_steps: int,
-        n_intermediate_ais_dist: int,
-        transition_operator_type: str,
-        use_buffer: bool,
-        min_buffer_length: Optional[int] = None) -> int:
+    n_training_iter: Union[int, None],
+    n_flow_forward_pass: Union[int, None],
+    batch_size: int,
+    loss_type: str,
+    n_transition_operator_inner_steps: int,
+    n_intermediate_ais_dist: int,
+    transition_operator_type: str,
+    use_buffer: bool,
+    min_buffer_length: Optional[int] = None,
+) -> int:
     """
     Calculate the number of training iterations, based on the run config.
     We define one "training iteration" as
@@ -65,21 +70,19 @@ def get_n_iterations(
                 # Note this also requires differentiating the flow, which is fair as the
                 # KLD forward pass also requires a differentiation of target and flow step.
                 # +1 is for the initial sampling step.
-                n_flow_eval_per_ais_forward = \
-                    (n_transition_operator_inner_steps)*n_intermediate_ais_dist + 1
+                n_flow_eval_per_ais_forward = (n_transition_operator_inner_steps) * n_intermediate_ais_dist + 1
             else:
                 assert transition_operator_type == "metropolis"
                 # +1 for the initial sampling step
-                n_flow_eval_per_ais_forward = \
-                    n_transition_operator_inner_steps*n_intermediate_ais_dist + 1
+                n_flow_eval_per_ais_forward = n_transition_operator_inner_steps * n_intermediate_ais_dist + 1
             if use_buffer:
                 buffer_init_flow_eval = n_flow_eval_per_ais_forward * min_buffer_length
                 # we do another ais evaluation per iteration to calculate the log prob of the
                 # samples from the buffer.
-                n_flow_eval_per_iter = (n_flow_eval_per_ais_forward + 1)*batch_size
+                n_flow_eval_per_iter = (n_flow_eval_per_ais_forward + 1) * batch_size
             else:
                 buffer_init_flow_eval = 0
-                n_flow_eval_per_iter = n_flow_eval_per_ais_forward*batch_size
+                n_flow_eval_per_iter = n_flow_eval_per_ais_forward * batch_size
             n_iter = int((n_flow_forward_pass - buffer_init_flow_eval) / n_flow_eval_per_iter)
     print(f"{n_iter} iter for {n_flow_forward_pass} flow forward passes")
     return n_iter
@@ -87,53 +90,62 @@ def get_n_iterations(
 
 def setup_logger(cfg: DictConfig, save_path: str) -> Logger:
     if hasattr(cfg.logger, "pandas_logger"):
-        logger = PandasLogger(save=True,
-                              save_path=save_path + "logging_hist.csv",
-                              save_period=cfg.logger.pandas_logger.save_period)
+        logger = PandasLogger(
+            save=True, save_path=save_path + "logging_hist.csv", save_period=cfg.logger.pandas_logger.save_period
+        )
     elif hasattr(cfg.logger, "wandb"):
         logger = WandbLogger(**cfg.logger.wandb, config=dict(cfg))
     elif hasattr(cfg.logger, "list_logger"):
         logger = ListLogger(save_path=save_path + "logging_hist.pkl")
     else:
-        raise Exception("No logger specified, try adding the wandb or "
-                        "pandas logger to the config file.")
+        raise Exception("No logger specified, try adding the wandb or " "pandas logger to the config file.")
     return logger
 
 
-def setup_buffer(cfg: DictConfig, fab_model: FABModel, auto_fill_buffer: bool) -> \
-        Union[ReplayBuffer, PrioritisedReplayBuffer]:
+def setup_buffer(
+    cfg: DictConfig, fab_model: FABModel, auto_fill_buffer: bool
+) -> Union[ReplayBuffer, PrioritisedReplayBuffer]:
     dim = cfg.target.dim  # applies to flow and target
     if cfg.training.prioritised_buffer is False:
+
         def initial_sampler():
             # used to fill the replay buffer up to its minimum size
             x, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
-                cfg.training.batch_size, logging=False)
+                cfg.training.batch_size, logging=False, purpose="init buffer fill"
+            )
             return x, log_w
 
-        buffer = ReplayBuffer(dim=dim, max_length=cfg.training.maximum_buffer_length,
-                              min_sample_length=cfg.training.min_buffer_length,
-                              initial_sampler=initial_sampler,
-                              temperature=cfg.training.buffer_temp)
+        buffer = ReplayBuffer(
+            dim=dim,
+            max_length=cfg.training.maximum_buffer_length,
+            min_sample_length=cfg.training.min_buffer_length,
+            initial_sampler=initial_sampler,
+            temperature=cfg.training.buffer_temp,
+        )
     else:
         # buffer
         def initial_sampler():
             point, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
-                cfg.training.batch_size, logging=False)
+                cfg.training.batch_size, logging=False, purpose="init buffer fill"
+            )
             return point.x.detach(), log_w, point.log_q.detach()
 
-        buffer = PrioritisedReplayBuffer(dim=dim, max_length=cfg.training.maximum_buffer_length,
-                                         min_sample_length=cfg.training.min_buffer_length,
-                                         initial_sampler=initial_sampler,
-                                         fill_buffer_during_init=auto_fill_buffer)
+        buffer = PrioritisedReplayBuffer(
+            dim=dim,
+            max_length=cfg.training.maximum_buffer_length,
+            min_sample_length=cfg.training.min_buffer_length,
+            initial_sampler=initial_sampler,
+            fill_buffer_during_init=auto_fill_buffer,
+        )
     return buffer
+
 
 def get_load_checkpoint_dir(outer_checkpoint_dir):
     """Get directory of most recent checkpoint"""
     try:
         # load the most recent checkpoint, from the most recent run.
         chkpts = [it.path for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
-        folder_names = [it.name for it in os.scandir(outer_checkpoint_dir) if
-                        it.is_dir()]
+        folder_names = [it.name for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
         times = [datetime.fromisoformat(time).timestamp() for time in folder_names]
         # grab most recent dir with argmax on times
         latest_chkpts_dir = os.path.join(chkpts[np.argmax(times)], "model_checkpoints")
@@ -150,14 +162,14 @@ def get_load_checkpoint_dir(outer_checkpoint_dir):
 
 def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     dim = cfg.target.dim  # applies to flow and target
-    p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or \
-                         not cfg.training.prioritised_buffer
+    p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
     if cfg.flow.resampled_base:
         flow = make_wrapped_normflow_resampled_flow(
             dim,
             n_flow_layers=cfg.flow.n_layers,
             layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
-            act_norm=cfg.flow.act_norm)
+            act_norm=cfg.flow.act_norm,
+        )
 
     elif cfg.flow.use_snf:
         flow = make_wrapped_normflow_snf_model(
@@ -170,13 +182,15 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             it_snf_layer=cfg.flow.snf.it_snf_layer,
             mh_steps=cfg.flow.snf.num_steps,
             transition_operator_type=cfg.flow.snf.transition_operator_type,
-            hmc_n_leapfrog_steps=cfg.flow.snf.num_steps
-                                      )
+            hmc_n_leapfrog_steps=cfg.flow.snf.num_steps,
+        )
     else:
-        flow = make_wrapped_normflow_realnvp(dim, n_flow_layers=cfg.flow.n_layers,
-                                             layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
-                                             act_norm=cfg.flow.act_norm)
-
+        flow = make_wrapped_normflow_realnvp(
+            dim,
+            n_flow_layers=cfg.flow.n_layers,
+            layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
+            act_norm=cfg.flow.act_norm,
+        )
 
     if cfg.fab.transition_operator.type == "hmc":
         # very lightweight HMC.
@@ -190,7 +204,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             n_outer=1,
             epsilon=1.0,
             L=cfg.fab.transition_operator.n_inner_steps,
-            )
+        )
 
     elif cfg.fab.transition_operator.type == "metropolis":
         transition_operator = Metropolis(
@@ -204,11 +218,10 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             adjust_step_size=cfg.fab.transition_operator.tune_step_size,
             target_p_accept=cfg.fab.transition_operator.target_p_accept,
             min_step_size=cfg.fab.transition_operator.init_step_size,
-            max_step_size=cfg.fab.transition_operator.init_step_size
+            max_step_size=cfg.fab.transition_operator.init_step_size,
         )
     else:
         raise NotImplementedError
-
 
     # use GPU if available
     if torch.cuda.is_available() and cfg.training.use_gpu:
@@ -218,24 +231,23 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         print("\n*************  Utilising CPU  ****************** \n")
 
-
-    fab_model = FABModel(flow=flow,
-                         target_distribution=target,
-                         n_intermediate_distributions=cfg.fab.n_intermediate_distributions,
-                         transition_operator=transition_operator,
-                         alpha=cfg.fab.alpha,
-                         loss_type=cfg.fab.loss_type)
+    fab_model = FABModel(
+        flow=flow,
+        target_distribution=target,
+        n_intermediate_distributions=cfg.fab.n_intermediate_distributions,
+        transition_operator=transition_operator,
+        alpha=cfg.fab.alpha,
+        loss_type=cfg.fab.loss_type,
+    )
     return fab_model
 
 
-
-def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn,
-                          target: TargetDistribution):
+def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, target: TargetDistribution):
     """Setup model and train."""
     if cfg.training.tlimit:
         start_time = time.time()
     else:
-        start_time = None
+        start_time = time.time()  # Just always track time?
     if cfg.training.checkpoint_load_dir is not None:
         if not os.path.exists(cfg.training.checkpoint_load_dir):
             print("no checkpoint loaded, starting training from scratch")
@@ -268,7 +280,6 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn,
     print(f"running for {n_iterations}")
     cfg.training.n_iterations = n_iterations
 
-
     with open(os.path.join(save_path, "config.txt"), "w") as file:
         file.write(str(cfg))
 
@@ -285,32 +296,41 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn,
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
         fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location)
-        opt_state = torch.load(os.path.join(chkpt_dir, 'optimizer.pt'), map_location)
+        opt_state = torch.load(os.path.join(chkpt_dir, "optimizer.pt"), map_location)
         optimizer.load_state_dict(opt_state)
         if buffer is not None:
-            buffer.load(path=os.path.join(chkpt_dir, 'buffer.pt'))
-            assert buffer.can_sample, "if a buffer is loaded, it is expected to contain " \
-                                      "enough samples to sample from"
+            buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
+            assert buffer.can_sample, (
+                "if a buffer is loaded, it is expected to contain " "enough samples to sample from"
+            )
         print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
 
     plot = setup_plotter(cfg, target, buffer)
 
-
-
     # Create trainer
     if cfg.training.use_buffer is False:
-        trainer = Trainer(model=fab_model, optimizer=optimizer, logger=logger, plot=plot,
-                          optim_schedular=scheduler, save_path=save_path,
-                          max_gradient_norm=cfg.training.max_grad_norm
-                          )
+        trainer = Trainer(
+            model=fab_model,
+            optimizer=optimizer,
+            logger=logger,
+            plot=plot,
+            optim_schedular=scheduler,
+            save_path=save_path,
+            max_gradient_norm=cfg.training.max_grad_norm,
+        )
     elif cfg.training.prioritised_buffer is False:
-        trainer = BufferTrainer(model=fab_model, optimizer=optimizer, logger=logger, plot=plot,
-                          optim_schedular=scheduler, save_path=save_path,
-                                buffer=buffer,
-                                n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
-                                clip_ais_weights_frac=cfg.training.log_w_clip_frac,
-                                max_gradient_norm=cfg.training.max_grad_norm
-                                )
+        trainer = BufferTrainer(
+            model=fab_model,
+            optimizer=optimizer,
+            logger=logger,
+            plot=plot,
+            optim_schedular=scheduler,
+            save_path=save_path,
+            buffer=buffer,
+            n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
+            clip_ais_weights_frac=cfg.training.log_w_clip_frac,
+            max_gradient_norm=cfg.training.max_grad_norm,
+        )
     else:
         trainer = PrioritisedBufferTrainer(
             model=fab_model,
@@ -323,25 +343,25 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn,
             n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
             max_gradient_norm=cfg.training.max_grad_norm,
             w_adjust_max_clip=cfg.training.w_adjust_max_clip,
-            alpha=cfg.fab.alpha
-            )
+            alpha=cfg.fab.alpha,
+        )
 
-
-    trainer.run(n_iterations=n_iterations,
-                batch_size=cfg.training.batch_size,
-                n_plot=cfg.evaluation.n_plots,
-                n_eval=cfg.evaluation.n_eval,
-                eval_batch_size=cfg.evaluation.eval_batch_size,
-                save=True,
-                n_checkpoints=cfg.evaluation.n_checkpoints,
-                tlimit=cfg.training.tlimit,
-                start_time=start_time,
-                start_iter=iter_number)
+    trainer.run(
+        n_iterations=n_iterations,
+        batch_size=cfg.training.batch_size,
+        n_plot=cfg.evaluation.n_plots,
+        n_eval=cfg.evaluation.n_eval,
+        eval_batch_size=cfg.evaluation.eval_batch_size,
+        save=True,
+        n_checkpoints=cfg.evaluation.n_checkpoints,
+        tlimit=cfg.training.tlimit,
+        start_time=start_time,
+        start_iter=iter_number,
+    )
 
     if hasattr(cfg.logger, "list_logger"):
         plot_history(trainer.logger.history)
         plt.show()
-        print(trainer.logger.history['eval_ess_flow_p_target'][-10:])
-        print(trainer.logger.history['eval_ess_ais_p_target'][-10:])
-        print(trainer.logger.history['test_set_mean_log_prob_p_target'][-10:])
-
+        print(trainer.logger.history["eval_ess_flow_p_target"][-10:])
+        print(trainer.logger.history["eval_ess_ais_p_target"][-10:])
+        print(trainer.logger.history["test_set_mean_log_prob_p_target"][-10:])

@@ -7,4 +7,4 @@ from .train_with_prioritised_buffer import PrioritisedBufferTrainer
 from .sampling_methods import AnnealedImportanceSampler, HamiltonianMonteCarlo, Metropolis
 from .types_ import Model, Distribution
 
-__version__ = '0.1'
+__version__ = "0.1"

@@ -17,10 +17,7 @@ from experiments.many_well.many_well_visualise_all_marginal_pairs import get_tar
 PATH = os.getcwd()
 
 
-def plot_manywell_results(cfg: DictConfig,
-                          supfig,
-                          path_to_model: Optional[str] = None,
-                          plot_y_label: bool = True):
+def plot_manywell_results(cfg: DictConfig, supfig, path_to_model: Optional[str] = None, plot_y_label: bool = True):
     """Visualise samples from marginal pair distributions for the first 4 dimensions of the
     Many Well problem."""
     n_samples: int = 200
@@ -45,11 +42,12 @@ def plot_manywell_results(cfg: DictConfig,
         for j in range(2):
             # target_log_prob = get_target_log_prob_marginal_pair(target.log_prob_2D, i, j+2, dim)
             target_log_prob = get_target_log_prob_marginal_pair(target.log_prob, i, j + 2, dim)
-            plot_contours(target_log_prob, bounds=plotting_bounds, ax=axs[i, j],
-                          n_contour_levels=20, grid_width_n_points=100)
-            plot_marginal_pair(samples_flow, marginal_dims=(i, j+2),
-                               ax=axs[i, j], bounds=plotting_bounds, alpha=alpha)
-
+            plot_contours(
+                target_log_prob, bounds=plotting_bounds, ax=axs[i, j], n_contour_levels=20, grid_width_n_points=100
+            )
+            plot_marginal_pair(
+                samples_flow, marginal_dims=(i, j + 2), ax=axs[i, j], bounds=plotting_bounds, alpha=alpha
+            )
 
             if j == 0:
                 if plot_y_label:
@@ -58,18 +56,16 @@ def plot_manywell_results(cfg: DictConfig,
                 axs[i, j].set_xlabel(f"$x_{j + 1 + 2}$")
 
 
-
-
 @hydra.main(config_path="../config", config_name="many_well.yaml")
 def run(cfg: DictConfig):
-    mpl.rcParams['figure.dpi'] = 300
-    rc('font', **{'family': 'serif', 'serif': ['Times']})
-    rc('text', usetex=True)
-    rc('figure', titlesize=15)
-    rc('axes', titlesize=13, labelsize=13)  # fontsize of the axes title and labels
-    #rc('legend', fontsize=6)
-    rc('xtick', labelsize=11)
-    rc('ytick', labelsize=11)
+    mpl.rcParams["figure.dpi"] = 300
+    rc("font", **{"family": "serif", "serif": ["Times"]})
+    rc("text", usetex=True)
+    rc("figure", titlesize=15)
+    rc("axes", titlesize=13, labelsize=13)  # fontsize of the axes title and labels
+    # rc('legend', fontsize=6)
+    rc("xtick", labelsize=11)
+    rc("ytick", labelsize=11)
 
     model_names = ["fab_buffer", "flow_kld"]
     titles = ["FAB w/ buffer (ours)", "Flow w/ KLD"]
@@ -87,9 +83,9 @@ def run(cfg: DictConfig):
     plot_manywell_results(cfg, subfigs[1], path_to_model=path_to_model_1, plot_y_label=False)
     subfigs[1].suptitle(titles[1])
 
-    #fig.suptitle(' ', fontsize='xx-large')
+    # fig.suptitle(' ', fontsize='xx-large')
     plt.show()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run()

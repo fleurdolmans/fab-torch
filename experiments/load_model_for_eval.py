@@ -4,8 +4,7 @@ from omegaconf import DictConfig
 from experiments.setup_run import setup_model
 
 
-def load_model(cfg: DictConfig, target, path_to_model: Optional[str] = None,
-               map_location: str = "cpu"):
+def load_model(cfg: DictConfig, target, path_to_model: Optional[str] = None, map_location: str = "cpu"):
     """Return the model with the loaded checkpoint provided in `path_to_model`."""
     if cfg.training.use_64_bit:
         target.double()
