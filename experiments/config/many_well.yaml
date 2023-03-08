@@ -35,7 +35,7 @@ training:
   lr: 3e-4
   batch_size: 2048
   n_iterations: null
-  n_flow_forward_pass: 10_000_000_000
+  n_flow_forward_pass: 10_000_000  #10_000_000_000
   use_gpu: true
   use_64_bit: true
   use_buffer: false
@@ -61,4 +61,8 @@ evaluation:
 logger:
   pandas_logger:
     save_period: 1000 # how often to save the pandas dataframe as a csv
-
+#  wandb:
+#    name: MWell_${fab.loss_type}_pr${training.prioritised_buffer}_alpha${fab.alpha}
+#    project: fab_manywell
+#    entity: timsey
+#    tags: [fab_explore]

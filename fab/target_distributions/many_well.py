@@ -46,7 +46,7 @@ class ManyWellEnergy(DoubleWellEnergy, TargetDistribution):
             self.device = "cpu"
         self.normalised = normalised
 
-    @property
+    @property  # This breaks accessing the property for some reason.
     def log_Z(self):
         return torch.tensor(self.log_Z_2D * self.n_wells)
 
@@ -57,7 +57,8 @@ class ManyWellEnergy(DoubleWellEnergy, TargetDistribution):
     def sample(self, shape):
         """Sample by sampling each pair of dimensions from the double well problem
         using rejection sampling for the first dimension, and exact sampling for the second."""
-        return torch.concat([super(ManyWellEnergy, self).sample(shape) for _ in range(self.n_wells)], dim=-1)
+        # Change torch.concat to torch.cat, since concat does not exist in PyTorch 1.8.1
+        return torch.cat([super(ManyWellEnergy, self).sample(shape) for _ in range(self.n_wells)], dim=-1)
 
     def get_modes_test_set_iterator(self, batch_size: int):
         """Test set created from points manually placed near each mode."""

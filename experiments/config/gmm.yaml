@@ -68,6 +68,6 @@ logger:
     save_period: 100 # how often to save the pandas dataframe as a csv
 #  wandb:
 #    name: GMM_${fab.loss_type}_pr${training.prioritised_buffer}_alpha${fab.alpha}
-#    project: fab_exploration
+#    project: fab_gmm
 #    entity: timsey
 #    tags: [fab_explore]

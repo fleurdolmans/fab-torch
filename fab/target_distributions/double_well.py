@@ -94,7 +94,8 @@ class DoubleWellEnergy(Energy, nn.Module):
     def log_Z_2D(self):
         if self._a == -0.5 and self._b == -6 and self._c == 1.0:
             log_Z_dim0 = np.log(11784.50927)
-            log_Z_dim1 = 0.5 * np.log(2 * torch.pi)
+            pi = torch.acos(torch.zeros(1)).item() * 2  # torch.pi not implemented in version 1.8.1 of PyTorch
+            log_Z_dim1 = 0.5 * np.log(2 * pi)
             return log_Z_dim0 + log_Z_dim1
         else:
             raise NotImplementedError
