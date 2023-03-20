@@ -8,6 +8,7 @@ import normflows as nf
 import boltzgen as bg
 
 from time import time
+from datetime import datetime
 from fab.utils.training import load_config
 from fab.sampling_methods.transition_operators import HamiltonianMonteCarlo, Metropolis
 from fab.utils.aldp import evaluate_aldp
@@ -69,7 +70,11 @@ test_data = test_data.to(device)
 model = make_aldp_model(config, device)
 
 # Prepare output directories
-root = config["training"]["save_root"]
+date_str = datetime.now().strftime("%Y-%m-%d")
+time_str = datetime.now().strftime("%H:%M:%S")
+root = os.path.join(os.path.join(config["training"]["save_root"], date_str), time_str)
+print("Saving output to: {}".format(root))
+
 cp_dir = os.path.join(root, "checkpoints")
 plot_dir = os.path.join(root, "plots")
 plot_dir_flow = os.path.join(plot_dir, "flow")
@@ -80,7 +85,7 @@ log_dir_ais = os.path.join(log_dir, "ais")
 # Create dirs if not existent
 for dir in [cp_dir, plot_dir, log_dir, plot_dir_flow, plot_dir_ais, log_dir_flow, log_dir_ais]:
     if not os.path.isdir(dir):
-        os.mkdir(dir)
+        os.makedirs(dir)  # Also create parent directories
 
 # Initialize optimizer and its parameters
 lr = config["training"]["learning_rate"]
@@ -148,13 +153,14 @@ flow_type = config["flow"]["type"]
 lam_fkld = None if not "lam_fkld" in config["fab"] else config["fab"]["lam_fkld"]
 if loss_type == "forward_kl" or lam_fkld is not None:
     path = config["data"]["train"]
+    num_workers = config["training"]["num_workers"]
     train_data = torch.load(path)
     if args.precision == "double":
         train_data = train_data.double()
     else:
         train_data = train_data.float()
     train_loader = torch.utils.data.DataLoader(
-        train_data, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=4
+        train_data, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=True, num_workers=num_workers
     )
     train_iter = iter(train_loader)
 
@@ -287,6 +293,7 @@ model.set_ais_target(min_is_target=min_is_target)
 start_time = time()
 
 for it in range(start_iter, max_iter):
+    iter_time = time()
     # Get loss
     if loss_type == "forward_kl" or lam_fkld is not None:
         try:
@@ -507,9 +514,17 @@ for it in range(start_iter, max_iter):
         if use_rb and rb_config["type"] == "prioritised":
             model.set_ais_target(min_is_target=True)
 
+    print(f"Iteration {it+1} took: {time() - iter_time}.")
+
     # End job if necessary
     if it % checkpoint_iter == 0 and args.tlimit is not None:
         time_past = (time() - start_time) / 3600
         num_cp = (it + 1 - start_iter) / checkpoint_iter
         if num_cp > 0.5 and time_past * (1 + 1 / num_cp) > args.tlimit:
+            print(
+                f"\nEnding training at iteration {it}, after training for {time_past:.2f} "
+                f"hours as timelimit {args.tlimit:.2f} hours has been reached.\n"
+            )
             break
+
+print(f"\n Run completed in {(time() - start_time) / 3600:.2f} hours \n")

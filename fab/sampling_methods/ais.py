@@ -76,7 +76,7 @@ class AnnealedImportanceSampler:
 
         # Move through sequence of intermediate distributions via MCMC.
         for j in range(1, self.n_intermediate_distributions + 1):
-            point, log_w = self.perform_transition(point, log_w, j)
+            point, log_w = self.perform_transition(point, log_w, j)  # The magic happens here. j is the Beta index.
 
         point, log_w = self._remove_nan_and_infs(
             point, log_w, descriptor=f"{'' if purpose is None else purpose} chain end"
@@ -199,8 +199,6 @@ class AnnealedImportanceSampler:
         extreme points may be generated which have NaN probability under the target, which makes
         this function necessary in the final step of AIS."""
         # first remove samples that have inf/nan log w
-        if log_w.shape[0] == 800:
-            a = 10
         valid_indices = (
             ~torch.isinf(point.log_p)
             & ~torch.isnan(point.log_p)

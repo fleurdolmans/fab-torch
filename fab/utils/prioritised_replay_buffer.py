@@ -1,5 +1,6 @@
 from typing import NamedTuple, Tuple, Iterable, Callable
 import torch
+from time import time
 
 
 class ReplayData(NamedTuple):
@@ -67,10 +68,12 @@ class PrioritisedReplayBuffer:
         self.can_sample = False  # whether the buffer is full enough to begin sampling
         self.sample_with_replacement = sample_with_replacement
 
-        if fill_buffer_during_init:
+        if fill_buffer_during_init:  # This takes super long
             while self.can_sample is False:
+                sample_time = time()
                 # fill buffer up minimum length
                 x, log_w, log_q_old = initial_sampler()
+                print(f"AIS sampling took: {time() - sample_time}")
                 self.add(x, log_w, log_q_old)
         else:
             print("Buffer not initialised, expected that checkpoint will be loaded.")
@@ -87,6 +90,7 @@ class PrioritisedReplayBuffer:
         self.buffer.log_w[indices] = log_w
         self.buffer.log_q_old[indices] = log_q_old
         new_index = self.current_index + batch_size
+        print(new_index)
         if not self.is_full:
             self.is_full = new_index >= self.max_length
             self.can_sample = new_index >= self.min_sample_length

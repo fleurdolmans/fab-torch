@@ -59,18 +59,20 @@ def grad_and_value(x, forward_fn):
 
 def create_point(
     x: torch.Tensor,
-    log_q_fn: LogProbFunc,
-    log_p_fn: LogProbFunc,
+    log_q_fn: LogProbFunc,  # flow
+    log_p_fn: LogProbFunc,  # target distribution (e.g. Boltzmann)
     with_grad: bool,
     log_q_x: Optional[torch.Tensor] = None,
 ) -> Point:
     """Create an instance of a `Point` which contains the necessary info on a point for MCMC.
     If this is at the start of an AIS chain, we may already have access to log_q_x, which may then
      be used rather than recalculating log_q_x using the log_q_fn."""
-    x = x.detach()  # not backproping through x points in the chains.
+    x = x.detach()  # not backpropping through x points in the chains.
     if with_grad:
-        grad_log_q, log_q = grad_and_value(x, log_q_fn)
-        grad_log_p, log_p = grad_and_value(x, log_p_fn)
+        # Here we need to compute log_q_x anyway because we need the gradient, and log_q_x might not be part of the
+        #  computation graph.
+        grad_log_q, log_q = grad_and_value(x, log_q_fn)  # Takes 0.25s for ALDP base (forward + backward on flow)
+        grad_log_p, log_p = grad_and_value(x, log_p_fn)  # Takes 0.20s for ALDP base (mostly from energy calc)
         return Point(x=x, log_p=log_p, log_q=log_q, grad_log_p=grad_log_p, grad_log_q=grad_log_q)
     else:
         # Use log_q_x if we already have it, otherwise calculate it.

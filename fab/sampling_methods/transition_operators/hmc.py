@@ -137,7 +137,8 @@ class HamiltonianMonteCarlo(TransitionOperator):
                 # make momentum half step
                 p = p - epsilon * grad_u / 2
                 # Make full step for position
-                x = point.x + epsilon / self.mass_vector * p
+                x = point.x + epsilon / self.mass_vector * p  # batch_size x num_features
+                # This is the bottleneck: flow forward+backward and energy calc. 0.45s for ALDP base.
                 point = self.create_new_point(x)
                 # update grad_u
                 grad_u = grad_U(point)
@@ -184,7 +185,10 @@ class HamiltonianMonteCarlo(TransitionOperator):
 
     def transition(self, point: Point, i: int, beta: float) -> Point:
         """
-        Perform HMC transition.
+        Perform HMC transition. The value of beta (together with the base and target distribution) specifies the
+        intermediate targets for AIS (simple interpolation); this target probability determines the energy U for HMC,
+        and thus it determines the proposal and acceptance probabilities. That is how we can use HMC to get
+        samples closer to the AIS target.
         """
 
         def U(point: Point):
