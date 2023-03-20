@@ -17,19 +17,17 @@ EXPERIMENTAL_LOSSES = ["flow_alpha_2_div_unbiased", "flow_alpha_2_div", "fab_ub_
 
 class FABModel(Model):
     """Definition of various models, including the Flow Annealed Importance Sampling Bootstrap
-    (FAB) model."""
-
-    def __init__(
-        self,
-        flow: TrainableDistribution,
-        target_distribution: TargetDistribution,
-        n_intermediate_distributions: int,
-        alpha: Union[float, None],
-        transition_operator: Optional[TransitionOperator] = None,
-        ais_distribution_spacing: "str" = "linear",
-        loss_type: Optional["str"] = None,
-        use_ais: bool = True,
-    ):
+    (FAB) model. """
+    def __init__(self,
+                 flow: TrainableDistribution,
+                 target_distribution: TargetDistribution,
+                 n_intermediate_distributions: int,
+                 alpha: Union[float, None],
+                 transition_operator: Optional[TransitionOperator] = None,
+                 ais_distribution_spacing: "str" = "linear",
+                 loss_type: Optional["str"] = None,
+                 use_ais: bool = True,
+                 ):
         """
         Args:
             flow: Trainable flow model.
@@ -44,17 +42,11 @@ class FABModel(Model):
                 be set to True if we wish to use AIS in evaluation, which is why it is set to True
                 by default.
         """
-        assert loss_type in [
-            None,
-            "fab_ub_alpha_2_div",
-            "forward_kl",
-            "flow_alpha_2_div",
-            "flow_reverse_kl",
-            "fab_alpha_div",
-            "flow_alpha_2_div_unbiased",
-            "flow_alpha_2_div_nis",
-            "target_forward_kl",
-        ]
+        assert loss_type in [None, "fab_ub_alpha_2_div",
+                             "forward_kl", "flow_alpha_2_div",
+                             "flow_reverse_kl", "fab_alpha_div",
+                             "flow_alpha_2_div_unbiased", "flow_alpha_2_div_nis",
+                             "target_forward_kl"]
         if loss_type in EXPERIMENTAL_LOSSES:
             warnings.warn("Running using experiment loss not used within the main FAB paper.")
         if loss_type in ALPHA_DIV_TARGET_LOSSES:
@@ -78,7 +70,7 @@ class FABModel(Model):
                 n_intermediate_distributions=self.n_intermediate_distributions,
                 distribution_spacing_type=self.ais_distribution_spacing,
                 p_target=self.p_target,
-                alpha=self.alpha,
+                alpha=self.alpha
             )
 
     def parameters(self):
@@ -86,7 +78,8 @@ class FABModel(Model):
 
     def loss(self, args) -> torch.Tensor:
         if self.loss_type is None:
-            raise NotImplementedError("If loss_type is None, then the loss must be " "manually calculated.")
+            raise NotImplementedError("If loss_type is None, then the loss must be "
+                                      "manually calculated.")
         if self.loss_type == "fab_alpha_div":
             # FAB loss estimated with AIS targeting minimum var IS distribution.
             return self.fab_alpha_div(args)
@@ -117,17 +110,18 @@ class FABModel(Model):
             self.annealed_importance_sampler.p_target = False
             self.annealed_importance_sampler.transition_operator.p_target = False
 
-    def fab_alpha_div_inner(self, point: Point, log_w_ais: torch.Tensor) -> torch.Tensor:
+    def fab_alpha_div_inner(self, point: Point, log_w_ais: torch.Tensor) -> \
+            torch.Tensor:
         """Compute FAB loss based off points and importance weights from AIS targetting
         p^\alpha/q^{\alpha-1}.
         """
         log_q_x = self.flow.log_prob(point.x)
-        return -np.sign(self.alpha) * torch.mean(torch.softmax(log_w_ais, dim=-1) * log_q_x)
+        return - np.sign(self.alpha) * torch.mean(torch.softmax(log_w_ais, dim=-1) * log_q_x)
 
     def fab_alpha_div(self, batch_size: int) -> torch.Tensor:
         """Compute the FAB loss with p^\alpha/q^{\alpha-1} as the AIS target."""
         self.set_ais_target(min_is_target=True)
-        point_ais, log_w_ais = self.annealed_importance_sampler.sample_and_log_weights(batch_size, purpose="alpha_div")
+        point_ais, log_w_ais = self.annealed_importance_sampler.sample_and_log_weights(batch_size)
         loss = self.fab_alpha_div_inner(point_ais, log_w_ais)
         # Reset ais target distribution back to p, which ensures evaluation is performed
         # with the target distribution.
@@ -148,14 +142,14 @@ class FABModel(Model):
         """Compute an unbiased estimate of alpha-2-divergence with samples from the flow."""
         x, log_q_x = self.flow.sample_and_log_prob((batch_size,))
         log_p_x = self.target_distribution.log_prob(x)
-        loss = torch.mean(torch.exp(2 * (log_p_x - log_q_x)) * log_q_x)
+        loss = torch.mean(torch.exp(2*(log_p_x - log_q_x)) * log_q_x)
         return loss
 
     def flow_alpha_2_div_nis(self, batch_size: int) -> torch.Tensor:
         """From Neural Importance sampling paper https://arxiv.org/pdf/1808.03856.pdf."""
         x, log_q_x = self.flow.sample_and_log_prob((batch_size,))
         log_p_x = self.target_distribution.log_prob(x)
-        loss = -torch.mean(torch.exp(2 * (log_p_x - log_q_x)).detach() * log_q_x)
+        loss = - torch.mean(torch.exp(2*(log_p_x - log_q_x)).detach() * log_q_x)
         return loss
 
     def inner_loss(self, point: Point, log_w_ais) -> torch.Tensor:
@@ -176,9 +170,7 @@ class FABModel(Model):
 
     def fab_ub_alpha_div_loss(self, batch_size: int) -> torch.Tensor:
         """Compute the FAB loss based on lower-bound of alpha-divergence with alpha=2."""
-        point_ais, log_w_ais = self.annealed_importance_sampler.sample_and_log_weights(
-            batch_size, purpose="ub_alpha_div"
-        )
+        point_ais, log_w_ais = self.annealed_importance_sampler.sample_and_log_weights(batch_size)
         loss = self.fab_ub_alpha_div_loss_inner(point_ais.log_q, point_ais.log_p, log_w_ais)
         return loss
 
@@ -197,22 +189,19 @@ class FABModel(Model):
                 return self.annealed_importance_sampler.get_logging_info()
         return {}
 
-    def get_eval_info(
-        self,
-        outer_batch_size: int,
-        inner_batch_size: int,
-    ) -> Dict[str, Any]:
+    def get_eval_info(self,
+                      outer_batch_size: int,
+                      inner_batch_size: int,
+                      ) -> Dict[str, Any]:
         if hasattr(self, "annealed_importance_sampler"):
-            base_samples, base_log_w, ais_samples, ais_log_w = self.annealed_importance_sampler.generate_eval_data(
-                outer_batch_size, inner_batch_size
-            )
-            info = {
-                "eval_ess_flow": effective_sample_size(log_w=base_log_w, normalised=False).item(),
-                "eval_ess_ais": effective_sample_size(log_w=ais_log_w, normalised=False).item(),
-            }
-            flow_info = self.target_distribution.performance_metrics(
-                base_samples, base_log_w, self.flow.log_prob, batch_size=inner_batch_size
-            )
+            base_samples, base_log_w, ais_samples, ais_log_w = \
+                self.annealed_importance_sampler.generate_eval_data(outer_batch_size,
+                                                                    inner_batch_size)
+            info = {"eval_ess_flow": effective_sample_size(log_w=base_log_w, normalised=False).item(),
+                    "eval_ess_ais": effective_sample_size(log_w=ais_log_w, normalised=False).item()}
+            flow_info = self.target_distribution.performance_metrics(base_samples, base_log_w,
+                                                                     self.flow.log_prob,
+                                                                     batch_size=inner_batch_size)
             ais_info = self.target_distribution.performance_metrics(ais_samples, ais_log_w)
             info.update(flow_info)
             info.update(ais_info)
@@ -222,30 +211,33 @@ class FABModel(Model):
             # TODO
         return info
 
-    def save(self, path: "str"):
+    def save(self,
+             path: "str"
+             ):
         """Save FAB model to file."""
-        torch.save({"flow": self.flow._nf_model.state_dict(), "trans_op": self.transition_operator.state_dict()}, path)
+        torch.save({'flow': self.flow.state_dict(),
+                    'trans_op': self.transition_operator.state_dict()},
+                   path)
 
-    def load(
-        self,
-        path: "str",
-        map_location: Optional[str] = None,
-    ):
+    def load(self,
+             path: "str",
+             map_location: Optional[str] = None,
+             ):
         """Load FAB model from file."""
         checkpoint = torch.load(path, map_location=map_location)
         try:
-            self.flow._nf_model.load_state_dict(checkpoint["flow"])
+            self.flow.load_state_dict(checkpoint['flow'])
         except RuntimeError:
             # If flow is incorretly loaded then this will mess up evaluation, so raise Error.
-            raise RuntimeError("Flow could not be loaded. " "Perhaps there is a mismatch in the architectures.")
+            raise RuntimeError('Flow could not be loaded. '
+                  'Perhaps there is a mismatch in the architectures.')
         try:
-            self.transition_operator.load_state_dict(checkpoint["trans_op"])
+            self.transition_operator.load_state_dict(checkpoint['trans_op'])
         except RuntimeError:
             # Sometimes we only evaluate the flow, in which case having a transition operator
             # mismatch is okay, so we raise a warning.
-            warnings.warn(
-                "Transition operator could not be loaded. " "Perhaps there is a mismatch in the architectures."
-            )
+            warnings.warn('Transition operator could not be loaded. '
+                  'Perhaps there is a mismatch in the architectures.')
         if self.annealed_importance_sampler:
             self.annealed_importance_sampler = AnnealedImportanceSampler(
                 base_distribution=self.flow,
@@ -254,5 +246,4 @@ class FABModel(Model):
                 p_target=self.p_target,
                 alpha=self.alpha,
                 n_intermediate_distributions=self.n_intermediate_distributions,
-                distribution_spacing_type=self.ais_distribution_spacing,
-            )
+                distribution_spacing_type=self.ais_distribution_spacing)
