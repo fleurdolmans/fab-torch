@@ -26,6 +26,7 @@ from experiments.make_flow import (
     make_wrapped_normflow_realnvp,
     make_wrapped_normflow_resampled_flow,
     make_wrapped_normflow_snf_model,
+    make_wrapped_normflow_molecular_flow,
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -163,7 +164,12 @@ def get_load_checkpoint_dir(outer_checkpoint_dir):
 def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     dim = cfg.target.dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
-    if cfg.flow.resampled_base:
+    if cfg.flow.molecular_flow:
+        flow = make_wrapped_normflow_molecular_flow(
+            cfg,
+        )
+
+    elif cfg.flow.resampled_base:
         flow = make_wrapped_normflow_resampled_flow(
             dim,
             n_flow_layers=cfg.flow.n_layers,

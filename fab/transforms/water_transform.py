@@ -1,11 +1,7 @@
 import torch
-from torch import nn
-import numpy as np
 import math
 
 import normflows as nf
-import mdtraj
-import tempfile
 
 
 class WaterCoordinateTransform(nf.flows.Flow):
@@ -32,7 +28,7 @@ class WaterCoordinateTransform(nf.flows.Flow):
 
     def inverse(self, x):
         # Transform X --> Z. Return z and log det Jacobian.
-        z, log_det_jac = cartesian_to_z(x)
+        z, log_det_jac, _ = cartesian_to_z(x)
         return z, log_det_jac
 
 
@@ -54,6 +50,9 @@ def cartesian_to_z(x):
     #  coordinates. Note that this is equivalent to using planar angles between the solute-molecule-plane and the plane
     #  formed by the first two solute atoms and any other atom in the system.
     x = setup_coordinate_system(x, z_axis, y_axis)
+    x_coord = x
+
+    # TODO: Scaling?
 
     solute_atom0 = x[:, 0, :]
     if not torch.isclose(torch.zeros(x.shape[0], 3), solute_atom0).all():
@@ -92,11 +91,16 @@ def cartesian_to_z(x):
                     )
                 )
             z[:, atom_num, 0] = r
+            # 1D polar transform: z = r. This has Jacobian 1. Log(1) = 0, so we're done.
         elif atom_num == 2:  # r and phi
             r = torch.norm(atom_coords, dim=-1)
             phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)
             z[:, atom_num, 0] = r
             z[:, atom_num, 1] = phi
+            # q(latent) = q(cartesian) |det J_F(latent)|^{-1}, where J_F(Z) = dF/dlatent = dcartesian/dlatent. Since
+            # for this atom we have a 2D(!) polar transform, we have: x = r * cos(phi), y = r * sin(phi). The Jacobian
+            # determinant |dF/dlatent| is then r --> 1/r with the inverse. Log of this is -log(r).
+            log_det_jac += -1 * torch.log(r)
         else:  # r, phi, theta
             r = torch.norm(atom_coords, dim=-1)
             phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)
@@ -107,10 +111,11 @@ def cartesian_to_z(x):
             z[:, atom_num, 0] = r
             z[:, atom_num, 1] = phi
             z[:, atom_num, 2] = theta
+            # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent is r^2 sin(phi).
+            #  The log of the inverse is then: -2 log(r) + log(sin(phi)).
+            log_det_jac += -1 * (2 * torch.log(r) + torch.log(torch.abs(torch.sin(phi))))
 
-    log_det_jac += None  # TODO
-
-    return z, log_det_jac
+    return z, log_det_jac, x_coord
 
 
 def z_to_cartesian(z):
@@ -125,6 +130,8 @@ def z_to_cartesian(z):
     z_axis[:, 2] = 1
     x_axis = z.new_zeros(z.shape[0], 3)
     x_axis[:, 0] = 1
+
+    # TODO: Scaling?
 
     x = z.new_zeros(z.shape)
     log_det_jac = z.new_zeros(z.shape[0])  # n_batch
@@ -158,6 +165,7 @@ def z_to_cartesian(z):
                 )
             r = atom_coords[:, 0]
             x[:, atom_num, 2] = r
+            # 1D polar transform: z = r. This has Jacobian 1. Log(1) = 0, so we're done.
         elif atom_num == 2:  # distance and angle: reconstruct x
             # theta should be 0 for this atom
             if not torch.isclose(torch.zeros(z.shape[0], 1), atom_coords[:, 2:]).all():
@@ -173,8 +181,10 @@ def z_to_cartesian(z):
             #  Alternatively, we can take the positive angle and the normal with x < 0.
             phi_rotation = rotation_matrix(x_axis, -phi)
             # Apply rotation to z-axis
-            xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis)
+            xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis * r)
             x[:, atom_num, :] = xyz
+            # The Jacobian determinant dcartesian/dlatent is r for this 2D polar transform.
+            log_det_jac += -1 * torch.log(r)
         else:
             # We always use the first molecule as the anchor for the angles.
             r = atom_coords[:, 0]  # atom-to-reconstruct r
@@ -184,13 +194,13 @@ def z_to_cartesian(z):
             # NOTE: would prefer +phi, but we defined phi the other direction, and code for
             #  computing theta now depends on this convention.
             phi_rotation = rotation_matrix(x_axis, -phi)
-            xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis)
+            xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis * r)
             # Step 2: rotate this vector around the positive z-axis (by convention) by theta (NOT -theta).
             theta_rotation = rotation_matrix(z_axis, theta)
             xyz = torch.einsum('bij,bj -> bi', theta_rotation, xyz)
             x[:, atom_num, :] = xyz
-
-    log_det_jac += None  # TODO
+            # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent is r^2 sin(phi).
+            log_det_jac += 2 * torch.log(r) + torch.log(torch.abs(torch.sin(phi)))
 
     return x, log_det_jac
 
@@ -206,18 +216,16 @@ def setup_coordinate_system(x, z_axis, y_axis):
     :param x: Cartesian coordinates: n_batch x n_atoms x 3
     :return: Internal coordinates: n_batch x n_atoms x 3, and log det Jacobian of the initial transformation.
     """
-
     x_centered = x - x[:, 0:1, :]  # Center x around the solute oxygen, which now has coordinates [0, 0, 0].
 
     solute_atom0 = x_centered[:, 0, :]  # e.g., oxygen atom: n_batch x 3 at [0, 0, 0], defines r.
     solute_atom1 = x_centered[:, 1, :]  # e.g., first hydrogen; will become [r, 0, 0], defines phi.
-    solute_atom2 = x_centered[:, 2, :]  # e.g., second hydrogen; will become [r, phi, 0], defines theta.
 
     # First define phi w.r.t. the z-axis. This means we rotate solute_atom1 to align with the z-axis.
     # E.g. we want to align the first H atom with the z-axis.
     # The rotation should happen along the normal given by the z-O-H plane (for water).
     phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1)
-    phi_rotation = rotation_matrix(phi_rad, phi_axis)
+    phi_rotation = rotation_matrix(phi_axis, phi_rad)
     x_phi = torch.einsum('bij,bnj -> bni', phi_rotation, x_centered)
 
     # Now define theta w.r.t. the yz-plane. THis means we rotate solute_atom2 to align with the yz-plane.
@@ -227,8 +235,11 @@ def setup_coordinate_system(x, z_axis, y_axis):
     #  then subtract this component form the original to find the projection onto the plane.
     # However, we have an easy solution: projecting onto the xy-plane is just setting the z-component to 0.
     # Here we use the plane projection, because it means we don't have to mutate an existing object.
+    solute_atom2 = x_phi[:, 2, :]  # e.g., second hydrogen; will become [r, phi, 0], defines theta.
     xy_proj = solute_atom2 - unit_vector(z_axis) * torch.sum(z_axis * solute_atom2, dim=1, keepdim=True)
     # Angle between atom_to_align and projection, through origin (solute_atom0)
+    if not torch.isclose(solute_atom0, torch.zeros_like(solute_atom0)).all():
+        raise ValueError('Solute atom0 is not at the origin.')
     theta_rad, _ = get_angle_and_normal(y_axis, solute_atom0, xy_proj, to_yz_plane=True)
     # We rotate around the alignment axis (z-axis) to put the molecule into the yz-plane
     theta_rotation = rotation_matrix(z_axis, theta_rad)
@@ -310,16 +321,17 @@ def get_theta(atom1, atom2, atom3, atom4, phi):
     plane_axis = unit_vector(atom3 - atom1)
     # Get vector that lies in the theta=0 plane defined by the 3 atoms: plane_axis.
     # Project this vector onto the plane defined by the rotation axis (e.g., onto xy-plane)
+    #  Equivalent to setting z = 0 for rotation around z-axis.
     mag_along_normal = torch.sum(rotation_axis * plane_axis, dim=-1, keepdim=True)
-    in_both_planes = plane_axis - unit_vector(rotation_axis) * mag_along_normal
+    # Note: the below is essentially the y-unit vector in our setting, but with sign depending on the position of atom3.
+    in_both_planes = unit_vector(plane_axis - unit_vector(rotation_axis) * mag_along_normal)
     # Project the atom4 - atom1 vector onto the rotation_axis plane as well. We care about the
     #  angle between this vector and the in_both_planes vector around the rotation_axis.
     angle_vector = unit_vector(atom4 - atom1)
-    #     print("angle_vector", (atom4 - atom1)[0])
     mag_along_normal = torch.sum(rotation_axis * angle_vector, dim=-1, keepdim=True)
     in_rot_plane = angle_vector - unit_vector(rotation_axis) * mag_along_normal
     # Find angle through inner product: this value being negative corresponds to phi > pi
-    inner = torch.sum(unit_vector(in_both_planes) * unit_vector(in_rot_plane), dim=-1)
+    inner = torch.sum(in_both_planes * unit_vector(in_rot_plane), dim=-1)
     theta = torch.arccos(inner)
 
     # NOTE: we define the rotation axis as (atom2 - atom1), which is orthogonal to the plane in which
@@ -334,7 +346,7 @@ def get_theta(atom1, atom2, atom3, atom4, phi):
     #  This evaluates to: 2pi - theta if sign = -1, else: 0 + theta
     theta = 2 * math.pi * (1 - norm_sign) / 2 + norm_sign * theta
 
-    # Now some magic to make the theta angle work out correctly. We need to treat every xy-quadrant separately.
+    # Now some sign magic to make the theta angle work out correctly. We need to treat every xy-quadrant separately.
     # If y > 0, x < 0; we need: new_theta = theta
     # If y > 0, x > 0; we need: new_theta = theta - 2pi
     # If y < 0, x > 0; we need: new_theta = theta - pi
@@ -370,71 +382,83 @@ def rotation_matrix(rotation_axis, rotation_rad):
     return rot_matrix
 
 
-def perm_parity(lst):
-    # TODO: This is not used currently.
-    """
-    Given a permutation of the digits 0..N in order as a list,
-    returns its parity (or sign): +1 for even parity; -1 for odd.
-    """
-    parity = 1
-    for i in range(0, len(lst) - 1):
-        if lst[i] != i:
-            parity *= -1
-            mn = min(range(i, len(lst)), key=lst.__getitem__)
-            lst[i], lst[mn] = lst[mn], lst[i]
-    return parity
+if __name__ == "__main__":
+    n_batch = 1
+    n_atoms = 4
+    x = torch.randn(n_batch, n_atoms, 3)
+    z, _, x_coord = cartesian_to_z(x)
+    x_recon, _ = z_to_cartesian(z)
+    print(x_coord)
+    print(x_recon)
+    if not torch.isclose(x_coord, x_recon, atol=1e-4).all():
+        raise ValueError("Reconstruction error too large.")
 
 
-def order_solvent_molecules(x, atoms_per_solute_mol, atoms_per_solvent_mol):
-    # TODO: This is not used currently, as this is not actually doing anything in the
-    #  Z --> X direction. What to do for permutation invariance in that setting?
-    """
-    Order oxygen atoms by their distance to the solute oxygen atom.
-
-    :param x: Cartesian coordinates: n_batch x n_atoms x 3
-    :param atoms_per_solute_mol: Number of atoms per solute molecule
-    :param atoms_per_solvent_mol: Number of atoms per solvent molecule
-
-    :return:
-        Ordered Cartesian coordinates: n_batch x n_atoms x 3
-        Parity of the permutation: n_batch
-    """
-
-    # Reference coordinates: e.g., the oxygen atoms
-    ref_coords = x[:, atoms_per_solute_mol::atoms_per_solvent_mol, :]  # n_batch x num_atoms
-
-    # Distances to anchor at origin
-    ref_dists = torch.norm(ref_coords, dim=2)
-
-    # Order reference atoms by distance to origin
-    ref_permute = torch.argsort(ref_dists, dim=1) * atoms_per_solvent_mol
-
-    # Start building full permutation tensor.
-    #  First step is to permute reference atoms (e.g., oxygens) together with their hydrogens.
-    #  Then we can start permuting the remaining atoms (e.g., hydrogens) within the molecules, if necessary.
-    full_permute = torch.zeros(x.shape[:2])
-
-    # Solute molecule is fixed; reflect this in permutation tensor.
-    num_hydrogen = atoms_per_solvent_mol - 1
-    for j in range(1, num_hydrogen + 1, 1):
-        full_permute[:, j] = j
-
-    # Inefficient way to build full permutation tensor
-    for full_perm, ref_perm in zip(full_permute, ref_permute):
-        for i, ref_num in enumerate(ref_perm):
-            # ref_permute skips solute molecule, so index this back in
-            ind = atoms_per_solute_mol + i * atoms_per_solvent_mol  # index in permutation tensor
-            atom_num = atoms_per_solute_mol + ref_num  # atom number that should be at this index
-            full_perm[ind] = atom_num
-            for j in range(1, num_hydrogen + 1, 1):
-                full_perm[ind + j] = atom_num + j
-
-    b = x.shape[0]
-    n = x.shape[1]
-    flat_x = x.reshape(b * n, -1)
-    flat_permute = (full_permute + (torch.arange(0, b) * n).unsqueeze(-1)).flatten().unsqueeze(-1).long()
-    x_ordered = flat_x[flat_permute].reshape(b, n, flat_x.shape[-1])
-
-    parity = torch.tensor([perm_parity(perm) for perm in full_permute.clone()])
-
-    return x_ordered, parity
+# def perm_parity(lst):
+#     # TODO: This is not used currently.
+#     """
+#     Given a permutation of the digits 0..N in order as a list,
+#     returns its parity (or sign): +1 for even parity; -1 for odd.
+#     """
+#     parity = 1
+#     for i in range(0, len(lst) - 1):
+#         if lst[i] != i:
+#             parity *= -1
+#             mn = min(range(i, len(lst)), key=lst.__getitem__)
+#             lst[i], lst[mn] = lst[mn], lst[i]
+#     return parity
+#
+#
+# def order_solvent_molecules(x, atoms_per_solute_mol, atoms_per_solvent_mol):
+#     # TODO: This is not used currently, as this is not actually doing anything in the
+#     #  Z --> X direction. What to do for permutation invariance in that setting?
+#     """
+#     Order oxygen atoms by their distance to the solute oxygen atom.
+#
+#     :param x: Cartesian coordinates: n_batch x n_atoms x 3
+#     :param atoms_per_solute_mol: Number of atoms per solute molecule
+#     :param atoms_per_solvent_mol: Number of atoms per solvent molecule
+#
+#     :return:
+#         Ordered Cartesian coordinates: n_batch x n_atoms x 3
+#         Parity of the permutation: n_batch
+#     """
+#
+#     # Reference coordinates: e.g., the oxygen atoms
+#     ref_coords = x[:, atoms_per_solute_mol::atoms_per_solvent_mol, :]  # n_batch x num_atoms
+#
+#     # Distances to anchor at origin
+#     ref_dists = torch.norm(ref_coords, dim=2)
+#
+#     # Order reference atoms by distance to origin
+#     ref_permute = torch.argsort(ref_dists, dim=1) * atoms_per_solvent_mol
+#
+#     # Start building full permutation tensor.
+#     #  First step is to permute reference atoms (e.g., oxygens) together with their hydrogens.
+#     #  Then we can start permuting the remaining atoms (e.g., hydrogens) within the molecules, if necessary.
+#     full_permute = torch.zeros(x.shape[:2])
+#
+#     # Solute molecule is fixed; reflect this in permutation tensor.
+#     num_hydrogen = atoms_per_solvent_mol - 1
+#     for j in range(1, num_hydrogen + 1, 1):
+#         full_permute[:, j] = j
+#
+#     # Inefficient way to build full permutation tensor
+#     for full_perm, ref_perm in zip(full_permute, ref_permute):
+#         for i, ref_num in enumerate(ref_perm):
+#             # ref_permute skips solute molecule, so index this back in
+#             ind = atoms_per_solute_mol + i * atoms_per_solvent_mol  # index in permutation tensor
+#             atom_num = atoms_per_solute_mol + ref_num  # atom number that should be at this index
+#             full_perm[ind] = atom_num
+#             for j in range(1, num_hydrogen + 1, 1):
+#                 full_perm[ind + j] = atom_num + j
+#
+#     b = x.shape[0]
+#     n = x.shape[1]
+#     flat_x = x.reshape(b * n, -1)
+#     flat_permute = (full_permute + (torch.arange(0, b) * n).unsqueeze(-1)).flatten().unsqueeze(-1).long()
+#     x_ordered = flat_x[flat_permute].reshape(b, n, flat_x.shape[-1])
+#
+#     parity = torch.tensor([perm_parity(perm) for perm in full_permute.clone()])
+#
+#     return x_ordered, parity

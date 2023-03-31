@@ -1,19 +1,14 @@
 import torch
 from torch import nn
-import numpy as np
 
 from fab.target_distributions.base import TargetDistribution
 from fab.transforms.water_transform import WaterCoordinateTransform
 
 import boltzgen as bg
-import normflows as nf
 from simtk import openmm as mm
 from simtk import unit
 from simtk.openmm import app
-from openmmtools import testsystems
 from openmmtools.testsystems import TestSystem, get_data_filename
-import mdtraj
-import tempfile
 
 
 class WaterInWaterBox(TestSystem):
@@ -101,13 +96,6 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         system = WaterInWaterBox()
 
-        sim = app.Simulation(
-            system.topology,
-            system.system,
-            mm.LangevinIntegrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-            mm.Platform.getPlatformByName("Reference"),
-        )
-
         # TODO: Do we want to run a quick simulation to get a sense of the coordinate magnitude for normalisation?
         #  If so, we can run a quick simulation here, as in aldp.py to obtain `transform_data`.
 
@@ -123,6 +111,15 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 n_threads=n_threads,
             )
         else:
+            # Need to define sim, since the non-parallel version does not take a system as input (parallel builds the
+            #  sim from system in exactly this way).
+            sim = app.Simulation(
+                system.topology,
+                system.system,
+                mm.LangevinIntegrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
+                mm.Platform.getPlatformByName("Reference"),
+            )
+
             self.p = bg.distributions.TransformedBoltzmann(
                 sim.context,
                 temperature,
