@@ -26,7 +26,7 @@ from experiments.make_flow import (
     make_wrapped_normflow_realnvp,
     make_wrapped_normflow_resampled_flow,
     make_wrapped_normflow_snf_model,
-    make_wrapped_normflow_molecular_flow,
+    make_wrapped_normflow_solvent_flow,
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -164,9 +164,11 @@ def get_load_checkpoint_dir(outer_checkpoint_dir):
 def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     dim = cfg.target.dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
-    if cfg.flow.molecular_flow:
-        flow = make_wrapped_normflow_molecular_flow(
+    if cfg.flow.solute_flow:
+        # TODO: Check this is correct.
+        flow = make_wrapped_normflow_solvent_flow(
             cfg,
+            target,
         )
 
     elif cfg.flow.resampled_base:
@@ -207,8 +209,9 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             target_log_prob=target.log_prob,
             alpha=cfg.fab.alpha,
             p_target=p_target,
-            n_outer=1,
+            target_p_accept=cfg.fab.transition_operator.target_p_accept,
             epsilon=cfg.fab.transition_operator.init_step_size,
+            common_epsilon_init_weight=cfg.fab.transition_operator.init_step_size,
             L=cfg.fab.transition_operator.n_inner_steps,
         )
 
@@ -290,9 +293,45 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         file.write(str(cfg))
 
     fab_model = setup_model(cfg, target)
-    optimizer = torch.optim.Adam(fab_model.flow.parameters(), lr=cfg.training.lr)
-    # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.995)
-    scheduler = None
+
+    # Initialize optimizer and its parameters
+    #  Taken from ALDP's train.py.
+    lr = cfg.training.lr
+    weight_decay = cfg.training.wd
+    optimizer_name = "adam" if not "optimizer" in cfg.training else cfg.training.optimizer
+    optimizer_param = fab_model.flow.parameters()
+    if optimizer_name == "adam":
+        optimizer = torch.optim.Adam(optimizer_param, lr=lr, weight_decay=weight_decay)
+    elif optimizer_name == "adamax":
+        optimizer = torch.optim.Adamax(optimizer_param, lr=lr, weight_decay=weight_decay)
+    else:
+        raise NotImplementedError("The optimizer " + optimizer_name + " is not implemented.")
+    # Scheduler
+    if "lr_scheduler" in cfg.training:
+        if cfg.training.lr_scheduler.type == "exponential":
+            scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                optimizer=optimizer, gamma=cfg.training.scheduler.rate_decay,
+            )
+            lr_step = cfg.training.scheduler.decay_iter
+        elif cfg.training.lr_scheduler.type == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer=optimizer, T_max=cfg.training.n_iterations,
+            )
+            lr_step = 1
+        elif cfg.training.lr_scheduler.type == "cosine_restart":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer=optimizer, T_0=cfg.training.scheduler.restart_iter,
+            )
+            lr_step = 1
+    else:
+        scheduler = None
+
+    # Scheduler warmup
+    lr_warmup = "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None
+    if lr_warmup:
+        warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lambda s: min(1.0, s / cfg.training.warmup_iter)
+        )
 
     # Create buffer if needed
     if cfg.training.use_buffer is True:
@@ -352,6 +391,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             alpha=cfg.fab.alpha,
         )
 
+    # TODO: Check that this is similar enough to ALDP for solvent system.
+    # TODO: evaluation and plotting?
     trainer.run(
         n_iterations=n_iterations,
         batch_size=cfg.training.batch_size,

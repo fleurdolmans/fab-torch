@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import hydra
 from omegaconf import DictConfig
 from fab.utils.plotting import plot_contours, plot_marginal_pair
@@ -20,7 +19,17 @@ def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter
 
 def _run(cfg: DictConfig):
     torch.manual_seed(0)  # seed of 0 for setup. TODO: necessary? Maybe for simulation...
-    target = H2OinH2O()
+    if cfg.system.solute == "water" and cfg.system.solvent == "water":
+        assert cfg.target.dim % 3 == 0, "Dimension must be divisible by 3 for water in water."
+        target = H2OinH2O(
+            dim=cfg.target.dim,
+            temperature=cfg.target.temperature,
+            energy_cut=cfg.target.energy_cut,
+            energy_max=cfg.target.energy_max,
+            n_threads=cfg.target.n_threads,
+        )
+    else:
+        raise NotImplementedError("Solute/solvent combination not implemented.")
     torch.manual_seed(cfg.training.seed)
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
@@ -28,7 +37,7 @@ def _run(cfg: DictConfig):
     setup_trainer_and_run_flow(cfg, setup_h2o_plotter, target)
 
 
-@hydra.main(config_path="./config/", config_name="fab.yaml")
+@hydra.main(config_path="config/", config_name="h2oinh2o_fab_pbuff.yaml")
 def run(cfg: DictConfig):
     _run(cfg)
 

@@ -17,13 +17,10 @@ class WaterInWaterBox(TestSystem):
 
     Parameters
     ----------
-    constraints : optional, default=openmm.app.HBonds
-    hydrogenMass : unit, optional, default=None
-        If set, will pass along a modified hydrogen mass for OpenMM to
-        use mass repartitioning.
+    num_solvent_molecules: how many solvent molecules to add to the box.
 
     """
-    def __init__(self, **kwargs):
+    def __init__(self, dim, **kwargs):
         TestSystem.__init__(self, **kwargs)
         # http://docs.openmm.org/latest/userguide/application/02_running_sims.html
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
@@ -49,7 +46,7 @@ class WaterInWaterBox(TestSystem):
         # TODO: Other parameters? HydrogenMass, cutoffs, etc.?
         self.num_atoms_per_solute = 3   # Water
         self.num_atoms_per_solvent = 3  # Water
-        self.num_solvent_molecules = 8
+        self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // self.num_atoms_per_solvent
 
         # pdb example:
         # Initial solute molecule
@@ -69,24 +66,27 @@ class WaterInWaterBox(TestSystem):
 class H2OinH2O(nn.Module, TargetDistribution):
     def __init__(
         self,
+        dim=3 + 3 * 8,
         temperature=1000,
         energy_cut=1.0e8,
         energy_max=1.0e20,
         n_threads=4,
     ):
         """
-        Boltzmann distribution of Alanine dipeptide
+        Boltzmann distribution of H2O in H2O.
         :param temperature: Temperature of the system
-        :type temperature: Integer
+            :type temperature: Integer
         :param energy_cut: Value after which the energy is logarithmically scaled
-        :type energy_cut: Float
+            :type energy_cut: Float
         :param energy_max: Maximum energy allowed, higher energies are cut
-        :type energy_max: Float
+            :type energy_max: Float
         :param n_threads: Number of threads used to evaluate the log
             probability for batches
-        :type n_threads: Integer
+            :type n_threads: Integer
         """
         super(H2OinH2O, self).__init__()
+
+        self.dim = dim
 
         # Steps to take:
         # 1. Load topology of solute.
@@ -94,7 +94,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # 3. Add the solute and solvent force fields.
         # 4. Add the implicit solvent force field / external potential term.
 
-        system = WaterInWaterBox()
+        system = WaterInWaterBox(dim)
 
         # TODO: Do we want to run a quick simulation to get a sense of the coordinate magnitude for normalisation?
         #  If so, we can run a quick simulation here, as in aldp.py to obtain `transform_data`.
