@@ -18,6 +18,7 @@ flow:                                  # Properties of the flow model
   base:
     type: gauss
     params: null
+    learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
   blocks: 12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
   blocks_per_layer: 1                 # Int, number of blocks per layer
   hidden_units: 256                   # Int, number of hidden units of the NN in neural spline layers
@@ -60,8 +61,8 @@ training:                             # Properties of the training procedure
   max_grad_norm: 1.e3                 # Double, limit for gradient clipping
   use_buffer: true                    # Buffer args follow below here
   prioritised_buffer: true            # If True then FAB loss WILL be used no matter what fab.loss_type is.
-  maximum_buffer_length: 512 * 1024   # ALDP used 512 * batch_size
-  min_buffer_length: 64 * 1024        # ALDP used 64 * batch_size
+  maximum_buffer_length: 524288       # ALDP used 512 * 1024 (batch_size)
+  min_buffer_length: 65536            # ALDP used 64 * 1024 (batch_size)
   n_batches_buffer_sampling: 8        # Number of updates to do after every buffer sampling step
   w_adjust_max_clip: 10               # clipping of weight adjustment factor for prioritised replay
   buffer_temp: 1.0                    # Rate that we weight new experience over old (for non-prioritised replay only)

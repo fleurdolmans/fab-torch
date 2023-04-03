@@ -206,12 +206,7 @@ def make_wrapped_normflow_solvent_flow(config, target):
             bl = config["flow"]["blocks_per_layer"]
             hu = config["flow"]["hidden_units"]
             nb = config["flow"]["num_bins"]
-            ii = config["flow"]["init_identity"]
             dropout = config["flow"]["dropout"]
-            if i % 2 == 0:
-                mask = nf.utils.masks.create_random_binary_mask(dim, seed=config["training"]["seed"] + i)
-            else:
-                mask = 1 - mask
             # TODO: This is different from the Circular splines used in FAB paper. As far as I know, we
             #  don't have freely rotating angles that we need the Circular indices for. But if we do, we should
             #  change this.
@@ -222,9 +217,7 @@ def make_wrapped_normflow_solvent_flow(config, target):
                     hu,
                     tail_bound=tail_bound,
                     num_bins=nb,
-                    init_identity=ii,
                     dropout_probability=dropout,
-                    mask=mask,
                 )
             )
         else:

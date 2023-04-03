@@ -164,7 +164,7 @@ def get_load_checkpoint_dir(outer_checkpoint_dir):
 def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     dim = cfg.target.dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
-    if cfg.flow.solute_flow:
+    if cfg.flow.solvent_flow:
         # TODO: Check this is correct.
         flow = make_wrapped_normflow_solvent_flow(
             cfg,

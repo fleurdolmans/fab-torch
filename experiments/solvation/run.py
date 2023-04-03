@@ -19,7 +19,7 @@ def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter
 
 def _run(cfg: DictConfig):
     torch.manual_seed(0)  # seed of 0 for setup. TODO: necessary? Maybe for simulation...
-    if cfg.system.solute == "water" and cfg.system.solvent == "water":
+    if cfg.target.solute == "water" and cfg.target.solvent == "water":
         assert cfg.target.dim % 3 == 0, "Dimension must be divisible by 3 for water in water."
         target = H2OinH2O(
             dim=cfg.target.dim,

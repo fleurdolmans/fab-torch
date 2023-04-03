@@ -115,6 +115,9 @@ def cartesian_to_z(x):
             #  The log of the inverse is then: -2 log(r) + log(sin(phi)).
             log_det_jac += -1 * (2 * torch.log(r) + torch.log(torch.abs(torch.sin(phi))))
 
+    # Reshape z from n_batch x n_atoms x 3 to n_batch x n_dim
+    z = z.view(z.shape[0], -1)
+
     return z, log_det_jac, x_coord
 
 
@@ -124,6 +127,9 @@ def z_to_cartesian(z):
     :param z: Spherical coordinates: n_batch x n_atoms x 3
     :return: Cartesian coordinates: n_batch x n_atoms x 3, and log det Jacobian
     """
+
+    # Reshape z from n_batch x n_dim to n_batch x n_atoms x 3
+    z = z.view(z.shape[0], -1, 3)
 
     # Setup rotation axes
     z_axis = z.new_zeros(z.shape[0], 3)
@@ -174,7 +180,7 @@ def z_to_cartesian(z):
                         torch.norm(torch.zeros(z.shape[0], 1) - atom_coords[:, 2:], dim=1)
                     )
                 )
-            r = atom_coords[:, 0]  # atom-to-reconstruct r
+            r = atom_coords[:, 0:1]  # atom-to-reconstruct r
             phi = atom_coords[:, 1]  # atom-to-reconstruct phi
             # Define normal for rotation: for X --> Z we took the x > 0 normal when rotating towards the
             #  alignment axis. Now we rotate away from the axis, so we take the negative angle.
@@ -184,10 +190,10 @@ def z_to_cartesian(z):
             xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis * r)
             x[:, atom_num, :] = xyz
             # The Jacobian determinant dcartesian/dlatent is r for this 2D polar transform.
-            log_det_jac += -1 * torch.log(r)
+            log_det_jac += -1 * torch.log(r.squeeze(-1))
         else:
             # We always use the first molecule as the anchor for the angles.
-            r = atom_coords[:, 0]  # atom-to-reconstruct r
+            r = atom_coords[:, 0:1]  # atom-to-reconstruct r
             phi = atom_coords[:, 1]  # atom-to-reconstruct phi
             theta = atom_coords[:, 2]  # atom-to-reconstruct dihedral
             # Step 1: rotate the z-axis vector around the positive x-axis (by convention) by -phi
@@ -200,7 +206,7 @@ def z_to_cartesian(z):
             xyz = torch.einsum('bij,bj -> bi', theta_rotation, xyz)
             x[:, atom_num, :] = xyz
             # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent is r^2 sin(phi).
-            log_det_jac += 2 * torch.log(r) + torch.log(torch.abs(torch.sin(phi)))
+            log_det_jac += 2 * torch.log(r.squeeze(-1)) + torch.log(torch.abs(torch.sin(phi)))
 
     return x, log_det_jac
 
@@ -383,15 +389,21 @@ def rotation_matrix(rotation_axis, rotation_rad):
 
 
 if __name__ == "__main__":
-    n_batch = 1
-    n_atoms = 4
+    n_batch = 1024
+    n_atoms = 27
     x = torch.randn(n_batch, n_atoms, 3)
     z, _, x_coord = cartesian_to_z(x)
     x_recon, _ = z_to_cartesian(z)
-    print(x_coord)
-    print(x_recon)
-    if not torch.isclose(x_coord, x_recon, atol=1e-4).all():
-        raise ValueError("Reconstruction error too large.")
+    errs = torch.abs(x_coord - x_recon)
+    norm_err = torch.norm(x_coord - x_recon, dim=-1)
+    print("Max error (xyz): {:.5f}".format(errs.max().item()))
+    print("Mean error (xyz): {:.8f}".format(errs.mean().item()))
+    print("Min error (xyz): {:.8f}".format(errs.min().item()))
+    print("Max error norm (r): {:.5f}".format(norm_err.max().item()))
+    print("Mean error norm (r): {:.8f}".format(norm_err.mean().item()))
+    print("Min error norm (r): {:.8f}".format(norm_err.min().item()))
+    if not torch.isclose(x_coord, x_recon, atol=1e-3).all():
+        raise ValueError("Max reconstruction error > 1e-3...")
 
 
 # def perm_parity(lst):
