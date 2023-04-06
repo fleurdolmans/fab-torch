@@ -27,6 +27,7 @@ def _run(cfg: DictConfig):
             energy_cut=cfg.target.energy_cut,
             energy_max=cfg.target.energy_max,
             n_threads=cfg.target.n_threads,
+            data_path=None,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

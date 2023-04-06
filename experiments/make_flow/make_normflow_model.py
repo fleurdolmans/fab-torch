@@ -158,20 +158,47 @@ def make_wrapped_normflow_resampled_flow(
     return wrapped_dist
 
 
-def make_wrapped_normflow_solvent_flow(config, target):
+def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
     """
     Setup Flow model.
     """
 
     # Flow parameters
     flow_type = config["flow"]["type"]
+    seed = config["training"]["seed"]
     dim = target.dim
 
+    # TODO: Check that base distribution is correct. Check scales of base distribution at initialisation. I think it
+    #  might be initialised at [-pi, pi], instead of [0, pi]? Or even [-pi/2, pi/2], as a symmetric interval that has
+    #  width pi = bound_circ. Compare the Circular Flow implementation here:
+    #   https://github.com/francois-rozet/zuko/blob/master/zuko/flows.py#L493
+    #  And the used CircularShiftTransform: https://github.com/francois-rozet/zuko/blob/master/zuko/transforms.py
+    #  Note: MonotonicRQSTransform is simply the monotonic Rational Quadratic Spline transform.
+    #  What is our PeriodicShift doing exactly?
     # Base distribution
-    # TODO: We only use the Gauss here, because we have no freely rotating dihedrals that we would need circular
-    #  distributions for (circ_ind). Check that this is actually true!
+    # Indices of periodic variables (e.g., phi, theta) are given by `periodic_inds`, these should have their owns scale
+    # Original implementation uses 2 * pi / `std_of_angle` for base_scale of uniform distribution. I think it makes
+    #  more sense to not use the std_of_angle here, as the want the flow to operate on unit scale (also if
+    #  std_of_angle is not unit scale, then there will be a large difference between the scale of the Gaussian
+    #  base dist N(0, 1), and the scale of the uniform base dist U(0, 2 * pi / std_of_angle).
+    # Note that we have two different types of angles: phi and theta. But we can just use a pi range for both, and
+    #  multiply the one for phi by 2 at Flow output (in principle the Flow can learn that phi angles have double
+    #  range, but we might as well put that in manually, so that on initialisation the relative scale matches.
+    bound_circ = np.pi
+    # Bound of the Spline tails.
+    tail_bound = 5.0 * torch.ones(dim)
+    tail_bound[periodic_inds] = bound_circ
+
+    circ_shift = None if not "circ_shift" in config["flow"] else config["flow"]["circ_shift"]
+
+    # Base distribution
     if config["flow"]["base"]["type"] == "gauss":
         base = nf.distributions.DiagGaussian(dim, trainable=config["flow"]["base"]["learn_mean_var"])
+    elif config["flow"]["base"]["type"] == "gauss-uni":
+        base_scale = torch.ones(dim)  # Stddev of Gaussian or width of uniform
+        base_scale[periodic_inds] = bound_circ
+        base = nf.distributions.UniformGaussian(dim, periodic_inds, scale=base_scale)
+        base.shape = (dim,)
     else:
         raise NotImplementedError("The base distribution " + config["flow"]["base"]["type"] + " is not implemented")
 
@@ -181,15 +208,12 @@ def make_wrapped_normflow_solvent_flow(config, target):
     tail_bound = 5.0 * torch.ones(dim)
 
     for i in range(n_layers):
-        if flow_type == "ar-nsf":
+        if flow_type == "ar-nsf":  # Autoregressive Rational Spline Normalizing Flow
             bl = config["flow"]["blocks_per_layer"]
             hu = config["flow"]["hidden_units"]
             nb = config["flow"]["num_bins"]
             ii = config["flow"]["init_identity"]
             dropout = config["flow"]["dropout"]
-            # TODO: This is different from the Circular splines used in FAB paper. As far as I know, we
-            #  don't have freely rotating angles that we need the Circular indices for. But if we do, we should
-            #  change this.
             layers.append(
                 nf.flows.AutoregressiveRationalQuadraticSpline(
                     dim,
@@ -202,14 +226,11 @@ def make_wrapped_normflow_solvent_flow(config, target):
                     dropout_probability=dropout,
                 )
             )
-        elif flow_type == "coup-nsf":
+        elif flow_type == "coup-nsf":  # Coupling Rational Spline Normalizing Flow
             bl = config["flow"]["blocks_per_layer"]
             hu = config["flow"]["hidden_units"]
             nb = config["flow"]["num_bins"]
             dropout = config["flow"]["dropout"]
-            # TODO: This is different from the Circular splines used in FAB paper. As far as I know, we
-            #  don't have freely rotating angles that we need the Circular indices for. But if we do, we should
-            #  change this.
             layers.append(
                 nf.flows.CoupledRationalQuadraticSpline(
                     dim,
@@ -218,6 +239,48 @@ def make_wrapped_normflow_solvent_flow(config, target):
                     tail_bound=tail_bound,
                     num_bins=nb,
                     dropout_probability=dropout,
+                )
+            )
+        elif flow_type == "circ-ar-nsf":  # Circular AutoRegressive Rational Spline Normalizing Flow
+            bl = config["flow"]["blocks_per_layer"]
+            hu = config["flow"]["hidden_units"]
+            nb = config["flow"]["num_bins"]
+            ii = config["flow"]["init_identity"]
+            dropout = config["flow"]["dropout"]
+            layers.append(
+                nf.flows.CircularAutoregressiveRationalQuadraticSpline(
+                    dim,
+                    bl,
+                    hu,
+                    periodic_inds,
+                    tail_bound=tail_bound,
+                    num_bins=nb,
+                    permute_mask=True,
+                    init_identity=ii,
+                    dropout_probability=dropout,
+                )
+            )
+        elif flow_type == "circ-coup-nsf":  # Circular Coupled Rational Spline Normalizing Flow
+            bl = config["flow"]["blocks_per_layer"]
+            hu = config["flow"]["hidden_units"]
+            nb = config["flow"]["num_bins"]
+            ii = config["flow"]["init_identity"]
+            dropout = config["flow"]["dropout"]
+            if i % 2 == 0:
+                mask = nf.utils.masks.create_random_binary_mask(dim, seed=seed + i)
+            else:
+                mask = 1 - mask
+            layers.append(
+                nf.flows.CircularCoupledRationalQuadraticSpline(
+                    dim,
+                    bl,
+                    hu,
+                    periodic_inds,
+                    tail_bound=tail_bound,
+                    num_bins=nb,
+                    init_identity=ii,
+                    dropout_probability=dropout,
+                    mask=mask,
                 )
             )
         else:
@@ -230,6 +293,15 @@ def make_wrapped_normflow_solvent_flow(config, target):
 
         if config["flow"]["actnorm"]:
             layers.append(nf.flows.ActNorm(dim))
+
+        # Shift the periodic angles.
+        if i % 2 == 1 and i != n_layers - 1:
+            if circ_shift == "constant":
+                layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=bound_circ))
+            elif circ_shift == "random":
+                gen = torch.Generator().manual_seed(seed + i)
+                shift_scale = torch.rand([], generator=gen) + 0.5
+                layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=shift_scale * bound_circ))
 
         # SNF
         if "snf" in config["flow"]:

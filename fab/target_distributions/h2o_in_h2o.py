@@ -1,8 +1,11 @@
 import torch
 from torch import nn
+import numpy as np
+import tempfile
+import pathlib
 
 from fab.target_distributions.base import TargetDistribution
-from fab.transforms.water_transform import WaterCoordinateTransform
+from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
 
 import boltzgen as bg
 from simtk import openmm as mm
@@ -46,7 +49,7 @@ class WaterInWaterBox(TestSystem):
         # TODO: Other parameters? HydrogenMass, cutoffs, etc.?
         self.num_atoms_per_solute = 3   # Water
         self.num_atoms_per_solvent = 3  # Water
-        self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // self.num_atoms_per_solvent
+        self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
 
         # pdb example:
         # Initial solute molecule
@@ -61,28 +64,29 @@ class WaterInWaterBox(TestSystem):
         self.system = forcefield.createSystem(modeller.topology)
 
         self.topology, self.positions = modeller.getTopology(), modeller.getPositions()
+        # self.topology.atoms() yields the atom order, which is OHH OHH OHH etc.
+        # This is the order in which the coordinates are stored in the positions array.
+        self.atoms = [atom.name for atom in self.topology.atoms()]
 
 
 class H2OinH2O(nn.Module, TargetDistribution):
     def __init__(
         self,
-        dim=3 + 3 * 8,
-        temperature=1000,
-        energy_cut=1.0e8,
-        energy_max=1.0e20,
+        dim=3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
+        temperature=300,
+        energy_cut=1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
+        energy_max=1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
         n_threads=4,
+        data_path=None,
     ):
         """
         Boltzmann distribution of H2O in H2O.
         :param temperature: Temperature of the system
-            :type temperature: Integer
         :param energy_cut: Value after which the energy is logarithmically scaled
-            :type energy_cut: Float
         :param energy_max: Maximum energy allowed, higher energies are cut
-            :type energy_max: Float
         :param n_threads: Number of threads used to evaluate the log
             probability for batches
-            :type n_threads: Integer
+        :param data_path: Path to the data used for coordinate transform
         """
         super(H2OinH2O, self).__init__()
 
@@ -98,8 +102,33 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         # TODO: Do we want to run a quick simulation to get a sense of the coordinate magnitude for normalisation?
         #  If so, we can run a quick simulation here, as in aldp.py to obtain `transform_data`.
+        # Generate trajectory for coordinate transform if no data path is specified
+        if data_path is None:
+            traj_sim = app.Simulation(
+                system.topology,
+                system.system,
+                mm.LangevinIntegrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
+                platform=mm.Platform.getPlatformByName("Reference"),
+            )
+            traj_sim.context.setPositions(system.positions)
+            traj_sim.minimizeEnergy()
+            state = traj_sim.context.getState(getPositions=True)
+            position = state.getPositions(True).value_in_unit(unit.nanometer)
+            tmp_dir = pathlib.Path(tempfile.gettempdir())
+            data_path = tmp_dir / f"h2o_in_h2o_{dim}.pt"
 
-        self.coordinate_transform = WaterCoordinateTransform(system)
+            torch.save(torch.tensor(position.reshape(1, dim).astype(np.float64)), data_path)
+            del traj_sim
+
+        data_path = pathlib.Path(data_path)
+        assert data_path.suffix == ".pt", "Data path must be a .pt file"
+        transform_data = torch.load(data_path)
+        assert transform_data.shape[-1] == dim, (
+            f"Data shape ({transform_data.shape}) does not match number of "
+            f"coordinates in current system ({dim})."
+        )
+
+        self.coordinate_transform = Global3PointSphericalTransform(system, transform_data)
 
         if n_threads > 1:
             self.p = bg.distributions.TransformedBoltzmannParallel(

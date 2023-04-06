@@ -449,6 +449,11 @@ class InternalCoordinateTransform(Transform):
             self._setup_indices(z_indices, cart_indices)
             self._validate_data(data)
             # Setup the mean and standard deviations for each internal coordinate.
+            #  These are computed by transforming data X --> Z and then computing means and stds.
+            #  These values are then used to unnormalise the internal coordinates in the Z --> X direction,
+            #   so that the resulting output fits the values in the Boltzmann distribution. Note that the learned
+            #   values will still be off initially, as the current normalisation only makes it so the flow needs to
+            #   output closer-to-unit values (the flow still needs to learn to actually do this).
             transformed, _ = self._fwd(data)
             # Normalize
             self.default_std = default_std
@@ -838,7 +843,7 @@ class CompleteInternalCoordinateTransform(nn.Module):
         scale_jac = -(torch.log(self.std_b1) + torch.log(self.std_b2) + torch.log(self.std_angle))
         self.register_buffer("scale_jac", scale_jac)
 
-    def forward(self, x):
+    def forward(self, x):  # X --> Z
         # Create the jacobian vector
         jac = x.new_zeros(x.shape[0])
 
@@ -869,7 +874,7 @@ class CompleteInternalCoordinateTransform(nn.Module):
 
         return x, jac
 
-    def inverse(self, x):
+    def inverse(self, x):  # Z --> X
         # Create the jacobian vector
         jac = x.new_zeros(x.shape[0])
 
