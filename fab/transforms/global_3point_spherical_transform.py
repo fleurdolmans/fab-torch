@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import math
 
 import normflows as nf
@@ -20,21 +21,33 @@ class Global3PointSphericalTransform(nf.flows.Flow):
     the z-axis phi in [0, 2pi], and angle with the yz-plane theta in [-pi/2, pi/2]. The transformation is invertible
     and differentiable.
     """
-    def __init__(self, system, transform_data=None):
+    def __init__(self, system=None, transform_data=None):
         """
         Constructor
         :param transform_data: Data used to set up coordinate scale for r. Must be a single frame of shape (1, ).
         """
         super().__init__()
-        self.system = system
-        self.atom_order = system.atoms
+        if system is not None:
+            self.system = system
+            self.atom_order = system.atoms
+        else:
+            print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
+            # TODO: The stds setup here are used in the transforms and the Jacobian. Note that our Jacobian is
+            #  different from the one in the FAB paper, because we use 3D spherical coordinates. Their scaling
+            #  Jacobian for phi and theta follows from our derivation as well, but they only use a single power
+            #  of std_r everywhere, whereas we use std_r^3 for the atoms subject to 3D transforms (and less for
+            #  the atoms subject to 0D, 1D, 2D transforms). This follows from the fact that the determinant of the
+            #  Jacobian for an n-D transform has n columns, all which contribute a scaling factor in r (since x,y,z
+            #  are all defined as r * [angular part]).
             z, _, _, _ = self.cartesian_to_z(transform_data.view(1, -1, 3), setup=True)
             self._setup_std_r(z)  # Rescale r (by std of z[0, ::3])
             self._setup_std_phi(z)  # Rescale phi (by 2pi)
             self._setup_std_theta(z)  # Rescale theta (by pi)
+            # TODO: Do we need means as well? We set our coordinate system around (0, 0, 0) by default, so probably
+            #  not.
 
     def forward(self, z):
         # TODO: For water in water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
@@ -53,7 +66,6 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         return z, log_det_jac
 
     def _setup_std_r(self, z):
-        # TODO: How to solve the issue of needing r > 0? We can't just use a softplus, as this will not be invertible.
         std_r = torch.std(z[0:1, ::3], dim=-1)
         self.register_buffer("std_r", std_r)
 
@@ -127,12 +139,12 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                         )
                     )
             elif atom_num == 1:  # axis-aligned atom [r, 0, 0]
-                r = torch.norm(atom_coords, dim=-1)  # Vector norm
+                base_r = torch.norm(atom_coords, dim=-1)  # Vector norm
                 # This should match the distance along z axis, since the vector should be aligned with z-axis.
-                if not torch.isclose(r, atom_coords[:, -1]).all():
+                if not torch.isclose(base_r, atom_coords[:, -1]).all():
                     raise ValueError(
                         "Expected atom to be aligned with z-axis, but norm mismatch (n_batch): {}".format(
-                            torch.abs(r - torch.norm(atom_coords, dim=1))
+                            torch.abs(base_r - torch.norm(atom_coords, dim=1))
                         )
                     )
                 if not torch.isclose(unit_vector(z_axis), unit_vector(atom_coords), atol=1e-5).all():
@@ -141,42 +153,60 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                             torch.abs(unit_vector(z_axis) - unit_vector(atom_coords))
                         )
                     )
-                unnorm_z[:, atom_num, 0] = r
+                unnorm_z[:, atom_num, 0] = base_r
                 if not setup:
                     # Normalise
-                    r = r / self.std_r
+                    r = base_r / self.std_r
+                    # Log det Jacobian contribution
                     # This is the X --> Z transformation, so we need |det J_F|^-1. J_F is the Jacobian of F: dF/dz.
                     # The flow is defined as F: Z --> X. q(x) = q(z) |det J_F|^-1, here J_F is the Jacobian of F: dF/dz.
                     # 1D polar transform: z_X (coordinate) = r. This has Jacobian 1. Log(1) = 0, so we're done,
-                    # except for scaling z_X (coordinate) = r / self.std_r --> |dF/dlatent| = 1 / self.std_r -->
-                    # |det J_F|^-1 = self.std_r
+                    # except for scaling z_X (coordinate) = r * self.std_r --> |dF/dlatent| = self.std_r -->
+                    # |det J_F|^-1 = 1 / self.std_r
                     # Sanity check: this is just like adding the scale log det Jacobian contribution afterwards
-                    log_det_jac += torch.log(self.std_r)
+                    log_det_jac += -1 * (  # Notation chosen for consistency with 2D and 3D case
+                        torch.log(self.std_r)
+                    )
+                else:
+                    r = base_r
+
+                # No other Jacobian contribution for this atom.
                 # Assign
                 z[:, atom_num, 0] = r
 
             elif atom_num == 2:  # r and phi
-                r = torch.norm(atom_coords, dim=-1)
+                base_r = torch.norm(atom_coords, dim=-1)
                 phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)
                 unnorm_z[:, atom_num, 0] = r
                 unnorm_z[:, atom_num, 1] = phi
                 if not setup:
                     # Normalise
-                    r = r / self.std_r
+                    r = base_r / self.std_r
                     phi = phi / self.std_phi
-                # This is the X --> Z transformation, so we need |det J_F|^-1. J_F is the Jacobian of F: dF/dz.
-                # The flow is defined as F: Z --> X. q(x) = q(z) |det J_F|^-1, here J_F is the Jacobian of F: dF/dz.
-                # Since for this atom we have a 2D(!) polar transform, we have: x = r * cos(phi), y = r * sin(phi).
-                # The Jacobian determinant |dF/dlatent| is then r --> 1/r with the inverse. Log of this is -log(r).
-                # Still need to take care of scaling in r. |dF/dlatent|^-1 = r / self.std_r. But note that, since the
-                # variable r is already scaled here, we can just use it directly for the Jacobian.
-                log_det_jac += -1 * torch.log(r)
+                    # This is the X --> Z transformation, so we need |det J_F|^-1. J_F is the Jacobian of F: dF/dz.
+                    # The flow is defined as F: Z --> X. q(x) = q(z) |det J_F|^-1, here J_F is the Jacobian of F: dF/dz.
+                    # Since for this atom we have a 2D(!) polar transform, we have: x = r * cos(phi), y = r * sin(phi).
+                    # The Jacobian determinant |dF/dlatent| is then r --> 1/r with the inverse. Log of this is -log(r).
+                    # Still need to take care of scaling in r. |dF/dlatent|^-1 = r * std_r^2 ...
+                    # Still need to take care of scaling in phi. |dF/dlatent|^-1 = r * std_r^2 * std_phi
+                    # both y and z are scaled by std_r.
+                    # d/dphi sin(base_phi * std_phi) = std_phi * cos(base_phi * std_phi)
+                    log_det_jac += -1 * (
+                        2 * torch.log(self.std_r) +  # Shows up because y,z both scaled by std_r: both cols of det.
+                        torch.log(self.std_phi)  # Shows up from d/dphi column of determinant
+                    )
+                else:
+                    r = base_r
+                # Transformation without scaling
+                log_det_jac += -1 * (
+                    torch.log(base_r)
+                )
                 # Assign
                 z[:, atom_num, 0] = r
                 z[:, atom_num, 1] = phi
 
             else:  # r, phi, theta
-                r = torch.norm(atom_coords, dim=-1)
+                base_r = torch.norm(atom_coords, dim=-1)
                 phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)
                 solute_atom0 = x[:, 0, :]
                 solute_atom1 = x[:, 1, :]
@@ -187,16 +217,30 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 unnorm_z[:, atom_num, 2] = theta
                 if not setup:
                     # Normalise
-                    r = r / self.std_r
+                    r = base_r / self.std_r
                     phi = phi / self.std_phi
                     theta = theta / self.std_theta
-                # This is the X --> Z transformation, so we need |det J_F|^-1. J_F is the Jacobian of F: dF/dz.
-                # The flow is defined as F: Z --> X. q(x) = q(z) |det J_F|^-1, here J_F is the Jacobian of F: dF/dz.
-                # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent is r^2 sin(phi).
-                #  The log of the inverse is then: -2 log(r) + log(sin(phi)).
-                # We still need to take care of scaling. |dF/dlatent|^-1 = self.std_r^2 / r^2 sin(phi). But note again,
-                #  the variable r already includes the scaling, so we can use it directly here.
-                log_det_jac += -1 * (2 * torch.log(r) + torch.log(torch.abs(torch.sin(phi))))
+                    # This is the X --> Z transformation, so we need |det J_F|^-1. J_F is the Jacobian of F: dF/dz.
+                    # The flow is defined as F: Z --> X. q(x) = q(z) |det J_F|^-1, here J_F is the Jacobian of F: dF/dz.
+                    # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent
+                    #  is r^2 sin(phi). The log of the inverse is then: -2 log(r) + log(sin(phi)).
+                    # We still need to take care of scaling. |dF/dlatent|^-1 = std_r^3 / (r^2 sin(phi)).
+                    # We also have scaling in phi, which comes out as in:
+                    # d/dphi sin(phi * scale) = scale * cos(phi * scale). So add the scale term = std_phi.
+                    # And we have scaling in theta, which comes in the same.
+                    log_det_jac += -1 * (
+                        3 * torch.log(self.std_r) +  # Shows up because x,y,z all scaled by std_r: all columns of det.
+                        torch.log(self.std_phi) +  # Shows up from d/dphi column of determinant
+                        torch.log(self.std_theta)  # Shows up from d/dtheta column of determinant
+                    )
+                else:
+                    r = base_r
+
+                # Transformation without scaling
+                log_det_jac += -1 * (
+                    2 * torch.log(base_r) +
+                    torch.log(torch.abs(torch.sin(phi)))  # phi = base_phi * std_phi
+                )
                 # Assign
                 z[:, atom_num, 0] = r
                 z[:, atom_num, 1] = phi
@@ -207,13 +251,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         return z, log_det_jac, x_coord, unnorm_z
 
-    def z_to_cartesian(self, z, mask_z=True):
+    def z_to_cartesian(self, z, from_flow=True):
         """
         Transform Spherical coordinates to Cartesian coordinates.
         :param z: Spherical coordinates: n_batch x n_dim
         :return: Cartesian coordinates: n_batch x n_dim, and log det Jacobian
-        :param mask_z: If True, mask out the 6 coordinates that define the reference frame. Should be set to True when
-        z is the flow output.
+        :param from_flow:  Should be set to True when z is the flow output. If True, mask out the 6 coordinates that
+        define the reference frame, and apply softplus to r.
 
         OpenMM expects specific atom types at specific indices. For water in water, this order is OHH OHH OHH etc.
         """
@@ -232,7 +276,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         # Flow output should have 6 degrees of freedom masked out: these correspond to the orientation we choose
         # for the first three atoms.
-        if mask_z:
+        if from_flow:
             mask = z.new_ones(z.shape)
             mask[:, 0, :] = 0
             mask[:, 1, 1:] = 0
@@ -260,17 +304,24 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                     )
                 base_r = atom_coords[:, 0]
                 # Fix r to lie in [0, inf].
-                r = torch.softplus(base_r) * self.std_r  # This changes the Jacobian
+                # NOTE: The order here matters! We are doing softplus first, then scaling. This will have an effect
+                #  on the Jacobian determinant form as well: std_r will show up to the first power.
+                r = F.softplus(base_r) if from_flow else base_r  # This changes the Jacobian!
+                r = r * self.std_r  # This changes the Jacobian
                 x[:, atom_num, 2] = r
                 # This is the z --> X transformation, so we need |det J_F|. J_F is the Jacobian of F: dF/dz.
                 # The flow is defined as F: Z --> X. q(z) = q(x = F(z)) |det J_F|, here J_F is the Jacobian of F: dF/dz.
                 # 1D polar transform: z = r. This has Jacobian 1. Log(1) = 0, so we're done, except for scaling.
-                #  z = r / self.std_r --> |dF/dlatent| = 1 / self.std_r
+                #  z_X = r * self.std_r --> |dF/dlatent| = self.std_r (note: F goes from Z to X).
                 # Sanity check: this is just like adding the scale log det Jacobian contribution afterwards.
                 # HOWEVER, we are now using a softplus as well, which changes the Jacobian. Our full transformation is:
-                #  r <-- softplus(base_r) * self.std_r.
-                # The Jacobian is then: |dF/dlatent| = sigmoid(base_r) * self.std_r.
-                log_det_jac += -1 * torch.log(torch.sigmoid(base_r) * self.std_r)
+                #  r <-- softplus(base_r) * std_r
+                # The Jacobian det is then: |det dF/dlatent| = sigmoid(base_r) * std_r
+                # So this Jacobian determinant is purely from scaling r:
+                log_det_jac += (
+                    torch.log(torch.sigmoid(base_r)) +  # From the d/dr column of the determinant
+                    torch.log(self.std_r)  # Scaling, because z scales as std_r.
+                )
             elif atom_num == 2:  # distance and angle: reconstruct x
                 # theta should be 0 for this atom
                 if not torch.isclose(z.new_zeros(z.shape[0], 1), atom_coords[:, 2:]).all():
@@ -284,8 +335,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # NOTE: Softplus is technically a linear function for r > 20 (= threshold). So in principle we need to
                 #  save the input value to determine the exact Jacobian, but this should not be a problem
                 #  in practice, since this should only happen rarely, and not near the end of training.
-                r = torch.softplus(base_r) * self.std_r  # This changes the Jacobian
-                phi = phi * self.std_phi  # This does not change the Jacobian (independent of phi)
+                # NOTE: The order here matters! We are doing softplus first, then scaling. This will have an effect
+                #  on the Jacobian determinant form as well: std_r will show up to the second power.
+                r = F.softplus(base_r) if from_flow else base_r  # This changes the Jacobian!
+                r = r * self.std_r  # This changes the Jacobian
+                phi = phi * self.std_phi  # This scales the Jacobian through the dz/dphi and dy/dphi terms
                 # Fix phi to lie in [0, 2pi]. We assume the flow output in [-1, 1] maps to this range. This does not
                 #  affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow.
@@ -304,18 +358,26 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # But we need to take care of scaling and the so |det dF/dz| = base_r / self.std_r = r.
                 # Sanity check: this is just like adding the scale log det Jacobian contribution afterwards.
                 # HOWEVER, we are now using a softplus as well, which changes the Jacobian. Our full transformation is:
-                # z = softplus(base_r) * self.std_r * torch.cos(phi)
-                # y = softplus(base_r) * self.std_r * torch.sin(phi)
-                # The Jacobian det is then: |det dF/dlatent| = softplus(base_r) * sigmoid(base_r) * self.std_r
-                log_det_jac += -1 * torch.log(torch.softplus(base_r) * torch.sigmoid(base_r) * self.std_r)
+                # z = softplus(base_r) * std_r * cos(base_phi * std_phi)
+                # y = softplus(base_r) * std_r * sin(base_phi * std_phi)
+                # The Jacobian det is then: |det dF/dlatent| = softplus(base_r) * sigmoid(base_r) * std_r^2 * std_phi
+                log_det_jac += (
+                    torch.log(F.softplus(base_r)) +  # Essentially the r term from the basic determinant
+                    2 * torch.log(self.std_r) +  # Scaling from both columns of the 2D determinant
+                    torch.log(self.std_phi) +  # From the d/dphi column of the determinant
+                    torch.log(torch.sigmoid(base_r))  # From the d/dr column of the determinant
+                )
             else:
                 # We always use the first molecule as the anchor for the angles.
                 base_r = atom_coords[:, 0]  # atom-to-reconstruct r
                 phi = atom_coords[:, 1]  # atom-to-reconstruct phi
                 theta = atom_coords[:, 2]  # atom-to-reconstruct dihedral
                 # Fix r to lie in [0, inf] and unnormalise.
-                r = torch.softplus(base_r) * self.std_r  # This changes the Jacobian!
-                phi = phi * self.std_phi  # This changes the Jacobian
+                # NOTE: The order here matters! We are doing softplus first, then scaling. This will have an effect
+                #  on the Jacobian determinant form as well: std_r will show up to the third power.
+                r = F.softplus(base_r) if from_flow else base_r  # This changes the Jacobian!
+                r = r * self.std_r  # This changes the Jacobian!
+                phi = phi * self.std_phi  # This changes the Jacobian by a scaling factor!
                 theta = theta * self.std_theta  # This does not change the Jacobian (independent of theta)
                 # Fix phi to lie in [0, 2pi]. This does not affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow. E.g., we should see no
@@ -337,25 +399,26 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 theta_rotation = rotation_matrix(z_axis, theta)
                 xyz = torch.einsum('bij,bj -> bi', theta_rotation, xyz)
                 x[:, atom_num, :] = xyz
-                # TODO:
                 # This is the z --> X transformation, so we need |det J_F|. J_F is the Jacobian of F: dF/dz.
                 # The flow is defined as F: Z --> X. q(z) = q(x = F(z)) |det J_F|, here J_F is the Jacobian of F: dF/dz.
                 # The Jacobian det is then: |det dF/dlatent| = softplus(base_r) * sigmoid(base_r) * self.std_r
                 # Here we have a 3D spherical transform, so the Jacobian determinant dcartesian/dlatent is r^2 sin(phi).
                 # But we need to take care of scaling and the so:
-                #  |det dF/dz| = base_r^2 / self.std_r^2 * sin(phi) = r^2 sin(phi).
+                #  |det dF/dz| = base_r^2 * self.std_r^2 * sin(phi) = r^2 sin(phi).
                 # Sanity check: this is just like adding the scale log det Jacobian contribution afterwards.
                 # HOWEVER, we are now using a softplus as well, which changes the Jacobian. Our full transformation is:
-                # z = softplus(base_r) * std_r * cos(phi)
-                # y = softplus(base_r) * std_r * sin(phi) * cos(theta)
-                # x = - softplus(base_r) * std_r * sin(phi) * sin(theta)
+                # z = softplus(base_r) * std_r * cos(base_phi * std_phi)
+                # y = softplus(base_r) * std_r * sin(base_phi * std_phi) * cos(theta * std_theta)
+                # x = - softplus(base_r) * std_r * sin(base_phi * std_phi) * sin(theta * std_theta)
                 # The Jacobian det is then:
-                #  |det dF/dlatent| = softplus(base_r)^2 * sigmoid(base_r) * self.std_r^2 * sin(phi)
+                #  |det dF/dlatent| = softplus(base_r)^2 * sigmoid(base_r) * std_r^3 * sin(phi) * std_phi
                 log_det_jac += (
-                        2 * torch.log(torch.softplus(base_r)) +
-                        torch.log(torch.sigmoid(base_r)) +
-                        2 * torch.log(self.std_r) +
-                        torch.log(torch.abs(torch.sin(phi)))
+                        2 * torch.log(F.softplus(base_r)) +  # Essentially the r^2 term from the standard determinant
+                        torch.log(torch.abs(torch.sin(phi))) +  # here: phi = base_phi * std_phi
+                        3 * torch.log(self.std_r) +  # Scaling from all three columns of the determinant
+                        torch.log(self.std_phi) +  # From the d/dphi column of the determinant
+                        torch.log(self.std_theta) +  # From the d/dtheta column of the determinant
+                        torch.log(torch.sigmoid(base_r))  # from the d/dr column of the determinant
                 )
 
         return x, log_det_jac
@@ -548,11 +611,13 @@ if __name__ == "__main__":
     )
 
     x = torch.randn(n_batch, n_atoms, 3)
-    print(x[0, :7, :])
     z, _, x_coord, unnorm_z = t.cartesian_to_z(x)
-    print(unnorm_z.view(n_batch, n_atoms, 3)[0, :7, :])
-    print(z.view(n_batch, n_atoms, 3)[0, :7, :])
-    x_recon, _ = t.z_to_cartesian(z, mask_z=True)
+    x_recon, _ = t.z_to_cartesian(z, from_flow=False)
+
+    print(x_coord[0, :7, :])
+    # print(unnorm_z.view(n_batch, n_atoms, 3)[0, :7, :])
+    # print(z.view(n_batch, n_atoms, 3)[0, :7, :])
+    print(x_recon[0, :7, :])
 
     errs = torch.abs(x_coord - x_recon)
     norm_err = torch.norm(x_coord - x_recon, dim=-1)

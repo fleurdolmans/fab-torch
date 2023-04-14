@@ -20,7 +20,7 @@ class WaterInWaterBox(TestSystem):
 
     Parameters
     ----------
-    num_solvent_molecules: how many solvent molecules to add to the box.
+    dim: dimensionality of system (num_atoms x 3).
 
     """
     def __init__(self, dim, **kwargs):
@@ -47,6 +47,8 @@ class WaterInWaterBox(TestSystem):
         # self.topology, self.system, self.positions = topology, system, positions
 
         # TODO: Other parameters? HydrogenMass, cutoffs, etc.?
+        # TODO: Add radial restraint force to keep solvation shells close
+        # TODO: Add implicit solvent to the system
         self.num_atoms_per_solute = 3   # Water
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
