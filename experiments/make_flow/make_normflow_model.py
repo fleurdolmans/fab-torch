@@ -175,6 +175,12 @@ def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
     #  And the used CircularShiftTransform: https://github.com/francois-rozet/zuko/blob/master/zuko/transforms.py
     #  Note: MonotonicRQSTransform is simply the monotonic Rational Quadratic Spline transform.
     #  What is our PeriodicShift doing exactly?
+    # Feature mixing happens through using different features as identity and transform features. This is controlled
+    #  by the mask passed to the mask=True / permute_mask=True parameter. Tail bounds are shifting as well, so at
+    #  every step the Spline still satisfies the conditions for periodicity. Note that the base distribution is not
+    #  part of the Splines: it comes in when evaluating the log_prob of the flow, or when sampling from the flow, but
+    #  not when flowing a given sample forward or backward.
+
     # Base distribution
     # Indices of periodic variables (e.g., phi, theta) are given by `periodic_inds`, these should have their owns scale
     # Original implementation uses 2 * pi / `std_of_angle` for base_scale of uniform distribution. I think it makes
@@ -205,7 +211,6 @@ def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
     # Flow layers
     layers = []
     n_layers = config["flow"]["blocks"]
-    tail_bound = 5.0 * torch.ones(dim)
 
     for i in range(n_layers):
         if flow_type == "ar-nsf":  # Autoregressive Rational Spline Normalizing Flow
