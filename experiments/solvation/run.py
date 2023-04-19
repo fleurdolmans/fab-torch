@@ -28,6 +28,7 @@ def _run(cfg: DictConfig):
             energy_max=cfg.target.energy_max,
             n_threads=cfg.target.n_threads,
             data_path=None,
+            device="cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu",
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

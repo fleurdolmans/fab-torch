@@ -36,17 +36,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             self.atom_order = system.atoms
         else:
             print("No molecular system specified: presumably testing...?")
-        self.transform_data = transform_data
+        self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
-            # TODO: The stds setup here are used in the transforms and the Jacobian. Note that our Jacobian is
-            #  different from the one in the FAB paper, because we use 3D spherical coordinates. Their scaling
-            #  Jacobian for phi and theta follows from our derivation as well, but they only use a single power
-            #  of std_r everywhere, whereas we use std_r^3 for the atoms subject to 3D transforms (and less for
-            #  the atoms subject to 0D, 1D, 2D transforms). This follows from the fact that the determinant of the
-            #  Jacobian for an n-D transform has n columns, all which contribute a scaling factor in r (since x,y,z
-            #  are all defined as r * [angular part]).
-            z, _, _, _ = self.cartesian_to_z(transform_data.view(1, -1, 3), setup=True)
+            z, _, _, _ = self.cartesian_to_z(transform_data, setup=True)
             self._setup_std_r(z)  # Rescale r (by std of z[0, ::3])
             self._setup_std_phi(z)  # Rescale phi (by 2pi)
             self._setup_std_theta(z)  # Rescale theta (by pi)
@@ -74,16 +67,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         self.register_buffer("std_r", std_r)
 
     def _setup_std_phi(self, z):
-        # TODO: We can choose this scale freely, and should probably do so to fit the expected normalising flow range
-        #  at initialisation. The initial flow is approx N(0, 1), which has approximate range [-3, 3]. We can try to
-        #  map this whole range onto [0, 2pi], by scaling by 2pi/6 = pi/3, and then modding the remaining range by 2pi
-        #  to fold any really extreme values back into the [0, 2pi] range.
-        #  The naive version here (using 2pi) as normalisation, means we will see six equivalent folds in the flow
-        #  output (as we currently map [0, 1] to [0, 2pi]). If we are not careful about this mapping, we will create
-        #  an asymmetry in probability mass assigned to specific values in the [0, 2pi] range!
-        #  The same goes for the theta angle, but since we map to [-pi/2, pi/2], we run less risk of this asymmetry;
-        #  note that we currently do a sixfold folding for theta as well.
-        # TODO: Actually, with Circular Flow, we can make sure phi and theta are periodic. Currently we have [0, pi]
+        # TODO: With Circular Flow, we can make sure phi and theta are periodic. Currently we have [0, pi]
         #  by default, which means that we can use this stddev to scale up the phi to the [0, 2pi] range. Theta we
         #  can leave untouched, except that we do have to shift it to the [-pi/2, pi/2] range. We can do this in the
         #  actual z_to_cartesian() function.
@@ -97,13 +81,15 @@ class Global3PointSphericalTransform(nf.flows.Flow):
     def cartesian_to_z(self, x, setup=False):
         """
         Transform Cartesian coordinates to internal coordinates.
-        :param x: Cartesian coordinates: n_batch x n_atoms x 3
+        :param x: Cartesian coordinates: n_batch x n_atoms . 3
         :param setup: If True, use to set up coordinate scale for r. x must then be a single frame of shape (1, ndim).
-        :return: Spherical coordinates: n_batch x n_atoms x 3, and log det Jacobian
+        :return: Spherical coordinates: n_batch x n_atoms . 3, and log det Jacobian
         """
 
         if setup:
             assert x.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
+
+        x = x.reshape(x.shape[0], -1, 3)
 
         # Setup rotation axes
         z_axis = x.new_zeros(x.shape[0], 3)
@@ -116,7 +102,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  coordinates. Note that this is equivalent to using planar angles between the solute-molecule-plane and
         #  the plane formed by the first two solute atoms and any other atom in the system.
         x = self.setup_coordinate_system(x, z_axis, y_axis)
-        x_coord = x  # For tests
+        x_coord = x.reshape(x.shape[0], -1)  # For tests
 
         solute_atom0 = x[:, 0, :]
         if not torch.isclose(x.new_zeros(x.shape[0], 3), solute_atom0).all():
@@ -243,15 +229,16 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 z[:, atom_num, 2] = ftheta
 
         # Reshape z from n_batch x n_atoms x 3 to n_batch x n_dim
-        z = z.view(z.shape[0], -1)
+        z = z.reshape(z.shape[0], -1)
+        unnorm_z = unnorm_z.reshape(unnorm_z.shape[0], -1)
 
         return z, log_det_jac, x_coord, unnorm_z
 
     def z_to_cartesian(self, z):
         """
         Transform Spherical coordinates to Cartesian coordinates.
-        :param z: Spherical coordinates: n_batch x n_dim
-        :return: Cartesian coordinates: n_batch x n_dim, and log det Jacobian
+        :param z: Spherical coordinates: n_batch x n_atoms . 3
+        :return: Cartesian coordinates: n_batch x n_atoms . 3, and log det Jacobian
         :param from_flow:  Should be set to True when z is the flow output. If True, mask out the 6 coordinates that
         define the reference frame, and apply softplus to r.
 
@@ -259,7 +246,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         """
 
         # Reshape z from n_batch x n_dim to n_batch x n_atoms x 3
-        z = z.view(z.shape[0], -1, 3)
+        z = z.reshape(z.shape[0], -1, 3)
 
         # Setup rotation axes
         z_axis = z.new_zeros(z.shape[0], 3)
@@ -385,6 +372,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                         torch.log(self.std_theta) +  # Scaling from theta: s_theta
                         torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
                 )
+
+        # Reshape to n_batch x n_atoms . 3
+        x = x.reshape(x.shape[0], -1)
 
         return x, log_det_jac
 
@@ -575,14 +565,12 @@ if __name__ == "__main__":
         t.std_r.item(), t.std_phi.item(), t.std_theta.item())
     )
 
-    x = torch.randn(n_batch, n_atoms, 3)
+    x = torch.randn(n_batch, n_atoms * 3)
     z, _, x_coord, unnorm_z = t.cartesian_to_z(x)
     x_recon, _ = t.z_to_cartesian(z)
 
-    print(x_coord[0, :7, :])
-    # print(unnorm_z.view(n_batch, n_atoms, 3)[0, :7, :])
-    # print(z.view(n_batch, n_atoms, 3)[0, :7, :])
-    print(x_recon[0, :7, :])
+    print(x_coord.reshape(x_coord.shape[0], -1, 3)[0, :7, :])
+    print(x_recon.reshape(x_recon.shape[0], -1, 3)[0, :7, :])
 
     errs = torch.abs(x_coord - x_recon)
     norm_err = torch.norm(x_coord - x_recon, dim=-1)

@@ -80,6 +80,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         energy_max=1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
         n_threads=4,
         data_path=None,
+        device="cpu",
     ):
         """
         Boltzmann distribution of H2O in H2O.
@@ -130,7 +131,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
             f"coordinates in current system ({dim})."
         )
 
-        self.coordinate_transform = Global3PointSphericalTransform(system, transform_data)
+        self.coordinate_transform = Global3PointSphericalTransform(system, transform_data.to(device))
 
         if n_threads > 1:
             self.p = bg.distributions.TransformedBoltzmannParallel(
