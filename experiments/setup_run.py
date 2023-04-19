@@ -326,8 +326,11 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
                 optimizer=optimizer, T_0=cfg.training.scheduler.restart_iter,
             )
             lr_step = 1
+        else:
+            raise NotImplementedError("The scheduler " + cfg.training.lr_scheduler.type + " is not implemented.")
     else:
         scheduler = None
+        lr_step = 1
 
     # Scheduler warmup
     lr_warmup = "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None
@@ -365,20 +368,21 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             optim_schedular=scheduler,
             save_path=save_path,
             max_gradient_norm=cfg.training.max_grad_norm,
+            lr_step=lr_step,
         )
-    elif cfg.training.prioritised_buffer is False:
-        trainer = BufferTrainer(
-            model=fab_model,
-            optimizer=optimizer,
-            logger=logger,
-            plot=plot,
-            optim_schedular=scheduler,
-            save_path=save_path,
-            buffer=buffer,
-            n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
-            clip_ais_weights_frac=cfg.training.log_w_clip_frac,
-            max_gradient_norm=cfg.training.max_grad_norm,
-        )
+    # elif cfg.training.prioritised_buffer is False:
+    #     trainer = BufferTrainer(
+    #         model=fab_model,
+    #         optimizer=optimizer,
+    #         logger=logger,
+    #         plot=plot,
+    #         optim_schedular=scheduler,
+    #         save_path=save_path,
+    #         buffer=buffer,
+    #         n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
+    #         clip_ais_weights_frac=cfg.training.log_w_clip_frac,
+    #         max_gradient_norm=cfg.training.max_grad_norm,
+    #     )
     else:
         trainer = PrioritisedBufferTrainer(
             model=fab_model,
@@ -392,6 +396,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             max_gradient_norm=cfg.training.max_grad_norm,
             w_adjust_max_clip=cfg.training.w_adjust_max_clip,
             alpha=cfg.fab.alpha,
+            lr_step=lr_step,
         )
 
     # TODO: Check that this is similar enough to ALDP for solvent system.

@@ -35,6 +35,7 @@ class PrioritisedBufferTrainer:
         w_adjust_max_clip: float = 10.0,
         w_adjust_in_buffer_after_update: bool = False,
         save_path: str = "",
+        lr_step = 1,
     ):
         self.model = model
         self.alpha = alpha
@@ -45,6 +46,7 @@ class PrioritisedBufferTrainer:
 
         self.optimizer = optimizer
         self.optim_schedular = optim_schedular
+        self.lr_step = lr_step
         self.logger = logger
         self.plot = plot
         # if no gradient clipping set max_gradient_norm to inf
@@ -171,6 +173,8 @@ class PrioritisedBufferTrainer:
                         self.optimizer.step()
                     else:
                         print(f"nan grad norm in replay step (batch size: {batch_size}")
+                    if self.optim_schedular and (i + 1) % self.lr_step == 0:
+                        self.optim_schedular.step()
                 else:
                     print(f"nan loss in replay step (batch size: {batch_size}")
 

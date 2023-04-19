@@ -14,7 +14,7 @@ flow:                                  # Properties of the flow model
   solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the paper
   use_snf: false                      # Bool, flag whether to use Stochastic Flow
   resampled_base: false               # Bool, flag whether to use resampled base distribution
-  type: circular-coup-nsf             # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
+  type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
   base:
     type: gauss
     params: null
