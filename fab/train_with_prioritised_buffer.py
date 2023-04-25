@@ -83,20 +83,20 @@ class PrioritisedBufferTrainer:
             plt.close(figure)
 
     def perform_eval(self, i, eval_batch_size, batch_size):
-        # set ais distribution to target for evaluation of ess
+        # Set ais distribution to target for evaluation of ess, freeze transition operator params.
         self.model.annealed_importance_sampler.transition_operator.set_eval_mode(True)
-        self.model.annealed_importance_sampler.p_target = True
-        # Evaluate with p as target.
-        eval_info_true_target = self.model.get_eval_info(
-            outer_batch_size=eval_batch_size, inner_batch_size=batch_size
-        )
-        # set ais distribution back to p^\alpha q^{1-\alpha}.
-        self.model.annealed_importance_sampler.p_target = False
-        # Evaluate with p^\alpha q^{1-\alpha} as target.
-        eval_info_practical_target = self.model.get_eval_info(
-            outer_batch_size=eval_batch_size, inner_batch_size=batch_size
-        )
+        eval_info_true_target = self.model.get_eval_info(outer_batch_size=eval_batch_size,
+                                                         inner_batch_size=batch_size,
+                                                         set_p_target=True)
+        # Double check the ais distribution has been set back to p^\alpha q^{1-\alpha}.
+        assert self.model.annealed_importance_sampler.p_target is False
+        assert self.model.annealed_importance_sampler.transition_operator.p_target is False
+        # Evaluation with the AIS ESS with target set as p^\alpha q^{1-\alpha}.
+        eval_info_practical_target = self.model.get_eval_info(outer_batch_size=eval_batch_size,
+                                                              inner_batch_size=batch_size,
+                                                              set_p_target=False)
         self.model.annealed_importance_sampler.transition_operator.set_eval_mode(False)
+
         eval_info = {}
         eval_info.update({key + "_p_target": val for key, val in eval_info_true_target.items()})
         eval_info.update({key + "_min_var_target": val for key, val in eval_info_practical_target.items()})
@@ -104,19 +104,17 @@ class PrioritisedBufferTrainer:
         eval_info.update(step=i)
         self.logger.write(eval_info)
 
-    def run(
-        self,
-        n_iterations: int,
-        batch_size: int,
-        eval_batch_size: Optional[int] = None,
-        n_eval: Optional[int] = None,
-        n_plot: Optional[int] = None,
-        n_checkpoints: Optional[int] = None,
-        save: bool = True,
-        tlimit: Optional[float] = None,
-        start_time: Optional[float] = None,
-        start_iter: Optional[int] = 0,
-    ) -> None:
+    def run(self,
+            n_iterations: int,
+            batch_size: int,
+            eval_batch_size: Optional[int] = None,
+            n_eval: Optional[int] = None,
+            n_plot: Optional[int] = None,
+            n_checkpoints: Optional[int] = None,
+            save: bool = True,
+            tlimit: Optional[float] = None,
+            start_time: Optional[float] = None,
+            start_iter: Optional[int] = 0) -> None:
         if save:
             pathlib.Path(self.plots_dir).mkdir(exist_ok=True)
             pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True)

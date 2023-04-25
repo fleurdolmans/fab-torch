@@ -6,24 +6,23 @@ from fab.types_ import LogProbFunc
 
 
 class HamiltonianMonteCarlo(TransitionOperator):
-    def __init__(
-        self,
-        n_ais_intermediate_distributions: int,
-        dim: int,
-        base_log_prob: LogProbFunc,
-        target_log_prob: LogProbFunc,
-        alpha: float = None,
-        p_target: bool = True,
-        epsilon: float = 1.0,
-        n_outer: int = 1,
-        L: int = 5,
-        mass_init: Union[float, torch.Tensor] = 1.0,
-        target_p_accept: float = 0.65,
-        max_grad: float = 1e3,
-        tune_period: bool = False,
-        common_epsilon_init_weight: float = 0.1,
-        eval_mode: bool = False,
-    ):
+    def __init__(self,
+                 n_ais_intermediate_distributions: int,
+                 dim: int,
+                 base_log_prob: LogProbFunc,
+                 target_log_prob: LogProbFunc,
+                 alpha: float = None,
+                 p_target: bool = False,
+                 epsilon: float = 1.0,
+                 n_outer: int = 1,
+                 L: int = 5,
+                 mass_init: Union[float, torch.Tensor] = 1.0,
+                 target_p_accept: float = 0.65,
+                 max_grad: float = 1e3,
+                 tune_period: bool = False,
+                 common_epsilon_init_weight: float = 0.1,
+                 eval_mode: bool = False
+                 ):
         """
         Step tuning with p_accept if used.
         """
