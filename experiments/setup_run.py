@@ -313,17 +313,20 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     if "lr_scheduler" in cfg.training:
         if cfg.training.lr_scheduler.type == "exponential":
             scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer=optimizer, gamma=cfg.training.scheduler.rate_decay,
+                optimizer=optimizer,
+                gamma=cfg.training.scheduler.rate_decay,
             )
             lr_step = cfg.training.scheduler.decay_iter
         elif cfg.training.lr_scheduler.type == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer=optimizer, T_max=cfg.training.n_iterations,
+                optimizer=optimizer,
+                T_max=cfg.training.n_iterations,
             )
             lr_step = 1
         elif cfg.training.lr_scheduler.type == "cosine_restart":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                optimizer=optimizer, T_0=cfg.training.scheduler.restart_iter,
+                optimizer=optimizer,
+                T_0=cfg.training.scheduler.restart_iter,
             )
             lr_step = 1
         else:
@@ -360,16 +363,17 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     # Create trainer
     if cfg.training.use_buffer is False:
-        trainer = Trainer(
-            model=fab_model,
-            optimizer=optimizer,
-            logger=logger,
-            plot=plot,
-            optim_schedular=scheduler,
-            save_path=save_path,
-            max_gradient_norm=cfg.training.max_grad_norm,
-            lr_step=lr_step,
-        )
+        raise NotImplementedError("Bufferless doesn't have all changes: 1) no warmup scheduler, 2) ...")
+        # trainer = Trainer(
+        #     model=fab_model,
+        #     optimizer=optimizer,
+        #     logger=logger,
+        #     plot=plot,
+        #     optim_schedular=scheduler,
+        #     save_path=save_path,
+        #     max_gradient_norm=cfg.training.max_grad_norm,
+        #     lr_step=lr_step,
+        # )
     # elif cfg.training.prioritised_buffer is False:
     #     trainer = BufferTrainer(
     #         model=fab_model,
@@ -397,6 +401,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             w_adjust_max_clip=cfg.training.w_adjust_max_clip,
             alpha=cfg.fab.alpha,
             lr_step=lr_step,
+            warmup_scheduler=lr_warmup,
         )
 
     # TODO: Check that this is similar enough to ALDP for solvent system.

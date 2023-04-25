@@ -224,9 +224,6 @@ class AldpBoltzmann(nn.Module, TargetDistribution):
         return {}
 
 
-
-
-
 # ------------------------------------
 # ------------------------------------
 # ------------------------------------
@@ -240,9 +237,6 @@ class AldpBoltzmann(nn.Module, TargetDistribution):
 # ------------------------------------
 
 
-
-
-
 class CoordinateTransform(nf.flows.Flow):
     """
     Coordinate transform for Boltzmann generators, see
@@ -252,10 +246,19 @@ class CoordinateTransform(nf.flows.Flow):
     Meaning of forward and backward pass are switched to meet
     convention of normflows package
     """
-    def __init__(self, data, n_dim, z_matrix, backbone_indices,
-                 mode='mixed', ind_circ_dih=[], shift_dih=False,
-                 shift_dih_params={'hist_bins': 100},
-                 default_std={'bond': 0.005, 'angle': 0.15, 'dih': 0.2}):
+
+    def __init__(
+        self,
+        data,
+        n_dim,
+        z_matrix,
+        backbone_indices,
+        mode="mixed",
+        ind_circ_dih=[],
+        shift_dih=False,
+        shift_dih_params={"hist_bins": 100},
+        default_std={"bond": 0.005, "angle": 0.15, "dih": 0.2},
+    ):
         """
         Constructor
         :param data: Data used to initialize transformation
@@ -270,12 +273,12 @@ class CoordinateTransform(nf.flows.Flow):
         #     self.transform = MixedTransform(n_dim, backbone_indices, z_matrix, data,
         #                                           ind_circ_dih, shift_dih, shift_dih_params,
         #                                           default_std)
-        if mode == 'internal':
-            self.transform = CompleteInternalCoordinateTransform(n_dim, z_matrix,
-                                                backbone_indices, data, ind_circ_dih,
-                                                shift_dih, shift_dih_params, default_std)
+        if mode == "internal":
+            self.transform = CompleteInternalCoordinateTransform(
+                n_dim, z_matrix, backbone_indices, data, ind_circ_dih, shift_dih, shift_dih_params, default_std
+            )
         else:
-            raise NotImplementedError('This mode is not implemented.')
+            raise NotImplementedError("This mode is not implemented.")
 
     def forward(self, z):
         z_, log_det = self.transform.inverse(z)  # Z --> X
@@ -290,6 +293,7 @@ class Scaling(nf.flows.Flow):
     """
     Applys a scaling factor
     """
+
     def __init__(self, mean, log_scale):
         """
         Constructor
@@ -297,18 +301,18 @@ class Scaling(nf.flows.Flow):
         :param log_scale: The log of the scale factor to apply
         """
         super().__init__()
-        self.register_buffer('mean', mean)
-        self.register_parameter('log_scale', torch.nn.Parameter(log_scale))
+        self.register_buffer("mean", mean)
+        self.register_parameter("log_scale", torch.nn.Parameter(log_scale))
 
     def forward(self, z):
         scale = torch.exp(self.log_scale)
-        z_ = (z-self.mean) * scale + self.mean
+        z_ = (z - self.mean) * scale + self.mean
         logdet = torch.log(scale) * self.mean.shape[0]
         return z_, logdet
 
     def inverse(self, z):
         scale = torch.exp(self.log_scale)
-        z_ = (z-self.mean) / scale + self.mean
+        z_ = (z - self.mean) / scale + self.mean
         logdet = -torch.log(scale) * self.mean.shape[0]
         return z_, logdet
 
@@ -317,13 +321,14 @@ class AddNoise(nf.flows.Flow):
     """
     Adds a small amount of Gaussian noise
     """
+
     def __init__(self, log_std):
         """
         Constructor
         :param log_std: The log standard deviation of the noise
         """
         super().__init__()
-        self.register_parameter('log_std', torch.nn.Parameter(log_std))
+        self.register_parameter("log_std", torch.nn.Parameter(log_std))
 
     def forward(self, z):
         eps = torch.randn_like(z)
@@ -407,8 +412,7 @@ def reconstruct_cart(cart, ref_atoms, bonds, angles, dihs):
 
     # Compute the log jacobian determinant.
     jac = torch.sum(
-        2 * torch.log(torch.abs(bonds.squeeze(2)))
-        + torch.log(torch.abs(torch.sin(angles.squeeze(2)))),
+        2 * torch.log(torch.abs(bonds.squeeze(2))) + torch.log(torch.abs(torch.sin(angles.squeeze(2)))),
         dim=1,
     )
 
@@ -438,10 +442,17 @@ def reconstruct_cart(cart, ref_atoms, bonds, angles, dihs):
 
 
 class InternalCoordinateTransform(Transform):
-    def __init__(self, dims, z_indices=None, cart_indices=None, data=None,
-                 ind_circ_dih=[], shift_dih=False,
-                 shift_dih_params={'hist_bins': 100},
-                 default_std={'bond': 0.005, 'angle': 0.15, 'dih': 0.2}):
+    def __init__(
+        self,
+        dims,
+        z_indices=None,
+        cart_indices=None,
+        data=None,
+        ind_circ_dih=[],
+        shift_dih=False,
+        shift_dih_params={"hist_bins": 100},
+        default_std={"bond": 0.005, "angle": 0.15, "dih": 0.2},
+    ):
         super().__init__()
         self.dims = dims
         with torch.no_grad():
@@ -472,22 +483,20 @@ class InternalCoordinateTransform(Transform):
             self._setup_std_dih(transformed)
             transformed[:, self.dih_indices] /= self.std_dih
             if shift_dih:
-                val = torch.linspace(-math.pi, math.pi,
-                                     shift_dih_params['hist_bins'])
+                val = torch.linspace(-math.pi, math.pi, shift_dih_params["hist_bins"])
                 for i in self.ind_circ_dih:
                     dih = transformed[:, self.dih_indices[i]]
                     dih = dih * self.std_dih[i] + self.mean_dih[i]
                     dih = (dih + math.pi) % (2 * math.pi) - math.pi
-                    hist = torch.histc(dih, bins=shift_dih_params['hist_bins'],
-                                       min=-math.pi, max=math.pi)
+                    hist = torch.histc(dih, bins=shift_dih_params["hist_bins"], min=-math.pi, max=math.pi)
                     self.mean_dih[i] = val[torch.argmin(hist)] + math.pi
                     dih = (dih - self.mean_dih[i]) / self.std_dih[i]
                     dih = (dih + math.pi) % (2 * math.pi) - math.pi
                     transformed[:, self.dih_indices[i]] = dih
             scale_jac = -(
-                    torch.sum(torch.log(self.std_bonds))
-                    + torch.sum(torch.log(self.std_angles))
-                    + torch.sum(torch.log(self.std_dih))
+                torch.sum(torch.log(self.std_bonds))
+                + torch.sum(torch.log(self.std_angles))
+                + torch.sum(torch.log(self.std_dih))
             )
             self.register_buffer("scale_jac", scale_jac)
 
@@ -515,9 +524,7 @@ class InternalCoordinateTransform(Transform):
         angles = calc_angles(inds2, inds1, inds4, coords=x)
         dihedrals = calc_dihedrals(inds3, inds2, inds1, inds4, coords=x)
 
-        jac = -torch.sum(
-            2 * torch.log(bonds) + torch.log(torch.abs(torch.sin(angles))), dim=1
-        )
+        jac = -torch.sum(2 * torch.log(bonds) + torch.log(torch.abs(torch.sin(angles))), dim=1)
 
         # Replace the cartesian coordinates with internal coordinates.
         x[:, inds4[:, 0]] = bonds
@@ -547,24 +554,21 @@ class InternalCoordinateTransform(Transform):
             # Get all of the bonds by retrieving the appropriate columns and
             # un-normalizing.
             bonds = (
-                    x[:, 3 * atoms_to_build]
-                    * self.std_bonds[self.atom_to_stats[atoms_to_build]]
-                    + self.mean_bonds[self.atom_to_stats[atoms_to_build]]
+                x[:, 3 * atoms_to_build] * self.std_bonds[self.atom_to_stats[atoms_to_build]]
+                + self.mean_bonds[self.atom_to_stats[atoms_to_build]]
             )
 
             # Get all of the angles by retrieving the appropriate columns and
             # un-normalizing.
             angles = (
-                    x[:, 3 * atoms_to_build + 1]
-                    * self.std_angles[self.atom_to_stats[atoms_to_build]]
-                    + self.mean_angles[self.atom_to_stats[atoms_to_build]]
+                x[:, 3 * atoms_to_build + 1] * self.std_angles[self.atom_to_stats[atoms_to_build]]
+                + self.mean_angles[self.atom_to_stats[atoms_to_build]]
             )
             # Get all of the dihedrals by retrieving the appropriate columns and
             # un-normalizing.
             dihs = (
-                    x[:, 3 * atoms_to_build + 2]
-                    * self.std_dih[self.atom_to_stats[atoms_to_build]]
-                    + self.mean_dih[self.atom_to_stats[atoms_to_build]]
+                x[:, 3 * atoms_to_build + 2] * self.std_dih[self.atom_to_stats[atoms_to_build]]
+                + self.mean_dih[self.atom_to_stats[atoms_to_build]]
             )
 
             # Compute angle loss
@@ -599,8 +603,7 @@ class InternalCoordinateTransform(Transform):
         if x.shape[0] > 1:
             std_bonds = torch.std(x[:, self.bond_indices], dim=0)
         else:
-            std_bonds = torch.ones_like(self.mean_bonds) \
-                        * self.default_std['bond']
+            std_bonds = torch.ones_like(self.mean_bonds) * self.default_std["bond"]
         self.register_buffer("std_bonds", std_bonds)
 
     def _setup_mean_angles(self, x):
@@ -611,8 +614,7 @@ class InternalCoordinateTransform(Transform):
         if x.shape[0] > 1:
             std_angles = torch.std(x[:, self.angle_indices], dim=0)
         else:
-            std_angles = torch.ones_like(self.mean_angles) \
-                         * self.default_std['angle']
+            std_angles = torch.ones_like(self.mean_angles) * self.default_std["angle"]
         self.register_buffer("std_angles", std_angles)
 
     def _setup_mean_dih(self, x):
@@ -630,16 +632,13 @@ class InternalCoordinateTransform(Transform):
         if x.shape[0] > 1:
             std_dih = torch.std(x[:, self.dih_indices], dim=0)
         else:
-            std_dih = torch.ones_like(self.mean_dih) \
-                      * self.default_std['dih']
-            std_dih[self.ind_circ_dih] = 1.
+            std_dih = torch.ones_like(self.mean_dih) * self.default_std["dih"]
+            std_dih[self.ind_circ_dih] = 1.0
         self.register_buffer("std_dih", std_dih)
 
     def _validate_data(self, data):
         if data is None:
-            raise ValueError(
-                "InternalCoordinateTransform must be supplied with training_data."
-            )
+            raise ValueError("InternalCoordinateTransform must be supplied with training_data.")
 
         if len(data.shape) != 2:
             raise ValueError("training_data must be n_samples x n_dim array")
@@ -647,9 +646,7 @@ class InternalCoordinateTransform(Transform):
         n_dim = data.shape[1]
 
         if n_dim != self.dims:
-            raise ValueError(
-                f"training_data must have {self.dims} dimensions, not {n_dim}."
-            )
+            raise ValueError(f"training_data must have {self.dims} dimensions, not {n_dim}.")
 
     def _setup_indices(self, z_indices, cart_indices):
         n_atoms = self.dims // 3
@@ -661,9 +658,7 @@ class InternalCoordinateTransform(Transform):
         self.register_buffer("inds_for_atom", ind_for_atom)
 
         sorted_z_indices = topological_sort(z_indices)
-        sorted_z_indices = [
-            [item[0], item[1][0], item[1][1], item[1][2]] for item in sorted_z_indices
-        ]
+        sorted_z_indices = [[item[0], item[1][0], item[1][1], item[1][2]] for item in sorted_z_indices]
         rev_z_indices = list(reversed(sorted_z_indices))
 
         mod = [item[0] for item in sorted_z_indices]
@@ -788,15 +783,15 @@ def topological_sort(graph_unsorted):
 
 class CompleteInternalCoordinateTransform(nn.Module):
     def __init__(
-            self,
-            n_dim,
-            z_mat,
-            cartesian_indices,
-            data,
-            ind_circ_dih=[],
-            shift_dih=False,
-            shift_dih_params={'hist_bins': 100},
-            default_std={'bond': 0.005, 'angle': 0.15, 'dih': 0.2}
+        self,
+        n_dim,
+        z_mat,
+        cartesian_indices,
+        data,
+        ind_circ_dih=[],
+        shift_dih=False,
+        shift_dih_params={"hist_bins": 100},
+        default_std={"bond": 0.005, "angle": 0.15, "dih": 0.2},
     ):
         super().__init__()
         # cartesian indices are the atom indices of the atoms that are not
@@ -808,8 +803,7 @@ class CompleteInternalCoordinateTransform(nn.Module):
 
         # Create our internal coordinate transform
         self.ic_transform = InternalCoordinateTransform(
-            n_dim, z_mat, cartesian_indices, data, ind_circ_dih,
-            shift_dih, shift_dih_params, default_std
+            n_dim, z_mat, cartesian_indices, data, ind_circ_dih, shift_dih, shift_dih_params, default_std
         )
 
         # permute puts the cartesian coords first then the internal ones
@@ -828,7 +822,7 @@ class CompleteInternalCoordinateTransform(nn.Module):
         self.register_buffer("permute_inv", permute_inv)
 
         data = data[:, self.permute]
-        b1, b2, angle = self._convert_last_internal(data[:, :3 * self.len_cart_inds])
+        b1, b2, angle = self._convert_last_internal(data[:, : 3 * self.len_cart_inds])
         self.register_buffer("mean_b1", torch.mean(b1))
         self.register_buffer("mean_b2", torch.mean(b2))
         self.register_buffer("mean_angle", torch.mean(angle))
@@ -837,9 +831,9 @@ class CompleteInternalCoordinateTransform(nn.Module):
             self.register_buffer("std_b2", torch.std(b2))
             self.register_buffer("std_angle", torch.std(angle))
         else:
-            self.register_buffer("std_b1", b1.new_ones([]) * default_std['bond'])
-            self.register_buffer("std_b2", b2.new_ones([]) * default_std['bond'])
-            self.register_buffer("std_angle", angle.new_ones([]) * default_std['angle'])
+            self.register_buffer("std_b1", b1.new_ones([]) * default_std["bond"])
+            self.register_buffer("std_b2", b2.new_ones([]) * default_std["bond"])
+            self.register_buffer("std_angle", angle.new_ones([]) * default_std["angle"])
         scale_jac = -(torch.log(self.std_b1) + torch.log(self.std_b2) + torch.log(self.std_angle))
         self.register_buffer("scale_jac", scale_jac)
 
@@ -855,10 +849,10 @@ class CompleteInternalCoordinateTransform(nn.Module):
         x = x[:, self.permute]
 
         # Split off the PCA coordinates and internal coordinates
-        int_coords = x[:, 3 * self.len_cart_inds:]
+        int_coords = x[:, 3 * self.len_cart_inds :]
 
         # Compute last internal coordinates
-        b1, b2, angle = self._convert_last_internal(x[:, :3 * self.len_cart_inds])
+        b1, b2, angle = self._convert_last_internal(x[:, : 3 * self.len_cart_inds])
         jac = jac - torch.log(b2)
         # Normalize
         b1 -= self.mean_b1
@@ -880,7 +874,7 @@ class CompleteInternalCoordinateTransform(nn.Module):
 
         # Separate the internal coordinates
         b1, b2, angle = x[:, 0], x[:, 1], x[:, 2]
-        int_coords = x[:, 3 * self.len_cart_inds - 6:]
+        int_coords = x[:, 3 * self.len_cart_inds - 6 :]
 
         # Reconstruct first three atoms
         b1 = b1 * self.std_b1 + self.mean_b1
@@ -922,6 +916,7 @@ class Boltzmann(nf.distributions.PriorDistribution):
     """
     Boltzmann distribution using OpenMM to get energy and forces
     """
+
     def __init__(self, sim_context, temperature, energy_cut, energy_max):
         """
         Constructor
@@ -940,8 +935,8 @@ class Boltzmann(nf.distributions.PriorDistribution):
         self.regularize_energy = regularize_energy
 
         self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.sim_context, temperature)[:, 0],
-            self.energy_cut, self.energy_max)
+            self.openmm_energy(pos, self.sim_context, temperature)[:, 0], self.energy_cut, self.energy_max
+        )
 
     def log_prob(self, z):
         return -self.norm_energy(z)
@@ -952,6 +947,7 @@ class TransformedBoltzmann(nn.Module):
     Boltzmann distribution with respect to transformed variables,
     uses OpenMM to get energy and forces
     """
+
     def __init__(self, sim_context, temperature, energy_cut, energy_max, transform):
         """
         Constructor
@@ -974,8 +970,8 @@ class TransformedBoltzmann(nn.Module):
         self.regularize_energy = regularize_energy
 
         self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.sim_context, temperature)[:, 0],
-            self.energy_cut, self.energy_max)
+            self.openmm_energy(pos, self.sim_context, temperature)[:, 0], self.energy_cut, self.energy_max
+        )
 
         self.transform = transform
 
@@ -989,6 +985,7 @@ class BoltzmannParallel(nf.distributions.PriorDistribution):
     Boltzmann distribution using OpenMM to get energy and forces and processes the
     batch of states in parallel
     """
+
     def __init__(self, system, temperature, energy_cut, energy_max, n_threads=None):
         """
         Constructor
@@ -1007,16 +1004,15 @@ class BoltzmannParallel(nf.distributions.PriorDistribution):
         self.n_threads = mp.cpu_count() if n_threads is None else n_threads
 
         # Create pool for parallel processing
-        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init,
-                            (system, temperature))
+        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init, (system, temperature))
 
         # Set up functions
         self.openmm_energy = OpenMMEnergyInterfaceParallel.apply
         self.regularize_energy = regularize_energy
 
         self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.pool)[:, 0],
-            self.energy_cut, self.energy_max)
+            self.openmm_energy(pos, self.pool)[:, 0], self.energy_cut, self.energy_max
+        )
 
     def log_prob(self, z):
         return -self.norm_energy(z)
@@ -1028,8 +1024,8 @@ class TransformedBoltzmannParallel(nn.Module):
     uses OpenMM to get energy and forces and processes the batch of
     states in parallel
     """
-    def __init__(self, system, temperature, energy_cut, energy_max, transform,
-                 n_threads=None):
+
+    def __init__(self, system, temperature, energy_cut, energy_max, transform, n_threads=None):
         """
         Constructor
         :param system: Molecular system
@@ -1049,16 +1045,15 @@ class TransformedBoltzmannParallel(nn.Module):
         self.n_threads = mp.cpu_count() if n_threads is None else n_threads
 
         # Create pool for parallel processing
-        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init,
-                            (system, temperature))
+        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init, (system, temperature))
 
         # Set up functions
         self.openmm_energy = OpenMMEnergyInterfaceParallel.apply
         self.regularize_energy = regularize_energy
 
         self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.pool)[:, 0],
-            self.energy_cut, self.energy_max)
+            self.openmm_energy(pos, self.pool)[:, 0], self.energy_cut, self.energy_max
+        )
 
         self.transform = transform
 
@@ -1094,18 +1089,10 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 state = openmm_context.getState(getForces=True, getEnergy=True)
 
                 # get energy
-                energies[i, 0] = (
-                    state.getPotentialEnergy().value_in_unit(
-                        unit.kilojoule / unit.mole) / kBT
-                )
+                energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
 
                 # get forces
-                f = (
-                    state.getForces(asNumpy=True).value_in_unit(
-                        unit.kilojoule / unit.mole / unit.nanometer
-                    )
-                    / kBT
-                )
+                f = state.getForces(asNumpy=True).value_in_unit(unit.kilojoule / unit.mole / unit.nanometer) / kBT
                 forces[i, :] = torch.from_numpy(-f)
         forces = forces.view(n_batch, n_dim * 3)
         # Save the forces for the backward step, uploading to the gpu if needed
@@ -1114,7 +1101,7 @@ class OpenMMEnergyInterface(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        forces, = ctx.saved_tensors
+        (forces,) = ctx.saved_tensors
         return forces * grad_output, None, None
 
 
@@ -1122,6 +1109,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
     """
     Uses parallel processing to get the energies of the batch of states
     """
+
     @staticmethod
     def var_init(sys, temp):
         """
@@ -1130,11 +1118,12 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
         """
         global temperature, openmm_context
         temperature = temp
-        sim = app.Simulation(sys.topology, sys.system,
-                             mm.LangevinIntegrator(temp * unit.kelvin,
-                                                   1.0 / unit.picosecond,
-                                                   1.0 * unit.femtosecond),
-                             platform=mm.Platform.getPlatformByName('Reference'))
+        sim = app.Simulation(
+            sys.topology,
+            sys.system,
+            mm.LangevinIntegrator(temp * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
+            platform=mm.Platform.getPlatformByName("Reference"),
+        )
         openmm_context = sim.context
 
     @staticmethod
@@ -1154,12 +1143,10 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             state = openmm_context.getState(getForces=True, getEnergy=True)
 
             # get energy
-            energy = state.getPotentialEnergy().value_in_unit(
-                unit.kilojoule / unit.mole) / kBT
+            energy = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
 
             # get forces
-            force = -state.getForces(asNumpy=True).value_in_unit(
-                unit.kilojoule / unit.mole / unit.nanometer) / kBT
+            force = -state.getForces(asNumpy=True).value_in_unit(unit.kilojoule / unit.mole / unit.nanometer) / kBT
         force = force.reshape(n_dim * 3)
         return energy, force
 
@@ -1167,8 +1154,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
     def forward(ctx, input, pool):
         device = input.device
         input_np = input.cpu().detach().numpy()
-        energies_out, forces_out = zip(*pool.map(
-            OpenMMEnergyInterfaceParallel.batch_proc, input_np))
+        energies_out, forces_out = zip(*pool.map(OpenMMEnergyInterfaceParallel.batch_proc, input_np))
         energies_np = np.array(energies_out)[:, None]
         forces_np = np.array(forces_out)
         energies = torch.from_numpy(energies_np)
@@ -1181,7 +1167,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        forces, = ctx.saved_tensors
+        (forces,) = ctx.saved_tensors
         return forces * grad_output, None, None
 
 
@@ -1194,9 +1180,6 @@ def regularize_energy(energy, energy_cut, energy_max):
     # Cap the energy at energy_max
     energy = torch.where(energy < energy_max, energy, energy_max)
     # Make it logarithmic above energy cut and linear below
-    energy = torch.where(
-        energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut
-    )
-    energy = torch.where(energy_finite, energy,
-                         torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
+    energy = torch.where(energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut)
+    energy = torch.where(energy_finite, energy, torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
     return energy

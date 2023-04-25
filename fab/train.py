@@ -25,7 +25,7 @@ class Trainer:
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
         save_path: str = "",
-        lr_step = 1,
+        lr_step=1,
     ):
         self.model = model
         self.optimizer = optimizer

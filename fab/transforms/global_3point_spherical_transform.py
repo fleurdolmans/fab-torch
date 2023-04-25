@@ -25,6 +25,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
     the z-axis phi in [0, 2pi], and angle with the yz-plane theta in [-pi/2, pi/2]. The transformation is invertible
     and differentiable.
     """
+
     def __init__(self, system=None, transform_data=None):
         """
         Constructor
@@ -158,9 +159,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # Assign
                 z[:, atom_num, 0] = fr
                 # Contribution of inverse softplus: reciprocal of sigmoid.
-                log_det_jac += -1 * (
-                    torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
-                )
+                log_det_jac += -1 * (torch.log(torch.sigmoid(fr_scaled)))  # sigmoid(f_r * s_r)
 
             elif atom_num == 2:  # r and phi
                 r = torch.norm(atom_coords, dim=-1)
@@ -173,17 +172,16 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                     fr = fr_scaled / self.std_r
                     fphi = phi / self.std_phi
                     # Log det Jacobian contribution of scaling.
-                    log_det_jac += -1 * (
-                        torch.log(self.std_r) +
-                        torch.log(self.std_phi)
-                    )
+                    log_det_jac += -1 * (torch.log(self.std_r) + torch.log(self.std_phi))
                 else:
                     fr = fr_scaled
                     fphi = phi
                 # Transformation without scaling
                 log_det_jac += -1 * (
-                    torch.log(r) +  # r = softplus(f_r * s_r) = norm(x, y, z)
-                    torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
+                    torch.log(r)
+                    + torch.log(  # r = softplus(f_r * s_r) = norm(x, y, z)
+                        torch.sigmoid(fr_scaled)
+                    )  # sigmoid(f_r * s_r)
                 )
                 # Assign
                 z[:, atom_num, 0] = fr
@@ -207,11 +205,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                     fphi = phi / self.std_phi
                     ftheta = theta / self.std_theta
                     # Log det Jacobian contribution of scaling.
-                    log_det_jac += -1 * (
-                        torch.log(self.std_r) +
-                        torch.log(self.std_phi) +
-                        torch.log(self.std_theta)
-                    )
+                    log_det_jac += -1 * (torch.log(self.std_r) + torch.log(self.std_phi) + torch.log(self.std_theta))
                 else:
                     fr = fr_scaled
                     fphi = phi
@@ -219,9 +213,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
                 # Transformation without scaling
                 log_det_jac += -1 * (
-                    2 * torch.log(r) +  # r = softplus(f_r * s_r) = norm(x, y, z)
-                    torch.log(torch.abs(torch.sin(phi))) +  # phi = f_phi * s_phi
-                    torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
+                    2 * torch.log(r)
+                    + torch.log(torch.abs(torch.sin(phi)))  # r = softplus(f_r * s_r) = norm(x, y, z)
+                    + torch.log(torch.sigmoid(fr_scaled))  # phi = f_phi * s_phi  # sigmoid(f_r * s_r)
                 )
                 # Assign
                 z[:, atom_num, 0] = fr
@@ -289,10 +283,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 r = F.softplus(fr_scaled)  # Fix r to lie in [0, inf]: This is f_r * s_r
                 x[:, atom_num, 2] = r
                 # Jacobian determinant contribution
-                log_det_jac += (
-                    torch.log(torch.sigmoid(fr_scaled)) +  # sigmoid(f_r * s_r)
-                    torch.log(self.std_r)  # s_r
-                )
+                log_det_jac += torch.log(torch.sigmoid(fr_scaled)) + torch.log(self.std_r)  # sigmoid(f_r * s_r)  # s_r
             elif atom_num == 2:  # distance and angle: reconstruct x
                 # theta should be 0 for this atom
                 if not torch.isclose(z.new_zeros(z.shape[0], 1), atom_coords[:, 2:]).all():
@@ -316,7 +307,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 #  alignment axis. Now we rotate away from the axis, so we take the negative angle.
                 #  Alternatively, we can take the positive angle and the normal with x < 0.
                 phi_rotation = rotation_matrix(x_axis, -phi)
-                xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis * r.unsqueeze(-1))  # Apply rotation to z-axis
+                xyz = torch.einsum("bij,bj -> bi", phi_rotation, z_axis * r.unsqueeze(-1))  # Apply rotation to z-axis
                 # x coordinate should be 0 for this atom
                 if not torch.isclose(z.new_zeros(z.shape[0], 1), xyz[:, :1]).all():
                     raise ValueError(
@@ -327,10 +318,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 x[:, atom_num, :] = xyz
                 # Jacobian determinant contribution
                 log_det_jac += (
-                    torch.log(r) +  # r = softplus(f_r * s_r) = norm(x, y, z)
-                    torch.log(self.std_r) +  # Scaling contribution for r: s_r
-                    torch.log(self.std_phi) +  # Scaling contribution for phi: s_phi
-                    torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
+                    torch.log(r)
+                    + torch.log(self.std_r)  # r = softplus(f_r * s_r) = norm(x, y, z)
+                    + torch.log(self.std_phi)  # Scaling contribution for r: s_r
+                    + torch.log(torch.sigmoid(fr_scaled))  # Scaling contribution for phi: s_phi  # sigmoid(f_r * s_r)
                 )
             else:
                 # We always use the first molecule as the anchor for the angles.
@@ -358,19 +349,19 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 #  computing theta now depends on this convention. In any case, this is equivalent to rotating by
                 #  phi around the negative x-axis.
                 phi_rotation = rotation_matrix(x_axis, -phi)
-                xyz = torch.einsum('bij,bj -> bi', phi_rotation, z_axis * r.unsqueeze(-1))
+                xyz = torch.einsum("bij,bj -> bi", phi_rotation, z_axis * r.unsqueeze(-1))
                 # Step 2: rotate this vector around the positive z-axis (by convention) by theta (NOT -theta).
                 theta_rotation = rotation_matrix(z_axis, theta)
-                xyz = torch.einsum('bij,bj -> bi', theta_rotation, xyz)
+                xyz = torch.einsum("bij,bj -> bi", theta_rotation, xyz)
                 x[:, atom_num, :] = xyz
                 # Jacobian determinant contribution
                 log_det_jac += (
-                        2 * torch.log(r) +  # r^2: r = softplus(f_r * s_r) = norm(x, y, z)
-                        torch.log(torch.abs(torch.sin(phi))) +  # here: phi = f_phi * s_phi
-                        torch.log(self.std_r) +  # Scaling from r: s_r
-                        torch.log(self.std_phi) +  # Scaling from phi: s_phi
-                        torch.log(self.std_theta) +  # Scaling from theta: s_theta
-                        torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
+                    2 * torch.log(r)
+                    + torch.log(torch.abs(torch.sin(phi)))  # r^2: r = softplus(f_r * s_r) = norm(x, y, z)
+                    + torch.log(self.std_r)  # here: phi = f_phi * s_phi
+                    + torch.log(self.std_phi)  # Scaling from r: s_r
+                    + torch.log(self.std_theta)  # Scaling from phi: s_phi
+                    + torch.log(torch.sigmoid(fr_scaled))  # Scaling from theta: s_theta  # sigmoid(f_r * s_r)
                 )
 
         # Reshape to n_batch x n_atoms . 3
@@ -400,7 +391,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # The rotation should happen along the normal given by the z-O-H plane (for water).
         phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1)
         phi_rotation = rotation_matrix(phi_axis, phi_rad)
-        x_phi = torch.einsum('bij,bnj -> bni', phi_rotation, x_centered)
+        x_phi = torch.einsum("bij,bnj -> bni", phi_rotation, x_centered)
 
         # Now define theta w.r.t. the yz-plane. THis means we rotate solute_atom2 to align with the yz-plane.
         # We want to rotate around the z-axis, so that the first H atom stays fixed in place.
@@ -413,25 +404,25 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         xy_proj = solute_atom2 - unit_vector(z_axis) * torch.sum(z_axis * solute_atom2, dim=1, keepdim=True)
         # Angle between atom_to_align and projection, through origin (solute_atom0)
         if not torch.isclose(solute_atom0, torch.zeros_like(solute_atom0)).all():
-            raise ValueError('Solute atom0 is not at the origin.')
+            raise ValueError("Solute atom0 is not at the origin.")
         theta_rad, _ = get_angle_and_normal(y_axis, solute_atom0, xy_proj, to_yz_plane=True)
         # We rotate around the alignment axis (z-axis) to put the molecule into the yz-plane
         theta_rotation = rotation_matrix(z_axis, theta_rad)
         # x rotated into the yz plane
-        x = torch.einsum('bij,bnj -> bni', theta_rotation, x_phi)
+        x = torch.einsum("bij,bnj -> bni", theta_rotation, x_phi)
 
         return x
 
 
 def unit_vector(vector):
-    """"
+    """ "
     Returns the unit vector of the vector.
     """
     return vector / torch.norm(vector, dim=-1, keepdim=True)
 
 
 def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False):
-    """"
+    """ "
     Returns the angle between three atoms in radian, and the axis of rotation.
 
     atom2 is the atom located at vertex where we want to know the angle.
@@ -547,11 +538,14 @@ def rotation_matrix(rotation_axis, rotation_rad):
     c = xyz_rot[:, 1]
     d = xyz_rot[:, 2]
 
-    rot_matrix = torch.stack([
-        torch.stack([a * a + b * b - c * c - d * d, 2 * (b * c - a * d), 2 * (b * d + a * c)], dim=1),
-        torch.stack([2 * (b * c + a * d), a * a + c * c - b * b - d * d, 2 * (c * d - a * b)], dim=1),
-        torch.stack([2 * (b * d - a * c), 2 * (c * d + a * b), a * a + d * d - b * b - c * c], dim=1)
-    ], dim=2)
+    rot_matrix = torch.stack(
+        [
+            torch.stack([a * a + b * b - c * c - d * d, 2 * (b * c - a * d), 2 * (b * d + a * c)], dim=1),
+            torch.stack([2 * (b * c + a * d), a * a + c * c - b * b - d * d, 2 * (c * d - a * b)], dim=1),
+            torch.stack([2 * (b * d - a * c), 2 * (c * d + a * b), a * a + d * d - b * b - c * c], dim=1),
+        ],
+        dim=2,
+    )
 
     return rot_matrix
 
@@ -561,8 +555,10 @@ if __name__ == "__main__":
     n_atoms = 27
     t_x = torch.randn(1, n_atoms * 3)
     t = Global3PointSphericalTransform(transform_data=t_x)
-    print("Scaling params for (r, phi, theta): ({:.3f}, {:.3f}, {:.3f})\n".format(
-        t.std_r.item(), t.std_phi.item(), t.std_theta.item())
+    print(
+        "Scaling params for (r, phi, theta): ({:.3f}, {:.3f}, {:.3f})\n".format(
+            t.std_r.item(), t.std_phi.item(), t.std_theta.item()
+        )
     )
 
     x = torch.randn(n_batch, n_atoms * 3)

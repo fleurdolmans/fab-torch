@@ -14,7 +14,11 @@ import torch
 
 
 def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter:
-    raise NotImplementedError("Plotting not implemented for H2OinH2O")
+    def plot(fab_model, n_samples: int = cfg.training.batch_size, dim: int = cfg.target.dim):
+        print("Plotting not yet implemented for H2OinH2O...")
+        return []
+
+    return plot
 
 
 def _run(cfg: DictConfig):
@@ -27,8 +31,9 @@ def _run(cfg: DictConfig):
             energy_cut=cfg.target.energy_cut,
             energy_max=cfg.target.energy_max,
             n_threads=cfg.target.n_threads,
-            data_path=None,
             device="cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu",
+            target_samples_path=cfg.target.samples_path,
+            save_dir=cfg.evaluation.save_path,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

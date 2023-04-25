@@ -236,6 +236,7 @@ if "replay_buffer" in config["training"]:
             min_sample_length=rb_config["min_length"] * batch_size,
             initial_sampler=initial_sampler,
             device=str(device),
+            sample_with_replacement=rb_config["sample_with_replacement"],
         )
 
         if os.path.exists(buffer_path):
@@ -488,7 +489,7 @@ for it in range(start_iter, max_iter):
             z_ = model.annealed_importance_sampler.sample_and_log_weights(
                 batch_size, logging=False, purpose="draw samples"
             )[0].x
-            z_, _ = model.flow._nf_model.flows[-1].inverse(z_.detach())
+            z_, _ = model.flow._nf_model.flows[-1].inverse(z_.detach())  # TODO: why invert the last layer???
             if filter_chirality_eval:
                 ind_L = filter_chirality(z_)
                 if torch.mean(1.0 * ind_L) > 0.1:

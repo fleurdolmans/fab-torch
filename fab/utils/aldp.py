@@ -46,7 +46,7 @@ def evaluate_aldp(z_sample, z_test, log_prob, transform, iter, metric_dir=None, 
         z = z_test[(i * batch_size) : end, :]
         x, log_det = transform(z.double())
         x_d_np = np.concatenate((x_d_np, x.cpu().data.numpy()))
-        log_p = log_prob(z)
+        log_p = log_prob(z)  # This the log prob under base dist of flow
         log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
     log_p_avg = log_p_sum.cpu().data.numpy() / len(z_test)
 

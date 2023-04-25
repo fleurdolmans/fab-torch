@@ -35,7 +35,8 @@ class PrioritisedBufferTrainer:
         w_adjust_max_clip: float = 10.0,
         w_adjust_in_buffer_after_update: bool = False,
         save_path: str = "",
-        lr_step = 1,
+        lr_step=1,
+        warmup_scheduler: Optional[lr_scheduler] = None,
     ):
         self.model = model
         self.alpha = alpha
@@ -59,6 +60,7 @@ class PrioritisedBufferTrainer:
         self.flow_device = next(model.flow.parameters()).device
         self.max_adjust_w_clip = w_adjust_max_clip
         self.w_adjust_in_buffer_after_update = w_adjust_in_buffer_after_update
+        self.warmup_scheduler = warmup_scheduler
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -68,6 +70,8 @@ class PrioritisedBufferTrainer:
         self.buffer.save(os.path.join(checkpoint_path, "buffer.pt"))
         if self.optim_schedular:
             torch.save(self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
+        if self.warmup_scheduler:
+            torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
         figures = self.plot(self.model)
@@ -82,9 +86,13 @@ class PrioritisedBufferTrainer:
         # set ais distribution to target for evaluation of ess
         self.model.annealed_importance_sampler.transition_operator.set_eval_mode(True)
         self.model.annealed_importance_sampler.p_target = True
-        eval_info_true_target = self.model.get_eval_info(outer_batch_size=eval_batch_size, inner_batch_size=batch_size)
+        # Evaluate with p as target.
+        eval_info_true_target = self.model.get_eval_info(
+            outer_batch_size=eval_batch_size, inner_batch_size=batch_size
+        )
         # set ais distribution back to p^\alpha q^{1-\alpha}.
         self.model.annealed_importance_sampler.p_target = False
+        # Evaluate with p^\alpha q^{1-\alpha} as target.
         eval_info_practical_target = self.model.get_eval_info(
             outer_batch_size=eval_batch_size, inner_batch_size=batch_size
         )

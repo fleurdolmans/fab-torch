@@ -59,13 +59,15 @@ training:                           # Properties of the training procedure
   replay_buffer:
     type: prioritised               # String, way to sample from the buffer, can be uniform or prioritised
     n_updates: 8                    # Int, number of updates to do after each sampling step
-    min_length: 64                  # Int, minimum number of batches in replay buffer
+    min_length: 4  #64                  # Int, minimum number of batches in replay buffer
     max_length: 512                 # Int, maximum number of batches in replay buffer
     max_adjust_w_clip: 10           # Double, fraction of weights to clip per batch
+    sample_with_replacement: True  # Bool, flag whether to sample with replacement (added)
+
   max_grad_norm: 1.e3               # Double, limit for gradient clipping
   weight_decay: 1.e-5               # Double, regularization parameter
   log_iter: 5000                    # Int, number of iterations after which loss is saved
-  checkpoint_iter: 25000            # Int, number of iterations after which checkpoint is saved
+  checkpoint_iter: 1 #25000            # Int, number of iterations after which checkpoint is saved
   eval_samples: 0                   # Int, number of samples to draw when evaluating the model
   filter_chirality: train            # String, whether to filter chirality during training or evaluation
   seed: 0                           # Int, seed to be used for the random number generator
