@@ -112,9 +112,6 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  the plane formed by the first two solute atoms and any other atom in the system.
         x = self.setup_coordinate_system(x, z_axis, y_axis)
 
-        # # TODO: Check case where a non-solute atom has y=0, leading to a rotation convention ambiguity.
-        # x[0, 5, 1] = 0  # Set y of atom 5 to 0 to check this here
-
         x_coord = x.reshape(x.shape[0], -1)  # For tests
 
         solute_atom0 = x[:, 0, :]
@@ -401,6 +398,8 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # First define phi w.r.t. the z-axis. This means we rotate solute_atom1 to align with the z-axis.
         # E.g. we want to align the first H atom with the z-axis.
         # The rotation should happen along the normal given by the z-O-H plane (for water).
+        # TODO: This is the culprit for the error when the second solute hydrogen y==0 exactly, on the second iteration
+        #  with current params.
         phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1)
         phi_rotation = rotation_matrix(phi_axis, phi_rad)
         x_phi = torch.einsum("bij,bnj -> bni", phi_rotation, x_centered)
@@ -465,10 +464,12 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False):
         sign = torch.sign(cross[:, 2])  # Flip direction if z < 0
     else:
         # TODO: What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
-        #  this is consistent? See the below check. This situation occurs when a non-solute atom has
-        #  y == 0, which can happen, although it should be rare.
+        #  this is consistent? See the below check. This situation occurs when the second solute hydrogen has
+        #  y == 0, which can happen, although it should be rare. Seems to happen when setting up the coordinate system
+        #  sometimes.
         if torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
             raise ValueError("Found rotation around axis with x=0. Set `to_yz_plane` to True.")
+            # cross[:, 0] += 1e-8  # Increases error, and doesn't fully fix the problem when non-solute atom has y=0.
         sign = torch.sign(cross[:, 0])  # Flip direction if x < 0
 
     cross = sign.unsqueeze(-1) * cross
