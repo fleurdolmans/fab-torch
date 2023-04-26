@@ -256,10 +256,9 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
 
 def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, target: TargetDistribution):
     """Setup model and train."""
-    if cfg.training.tlimit:
-        start_time = time.time()
-    else:
-        start_time = time.time()  # Just always track time?
+    print("Starting setup...")
+    start_time = time.time()  # Just always track time?
+
     if cfg.training.checkpoint_load_dir is not None:
         if not os.path.exists(cfg.training.checkpoint_load_dir):
             print("no checkpoint loaded, starting training from scratch")
@@ -295,10 +294,12 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     with open(os.path.join(save_path, "config.txt"), "w") as file:
         file.write(str(cfg))
 
+    print("Setting up model...")
     fab_model = setup_model(cfg, target)
 
     # Initialize optimizer and its parameters
     #  Taken from ALDP's train.py.
+    print("Setting up training parameters...")
     lr = cfg.training.lr
     weight_decay = cfg.training.wd
     optimizer_name = "adam" if not "optimizer" in cfg.training else cfg.training.optimizer
@@ -343,6 +344,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         )
 
     # Create buffer if needed
+    print("Setting up buffer...")
+    buffer_time = time.time()
     if cfg.training.use_buffer is True:
         buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=chkpt_dir is None)
     else:
@@ -358,10 +361,13 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
                 "if a buffer is loaded, it is expected to contain " "enough samples to sample from"
             )
         print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
+    print(f" buffer setup time: {time.time() - buffer_time}")
 
+    print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)
 
     # Create trainer
+    print("Setting up trainer...")
     if cfg.training.use_buffer is False:
         raise NotImplementedError("Bufferless doesn't have all changes: 1) no warmup scheduler, 2) ...")
         # trainer = Trainer(
@@ -404,8 +410,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             warmup_scheduler=lr_warmup,
         )
 
-    # TODO: Check that this is similar enough to ALDP for solvent system.
-    # TODO: evaluation and plotting?
+    print("Starting training...")
     trainer.run(
         n_iterations=n_iterations,
         batch_size=cfg.training.batch_size,

@@ -64,8 +64,8 @@ training:                             # Properties of the training procedure
   use_buffer: true                    # Buffer args follow below here
   prioritised_buffer: true            # If True then FAB loss WILL be used no matter what fab.loss_type is.
   maximum_buffer_length: 524288       # ALDP used 512 * 1024 (batch_size)
-  min_buffer_length: 50  # 65536            # ALDP used 64 * 1024 (batch_size)
-  n_batches_buffer_sampling: 8        # Number of updates to do after every buffer sampling step
+  min_buffer_length: 4  # 65536            # ALDP used 64 * 1024 (batch_size)
+  n_batches_buffer_sampling: 1 # 8        # Number of updates to do after every buffer sampling step
   w_adjust_max_clip: 10               # clipping of weight adjustment factor for prioritised replay
   buffer_temp: 1.0                    # Rate that we weight new experience over old (for non-prioritised replay only)
   log_w_clip_frac: null               # Null for no clipping, for non-prioritised replay only.
@@ -73,7 +73,7 @@ training:                             # Properties of the training procedure
 
 evaluation:  # TODO
   n_plots: 20                         # number of times we visualise the model throughout training.
-  n_eval: 20                          # for calculating metrics of flow w.r.t target.
+  n_eval: ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 8  #512            # must be a multiple of inner batch size
   n_checkpoints: 10                   # number of model checkpoints saved
   save_path:  ./results/h2o_in_h2o/seed${training.seed}/  # Relative to /DEPLOYMENT_DIR/outputs/yyyy-mm-dd/HH-MM-SS/LOGGER_DIR_TREE/

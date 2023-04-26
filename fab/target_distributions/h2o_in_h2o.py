@@ -235,44 +235,56 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
-            log_q_test = log_q_fn(self.target_data)
-            log_p_test = self.log_prob(self.target_data)
-            test_mean_log_prob = torch.mean(log_q_test)
-            kl_forward = torch.mean(log_p_test - log_q_test)
-            # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
-            #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
-            ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
+            with torch.no_grad():
+                log_q_test = log_q_fn(self.target_data)
+                log_p_test = self.log_prob(self.target_data)
+                test_mean_log_prob = torch.mean(log_q_test)
+                kl_forward = torch.mean(log_p_test - log_q_test)
+                # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
+                #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
+                ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
             summary_dict.update({
                 "flow_test_log_prob": test_mean_log_prob.cpu().item(),
-                "flow_ess_over_p": ess_over_p.detach().cpu().item(),
-                "flow_kl_forward": kl_forward.detach().cpu().item(),
+                "flow_ess_over_p": ess_over_p.cpu().item(),
+                "flow_kl_forward": kl_forward.cpu().item(),
             })
         else:  # Evaluate Flow+AIS samples: no likelihood available.
             pass  # There is no evaluation currently that only works for Flow+AIS samples.
         return summary_dict
 
     def get_kld_info(self, samples, log_w, batch_size=1000, iteration=None):
+        """
+        Computes the KLD between the target distribution and the flow distribution, and saves the KLD histogram to
+        disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
+        need the likelihood, so we can actually evaluate Flow+AIS samples as well.
+        """
+
         # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
         #  transforms have the opposite forward/inverse convention to ours.
         assert iteration, "Must pass iteration number for doing KLD histogram."
 
-        # Coordinate transforms work on GPU by default, so keep everything on GPU until we are done
-        # with the transforms.
         z_test = self.target_data
         z_sample = samples  # TODO: might need to fix PeriodicWrap for this (see last layer in Flow and Vincent email).
 
         # Determine likelihood of test data and transform it (mostly taken from aldp.py)
-        z_d_np = z_test  #.cpu().data.numpy()
+        z_d_np = z_test
         x_d_np = torch.zeros(0, self.dim)
         log_p_sum = 0
-        n_batches = int(torch.ceil(len(z_test) / batch_size))
+        n_batches = int(np.ceil(len(z_test) / batch_size))
         for i in range(n_batches):
             if i == n_batches - 1:
                 end = len(z_test)
             else:
                 end = (i + 1) * batch_size
             z = z_test[(i * batch_size): end, :]
-            x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z
+            # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
+            # TODO: This gives an error in get_angle_and_normal() that finds a rotation around and axis with x=0. This
+            #  presumably happens because one of the test data points has a non-solute atom with y=0. This can indeed
+            #  happen (although exactly 0 is kind of strange), so we should figure out how to deal with it. What would
+            #  work, is to pick a convention for the case where x=0 (i.e., pick a rotation direction,
+            #  such as the x>0 direction), and make sure that this convention is used when the code rotates our
+            #  molecule (otherwise we rotate wrong!).
+            x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
             x_d_np = torch.cat((x_d_np, x), dim=0)
             log_p = self.log_prob(z)
             log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
@@ -281,7 +293,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # Transform samples
         z_np = torch.zeros(0, self.dim)
         x_np = torch.zeros(0, self.dim)
-        n_batches = int(torch.ceil(len(samples) / batch_size))
+        n_batches = int(np.ceil(len(samples) / batch_size))
         for i in range(n_batches):
             if i == n_batches - 1:
                 end = len(z_sample)
@@ -289,7 +301,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 end = (i + 1) * batch_size
             z = z_sample[(i * batch_size): end, :]
             # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
-            x, _ = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z
+            x, _ = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
             x_np = torch.cat((x_np, x), dim=0)
             z, _ = self.coordinate_transform.forward(x)  # Actually: Z --> X
             z_np = torch.cat((z_np, z), dim=0)

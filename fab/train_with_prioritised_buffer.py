@@ -117,6 +117,7 @@ class PrioritisedBufferTrainer:
         start_time: Optional[float] = None,
         start_iter: Optional[int] = 0,
     ) -> None:
+
         if save:
             pathlib.Path(self.plots_dir).mkdir(exist_ok=True)
             pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True)
@@ -229,14 +230,17 @@ class PrioritisedBufferTrainer:
 
             if n_eval is not None:
                 if i in eval_iter:
+                    print("Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
+                    print("Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
+                    print("Saving checkpoint...")
                     self.save_checkpoint(i)
 
             max_it_time = max(max_it_time, time() - it_start_time)

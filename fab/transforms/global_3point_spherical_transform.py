@@ -52,6 +52,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms after transforming to Cartesian.
         # Transform Z --> X. Return x and log det Jacobian.
+        # Sometimes on cpu and sometimes on gpu, so we need to make sure the stds are on the right device.
+        self.std_r = self.std_r.to(z.device)
+        self.std_phi = self.std_phi.to(z.device)
+        self.std_theta = self.std_theta.to(z.device)
         x, log_det_jac = self.z_to_cartesian(z)
         return x, log_det_jac
 
@@ -60,6 +64,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms before transforming to Z.
         # Transform X --> Z. Return z and log det Jacobian.
+        # Sometimes on cpu and sometimes on gpu, so we need to make sure the stds are on the right device.
+        self.std_r = self.std_r.to(x.device)
+        self.std_phi = self.std_phi.to(x.device)
+        self.std_theta = self.std_theta.to(x.device)
         z, log_det_jac, _, _ = self.cartesian_to_z(x)
         return z, log_det_jac
 
@@ -103,6 +111,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  coordinates. Note that this is equivalent to using planar angles between the solute-molecule-plane and
         #  the plane formed by the first two solute atoms and any other atom in the system.
         x = self.setup_coordinate_system(x, z_axis, y_axis)
+
+        # # TODO: Check case where a non-solute atom has y=0, leading to a rotation convention ambiguity.
+        # x[0, 5, 1] = 0  # Set y of atom 5 to 0 to check this here
+
         x_coord = x.reshape(x.shape[0], -1)  # For tests
 
         solute_atom0 = x[:, 0, :]
@@ -452,6 +464,9 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False):
             raise ValueError("Convention is to rotate normal with x!=0 if possible, but `to_yz_plane` was True.")
         sign = torch.sign(cross[:, 2])  # Flip direction if z < 0
     else:
+        # TODO: What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
+        #  this is consistent? See the below check. This situation occurs when a non-solute atom has
+        #  y == 0, which can happen, although it should be rare.
         if torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
             raise ValueError("Found rotation around axis with x=0. Set `to_yz_plane` to True.")
         sign = torch.sign(cross[:, 0])  # Flip direction if x < 0
