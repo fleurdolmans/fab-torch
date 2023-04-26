@@ -8,7 +8,7 @@ target:                               # Properties of molecular system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
-  samples_path: null                  # Filepath to load samples from
+  samples_path: /home/timsey/Projects/fab-torch/experiments/solvation/data/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every100.pdb  # Filepath to load samples from
 
 
 flow:                                  # Properties of the flow model
@@ -33,7 +33,7 @@ flow:                                  # Properties of the flow model
 
 
 fab:
-  loss_type: fab_alpha_div            # Whether to use AIS, and type of loss for AIS. E.g., `forward_kl` for non-AIS.
+  loss_type: fab_alpha_div            # Whether to use AIS, and type of loss for AIS. E.g., `flow_reverse_kl` for non-AIS.
   n_intermediate_distributions: 8     # Int, number of intermediate distributions
   alpha: 2.0
   transition_operator:
@@ -48,9 +48,9 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 1  # 4                 # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 50000                 # Int, maximum number of iteration
+  n_iterations: 1000 #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
-  batch_size: 5  # 1024               # Int, batch size used during training
+  batch_size: 4  # 1024               # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
@@ -64,7 +64,7 @@ training:                             # Properties of the training procedure
   use_buffer: true                    # Buffer args follow below here
   prioritised_buffer: true            # If True then FAB loss WILL be used no matter what fab.loss_type is.
   maximum_buffer_length: 524288       # ALDP used 512 * 1024 (batch_size)
-  min_buffer_length: 65536            # ALDP used 64 * 1024 (batch_size)
+  min_buffer_length: 50  # 65536            # ALDP used 64 * 1024 (batch_size)
   n_batches_buffer_sampling: 8        # Number of updates to do after every buffer sampling step
   w_adjust_max_clip: 10               # clipping of weight adjustment factor for prioritised replay
   buffer_temp: 1.0                    # Rate that we weight new experience over old (for non-prioritised replay only)
@@ -74,7 +74,7 @@ training:                             # Properties of the training procedure
 evaluation:  # TODO
   n_plots: 20                         # number of times we visualise the model throughout training.
   n_eval: 20                          # for calculating metrics of flow w.r.t target.
-  eval_batch_size: 5  #512            # must be a multiple of inner batch size
+  eval_batch_size: 8  #512            # must be a multiple of inner batch size
   n_checkpoints: 10                   # number of model checkpoints saved
   save_path:  ./results/h2o_in_h2o/seed${training.seed}/  # Relative to /DEPLOYMENT_DIR/outputs/yyyy-mm-dd/HH-MM-SS/LOGGER_DIR_TREE/
 

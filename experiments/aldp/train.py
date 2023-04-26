@@ -489,7 +489,7 @@ for it in range(start_iter, max_iter):
             z_ = model.annealed_importance_sampler.sample_and_log_weights(
                 batch_size, logging=False, purpose="draw samples"
             )[0].x
-            z_, _ = model.flow._nf_model.flows[-1].inverse(z_.detach())  # TODO: why invert the last layer???
+            z_, _ = model.flow._nf_model.flows[-1].inverse(z_.detach())  # Invert periodicwrap
             if filter_chirality_eval:
                 ind_L = filter_chirality(z_)
                 if torch.mean(1.0 * ind_L) > 0.1:

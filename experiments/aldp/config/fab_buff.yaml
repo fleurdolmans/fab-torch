@@ -18,7 +18,6 @@ system:                             # Properties of molecular system
 
 
 flow:                               # Properties of the flow model
-
   type: circular-coup-nsf           # String, type of the flow
   base:                             # Base distribution
     type: gauss-uni                 # Type of the base dist
@@ -49,10 +48,10 @@ fab:
 
 training:                           # Properties of the training procedure
 
-  max_iter: 50000                   # Int, maximum number of iteration
-  warmup_iter: 1000                 # Int, number of iterations used for warmup
+  max_iter: 5000 # 50000                   # Int, maximum number of iteration
+  warmup_iter: 100 # 1000                 # Int, number of iterations used for warmup
   optimizer: adam                   # String, name of the optimizer
-  batch_size: 5 # 1024                  # Int, batch size used during training
+  batch_size: 8 # 1024                  # Int, batch size used during training
   learning_rate: 5.e-4              # Double, learning rate used during training
   lr_scheduler:
     type: cosine                    # String, kind of LR scheduler, can be exponential, cosine
@@ -66,8 +65,8 @@ training:                           # Properties of the training procedure
 
   max_grad_norm: 1.e3               # Double, limit for gradient clipping
   weight_decay: 1.e-5               # Double, regularization parameter
-  log_iter: 5000                    # Int, number of iterations after which loss is saved
-  checkpoint_iter: 1 #25000            # Int, number of iterations after which checkpoint is saved
+  log_iter: 10  #5000                    # Int, number of iterations after which loss is saved
+  checkpoint_iter: 100 #25000            # Int, number of iterations after which checkpoint is saved
   eval_samples: 0                   # Int, number of samples to draw when evaluating the model
   filter_chirality: train            # String, whether to filter chirality during training or evaluation
   seed: 0                           # Int, seed to be used for the random number generator

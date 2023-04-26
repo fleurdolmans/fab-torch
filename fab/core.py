@@ -77,7 +77,7 @@ class FABModel(Model):
                 n_intermediate_distributions=self.n_intermediate_distributions,
                 distribution_spacing_type=self.ais_distribution_spacing,
                 p_target=False,
-                alpha=self.alpha
+                alpha=self.alpha,
             )
 
     def parameters(self):
@@ -194,27 +194,31 @@ class FABModel(Model):
                 return self.annealed_importance_sampler.get_logging_info()
         return {}
 
-    def get_eval_info(self,
-                      outer_batch_size: int,
-                      inner_batch_size: int,
-                      set_p_target: bool = True
-                      ) -> Dict[str, Any]:
+    def get_eval_info(
+            self, outer_batch_size: int,
+            inner_batch_size: int,
+            set_p_target: bool = True,
+            iteration: Optional[int] = None,
+    ) -> Dict[str, Any]:
         if hasattr(self, "annealed_importance_sampler"):
             if set_p_target:
                 self.set_ais_target(min_is_target=False)  # Evaluate with target=p.
-            base_samples, base_log_w, ais_samples, ais_log_w = \
-                self.annealed_importance_sampler.generate_eval_data(outer_batch_size,
-                                                                    inner_batch_size)
-            info = {"eval_ess_flow": effective_sample_size(log_w=base_log_w, normalised=False).item(),
-                    "eval_ess_ais": effective_sample_size(log_w=ais_log_w, normalised=False).item()}
-            flow_info = self.target_distribution.performance_metrics(base_samples, base_log_w,
-                                                                     self.flow.log_prob,
-                                                                     batch_size=inner_batch_size)
+            base_samples, base_log_w, ais_samples, ais_log_w = self.annealed_importance_sampler.generate_eval_data(
+                outer_batch_size, inner_batch_size
+            )
+            # These ESS values will be spurious if the Flow and/or Flow+AIS is missing modes.
+            info = {
+                "eval_ess_flow": effective_sample_size(log_w=base_log_w, normalised=False).item(),  # Flow only.
+                "eval_ess_ais": effective_sample_size(log_w=ais_log_w, normalised=False).item(),  # Flow+AIS.
+            }
+            flow_info = self.target_distribution.performance_metrics(
+                base_samples, base_log_w, self.flow.log_prob, batch_size=inner_batch_size, iteration=iteration
+            )
 
-            # TODO: This doesn't seem to do anything without the flow.log_prob being passed? How would we evaluate
-            #  the flow with AIS samples anyway? We don't have the log_q of flow + AIS procedure? Guess we have to
-            #  find the log prob of the whole path flow+AIS?
-            ais_info = self.target_distribution.performance_metrics(ais_samples, ais_log_w)
+            # TODO: Evaluating Flow+AIS samples is more difficult, because we don't have a likelihood. This requires
+            #  problem-specific approaches (although ESS can always be done, but is spurious if the flow is
+            #  missing modes: ESS already computed above).
+            ais_info = self.target_distribution.performance_metrics(ais_samples, ais_log_w, iteration=iteration)
             info.update(flow_info)
             info.update(ais_info)
 
@@ -223,7 +227,8 @@ class FABModel(Model):
 
         else:
             raise NotImplementedError
-            # TODO
+            # TODO: Implement version without AIS: just evaluate the base flow here, similar to the first lines of the
+            #  above code, but not using self.model.flow to generate data.
         return info
 
     def save(self, path: "str"):

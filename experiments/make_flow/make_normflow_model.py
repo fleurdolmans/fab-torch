@@ -318,6 +318,11 @@ def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
                 dist = nf.distributions.LinearInterpolation(target, base, lam)
                 layers.append(nf.flows.MetropolisHastings(dist, proposal, steps))
 
+    # Map input to periodic interval
+    # The purpose is that incoming samples from a dataset get periodically wrapped to the interval [-pi, pi],
+    #  or the equivalent scaled version.
+    layers.append(nf.flows.PeriodicWrap(periodic_inds, bound_circ))
+
     # normflows model
     flow = nf.NormalizingFlow(base, layers)
     wrapped_flow = WrappedNormFlowModel(flow)

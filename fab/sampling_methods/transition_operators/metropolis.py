@@ -8,21 +8,24 @@ from fab.sampling_methods.base import Point
 
 
 class Metropolis(TransitionOperator):
-    def __init__(self,
-                 n_ais_intermediate_distributions: int,
-                 dim: int,
-                 base_log_prob: LogProbFunc,
-                 target_log_prob: LogProbFunc,
-                 n_updates,
-                 alpha: float = None,
-                 p_target: bool = False,
-                 max_step_size=1.0,
-                 min_step_size=0.1,
-                 adjust_step_size=True,
-                 target_p_accept=0.65,
-                 eval_mode: bool = False):
-        super(Metropolis, self).__init__(n_ais_intermediate_distributions, dim, base_log_prob, target_log_prob,
-            alpha=alpha, p_target=p_target)
+    def __init__(
+        self,
+        n_ais_intermediate_distributions: int,
+        dim: int,
+        base_log_prob: LogProbFunc,
+        target_log_prob: LogProbFunc,
+        n_updates,
+        alpha: float = None,
+        p_target: bool = False,
+        max_step_size=1.0,
+        min_step_size=0.1,
+        adjust_step_size=True,
+        target_p_accept=0.65,
+        eval_mode: bool = False,
+    ):
+        super(Metropolis, self).__init__(
+            n_ais_intermediate_distributions, dim, base_log_prob, target_log_prob, alpha=alpha, p_target=p_target
+        )
         self.n_distributions = n_ais_intermediate_distributions
         self.n_updates = n_updates
         self.adjust_step_size = adjust_step_size
