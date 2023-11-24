@@ -20,7 +20,6 @@ Plotter = Callable[[FABModel], List[plt.Figure]]
 class PrioritisedBufferTrainer:
     """A trainer for the FABModel for use with a prioritised replay buffer, and a different form
     of loss. In this training loop we target p^\alpha / q^(\alpha - 1) instead of p."""
-
     def __init__(
         self,
         model: FABModel,
@@ -32,7 +31,7 @@ class PrioritisedBufferTrainer:
         logger: Logger = ListLogger(),
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
-        w_adjust_max_clip: float = 10.0,
+        w_adjust_max_clip: Optional[float] = 10.0,
         w_adjust_in_buffer_after_update: bool = False,
         save_path: str = "",
         lr_step=1,
@@ -92,9 +91,10 @@ class PrioritisedBufferTrainer:
         assert self.model.annealed_importance_sampler.p_target is False
         assert self.model.annealed_importance_sampler.transition_operator.p_target is False
         # Evaluation with the AIS ESS with target set as p^\alpha q^{1-\alpha}.
-        eval_info_practical_target = self.model.get_eval_info(
-            outer_batch_size=eval_batch_size, inner_batch_size=batch_size, set_p_target=False, iteration=i,
-        )
+        eval_info_practical_target = self.model.get_eval_info(outer_batch_size=eval_batch_size,
+                                                              inner_batch_size=batch_size,
+                                                              set_p_target=False,
+                                                              ais_only=True)
         self.model.annealed_importance_sampler.transition_operator.set_eval_mode(False)
 
         eval_info = {}
