@@ -44,7 +44,7 @@ def _run(cfg: DictConfig):
     setup_trainer_and_run_flow(cfg, setup_h2o_plotter, target)
 
 
-@hydra.main(config_path="config/", config_name="h2oinh2o_fab_pbuff.yaml")
+@hydra.main(config_path="./config/", config_name="h2oinh2o_fab_pbuff.yaml", version_base="1.1")
 def run(cfg: DictConfig):
     _run(cfg)
 

@@ -21,10 +21,10 @@ class AnnealedImportanceSampler:
 
     def __init__(
         self,
-        base_distribution: Distribution,
-        target_log_prob: LogProbFunc,
+        base_distribution: Distribution,  # The flow
+        target_log_prob: LogProbFunc,  # The target distribution
         transition_operator: TransitionOperator,
-        p_target: bool,
+        p_target: bool,  # Target p or target p^2 / q
         alpha: Optional[float] = None,
         n_intermediate_distributions: int = 1,
         distribution_spacing_type: str = "linear",

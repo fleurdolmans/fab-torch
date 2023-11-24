@@ -136,6 +136,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
         self.target_samples_path = pathlib.Path(target_samples_path)
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")
+        if not os.path.exists(self.metric_dir):
+            os.makedirs(self.metric_dir)
 
         # Steps to take:
         # 1. Load topology of solute.
@@ -284,6 +286,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
             #  work, is to pick a convention for the case where x=0 (i.e., pick a rotation direction,
             #  such as the x>0 direction), and make sure that this convention is used when the code rotates our
             #  molecule (otherwise we rotate wrong!).
+            # TODO: Error in batch i=190?
             x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
             x_d_np = torch.cat((x_d_np, x), dim=0)
             log_p = self.log_prob(z)

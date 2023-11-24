@@ -261,7 +261,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     if cfg.training.checkpoint_load_dir is not None:
         if not os.path.exists(cfg.training.checkpoint_load_dir):
-            print("no checkpoint loaded, starting training from scratch")
+            print("No checkpoint loaded, starting training from scratch.")
             chkpt_dir = None
             iter_number = 0
         else:
@@ -288,7 +288,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         use_buffer=cfg.training.use_buffer,
         min_buffer_length=cfg.training.min_buffer_length,
     )
-    print(f"running for {n_iterations}")
+    print(f"Running for {n_iterations} iterations.")
     cfg.training.n_iterations = n_iterations
 
     with open(os.path.join(save_path, "config.txt"), "w") as file:
@@ -358,7 +358,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         if buffer is not None:
             buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
             assert buffer.can_sample, (
-                "if a buffer is loaded, it is expected to contain " "enough samples to sample from"
+                "If a buffer is loaded, it is expected to contain enough samples to sample from."
             )
         print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
     print(f" buffer setup time: {time.time() - buffer_time}")
@@ -369,7 +369,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     # Create trainer
     print("Setting up trainer...")
     if cfg.training.use_buffer is False:
-        raise NotImplementedError("Bufferless doesn't have all changes: 1) no warmup scheduler, 2) ...")
+        raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
         # trainer = Trainer(
         #     model=fab_model,
         #     optimizer=optimizer,

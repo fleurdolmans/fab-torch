@@ -392,9 +392,8 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # First define phi w.r.t. the z-axis. This means we rotate solute_atom1 to align with the z-axis.
         # E.g. we want to align the first H atom with the z-axis.
         # The rotation should happen along the normal given by the z-O-H plane (for water).
-        # TODO: This is the culprit for the error when the second solute hydrogen y==0 exactly, on the second iteration
-        #  with current params.
-        phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1)
+        # TODO: This is the culprit for the error when the first solute hydrogen has y==0 exactly.
+        phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1, align_first_solute_h=True)
         phi_rotation = rotation_matrix(phi_axis, phi_rad)
         x_phi = torch.einsum("bij,bnj -> bni", phi_rotation, x_centered)
 
@@ -426,7 +425,7 @@ def unit_vector(vector):
     return vector / torch.norm(vector, dim=-1, keepdim=True)
 
 
-def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False):
+def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_solute_h=False):
     """
     Returns the angle between three atoms in radian, and the axis of rotation.
 
@@ -458,13 +457,25 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False):
         sign = torch.sign(cross[:, 2])  # Flip direction if z < 0
     else:
         # TODO: What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
-        #  this is consistent? See the below check. This situation occurs when the second solute hydrogen has
+        #  this is consistent? See the below check. This situation occurs when the first solute hydrogen has
         #  y == 0, which can happen, although it should be rare. Seems to happen when setting up the coordinate system
         #  sometimes.
+        # TODO: Can't we just remove the check? It's actually fine if x=0 for the rotation axis, since this is a valid
+        #  axis to rotate around for aligning the first solute hydrogen with the z-axis. The only problem may be with
+        #  the reverse transformation, where we would need to know how exactly to invert this (set a convention).
+        #  Here we are in a situation where the rotation axis has z=0 and x=0, so we can use y>0 as our convention.
         if torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
-            raise ValueError("Found rotation around axis with x=0. Set `to_yz_plane` to True.")
+            # Exception: both x and z are 0, so use y-axis as rotation axis. Convention is to use the y>0 axis.
+            sign = torch.sign(cross[:, 1])  # Flip direction if y < 0
+            # TODO: Actually, this signing is unnecessary, since this exception should only happen when aligning the
+            #  first solute hydrogen during coordinate setup. We can just rotate however we want, since we never have
+            #  to reverse this rotation (this atom is always set to align to the z-axis in the reverse transform).
+            if not align_first_solute_h:
+                raise ValueError("Found rotation around axis with x=0 outside of coordinate setup.")
             # cross[:, 0] += 1e-8  # Increases error, and doesn't fully fix the problem when non-solute atom has y=0.
-        sign = torch.sign(cross[:, 0])  # Flip direction if x < 0
+        else:
+            # Standard setting: use x value for defining rotation direction.
+            sign = torch.sign(cross[:, 0])  # Flip direction if x < 0
 
     cross = sign.unsqueeze(-1) * cross
     # Adjust angles:
