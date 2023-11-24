@@ -231,9 +231,6 @@ def test_ais__overall(
     plot_history(logger.history)
     plt.show()
 
-<<<<<<< HEAD
 
 if __name__ == "__main__":
     test_ais__overall(n_ais_intermediate_distributions=4)
-=======
->>>>>>> upstream/master
