@@ -95,13 +95,16 @@ class PrioritisedReplayBuffer:
             self.can_sample = new_index >= self.min_sample_length
         self.current_index = new_index % self.max_length
 
+    def get_buffer_size(self):
+        return self.max_length if self.is_full else self.current_index
+
     @torch.no_grad()
     def sample(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return a batch of sampled data, if the batch size is specified then the batch will have a
         leading axis of length batch_size, otherwise the default self.batch_size will be used."""
         if not self.can_sample:
             raise Exception("Buffer must be at minimum length before calling sample")
-        max_index = self.max_length if self.is_full else self.current_index
+        max_index = self.get_buffer_size()
         if self.sample_with_replacement:
             indices = torch.distributions.Categorical(logits=self.buffer.log_w[:max_index]).sample_n(batch_size)
         else:

@@ -86,7 +86,8 @@ def get_intermediate_log_prob(
     alpha: Union[float, None],
     p_target: bool,
 ) -> torch.Tensor:
-    """Get log prob of point according to intermediate AIS distribution.
+    """Get log prob of point according to intermediate AIS distribution. E.g., in between current
+    distribution and target distribution.
 
     Set AIS final target g=p if p_target else set it to the minimum importance sampling
     distribution given by g=p^\alpha q^(1-\alpha).

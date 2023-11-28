@@ -34,6 +34,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         else:
             print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
+        # self.device = transform_data.device
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
             z, _, _, _ = self.cartesian_to_z(transform_data, setup=True)
@@ -598,74 +599,3 @@ if __name__ == "__main__":
     print("Min error norm (r): {:.8f}".format(norm_err.min().item()))
     if not torch.isclose(x_coord, x_recon, atol=1e-3).all():
         raise ValueError("Max reconstruction error > 1e-3...")
-
-
-# def perm_parity(lst):
-#     # TODO: This is not used currently. And not necessary: determinant of permutation is the sign, but we only care
-#     #  about the absolute value of the determinant in the change-of-variables rule, so 1.
-#     """
-#     Given a permutation of the digits 0..N in order as a list,
-#     returns its parity (or sign): +1 for even parity; -1 for odd.
-#     """
-#     parity = 1
-#     for i in range(0, len(lst) - 1):
-#         if lst[i] != i:
-#             parity *= -1
-#             mn = min(range(i, len(lst)), key=lst.__getitem__)
-#             lst[i], lst[mn] = lst[mn], lst[i]
-#     return parity
-#
-#
-# def order_solvent_molecules(x, atoms_per_solute_mol, atoms_per_solvent_mol):
-#     # TODO: This is not used currently, as this is not actually doing anything in the
-#     #  Z --> X direction. What to do for permutation invariance in that setting?
-#     """
-#     Order oxygen atoms by their distance to the solute oxygen atom.
-#
-#     :param x: Cartesian coordinates: n_batch x n_atoms x 3
-#     :param atoms_per_solute_mol: Number of atoms per solute molecule
-#     :param atoms_per_solvent_mol: Number of atoms per solvent molecule
-#
-#     :return:
-#         Ordered Cartesian coordinates: n_batch x n_atoms x 3
-#         Parity of the permutation: n_batch
-#     """
-#
-#     # Reference coordinates: e.g., the oxygen atoms
-#     ref_coords = x[:, atoms_per_solute_mol::atoms_per_solvent_mol, :]  # n_batch x num_atoms
-#
-#     # Distances to anchor at origin
-#     ref_dists = torch.norm(ref_coords, dim=2)
-#
-#     # Order reference atoms by distance to origin
-#     ref_permute = torch.argsort(ref_dists, dim=1) * atoms_per_solvent_mol
-#
-#     # Start building full permutation tensor.
-#     #  First step is to permute reference atoms (e.g., oxygens) together with their hydrogens.
-#     #  Then we can start permuting the remaining atoms (e.g., hydrogens) within the molecules, if necessary.
-#     full_permute = torch.zeros(x.shape[:2])
-#
-#     # Solute molecule is fixed; reflect this in permutation tensor.
-#     num_hydrogen = atoms_per_solvent_mol - 1
-#     for j in range(1, num_hydrogen + 1, 1):
-#         full_permute[:, j] = j
-#
-#     # Inefficient way to build full permutation tensor
-#     for full_perm, ref_perm in zip(full_permute, ref_permute):
-#         for i, ref_num in enumerate(ref_perm):
-#             # ref_permute skips solute molecule, so index this back in
-#             ind = atoms_per_solute_mol + i * atoms_per_solvent_mol  # index in permutation tensor
-#             atom_num = atoms_per_solute_mol + ref_num  # atom number that should be at this index
-#             full_perm[ind] = atom_num
-#             for j in range(1, num_hydrogen + 1, 1):
-#                 full_perm[ind + j] = atom_num + j
-#
-#     b = x.shape[0]
-#     n = x.shape[1]
-#     flat_x = x.reshape(b * n, -1)
-#     flat_permute = (full_permute + (torch.arange(0, b) * n).unsqueeze(-1)).flatten().unsqueeze(-1).long()
-#     x_ordered = flat_x[flat_permute].reshape(b, n, flat_x.shape[-1])
-#
-#     parity = torch.tensor([perm_parity(perm) for perm in full_permute.clone()])
-#
-#     return x_ordered, parity

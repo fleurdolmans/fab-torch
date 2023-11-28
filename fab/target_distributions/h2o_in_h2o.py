@@ -34,25 +34,7 @@ class WaterInWaterBox(TestSystem):
         #  as in the openmmtools testsystems examples:
         #  https://openmmtools.readthedocs.io/en/stable/_modules/openmmtools/testsystems.html#AlanineDipeptideImplicit
 
-        # prmtop + crd example:
-        # prmtop_filename = get_data_filename("data/alanine-dipeptide-gbsa/alanine-dipeptide.prmtop")
-        # crd_filename = get_data_filename("data/alanine-dipeptide-gbsa/alanine-dipeptide.crd")
-        #
-        # # Initialize system.
-        # prmtop = app.AmberPrmtopFile(prmtop_filename)
-        # system = prmtop.createSystem(
-        #     implicitSolvent=app.OBC1, constraints=constraints, nonbondedCutoff=None, hydrogenMass=hydrogenMass
-        # )
-        # # Extract topology
-        # topology = prmtop.topology
-        # # Read positions.
-        # inpcrd = app.AmberInpcrdFile(crd_filename)
-        # positions = inpcrd.getPositions(asNumpy=True)
-        # self.topology, self.system, self.positions = topology, system, positions
-
         # TODO: Other parameters? HydrogenMass, cutoffs, etc.?
-        # TODO: Add radial restraint force to keep solvation shells close
-        # TODO: Add implicit solvent to the system
         self.num_atoms_per_solute = 3  # Water
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
@@ -60,7 +42,7 @@ class WaterInWaterBox(TestSystem):
         # pdb example:
         # Initial solute molecule
         pdb = app.PDBFile("/home/timsey/HDD/data/molecules/solvents/water.pdb")
-        # NOTE: Add solute force field if not water!
+        # TODO: Add solute force field if not water!
         # Add solvent
         modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
         forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
@@ -230,16 +212,18 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # samples (no likelihood available).
         summary_dict = {}
 
-        # TODO: Compute something like KL by histogram for both Flow and Flow+AIS settings. Check that this works.
+        # TODO: Fix self.get_kld_info() to do some kind of eval when we don't have a flow likelihood. Maybe use
+        #  aldp.py's evaluate_aldp as an example.
         # These are saved to disk, rather than to a dictionary.
-        if self.metric_dir is not None:
-            with torch.no_grad():
-                self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
+        # if self.metric_dir is not None:
+        #     with torch.no_grad():
+        #         self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
+            target_data = self.target_data.to(self.device)
             with torch.no_grad():
-                log_q_test = log_q_fn(self.target_data)
-                log_p_test = self.log_prob(self.target_data)
+                log_q_test = log_q_fn(target_data)
+                log_p_test = self.log_prob(target_data)
                 test_mean_log_prob = torch.mean(log_q_test)
                 kl_forward = torch.mean(log_p_test - log_q_test)
                 # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
@@ -289,7 +273,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
             # TODO: Error in batch i=190?
             x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
             x_d_np = torch.cat((x_d_np, x), dim=0)
-            log_p = self.log_prob(z)
+            log_p = self.log_prob(z)  # TODO: This is the logprob under the target, of the z-space samples?! Weird.
             log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
         log_p_avg = log_p_sum / len(z_test)
 

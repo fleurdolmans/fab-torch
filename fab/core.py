@@ -222,7 +222,6 @@ class FABModel(Model):
             #  problem-specific approaches (although ESS can always be done, but is spurious if the flow is
             #  missing modes: ESS already computed above).
             ais_info = self.target_distribution.performance_metrics(ais_samples, ais_log_w, iteration=iteration)
-            info.update(flow_info)
             info.update(ais_info)
 
             # Back to target = p^\alpha & q^(1-\alpha).

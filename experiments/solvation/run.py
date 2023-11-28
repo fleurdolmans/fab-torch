@@ -15,7 +15,7 @@ import torch
 
 def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter:
     def plot(fab_model, n_samples: int = cfg.training.batch_size, dim: int = cfg.target.dim):
-        print("Plotting not yet implemented for H2OinH2O...")
+        print("  Plotting not yet implemented for H2OinH2O...")
         return []
 
     return plot

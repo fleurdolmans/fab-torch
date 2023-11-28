@@ -173,7 +173,6 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             target,
             periodic_inds=periodic_inds,
         )
-
     elif cfg.flow.resampled_base:
         flow = make_wrapped_normflow_resampled_flow(
             dim,
@@ -181,7 +180,6 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
             act_norm=cfg.flow.act_norm,
         )
-
     elif cfg.flow.use_snf:
         flow = make_wrapped_normflow_snf_model(
             dim,
@@ -217,7 +215,6 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             common_epsilon_init_weight=cfg.fab.transition_operator.init_step_size,
             L=cfg.fab.transition_operator.n_inner_steps,
         )
-
     elif cfg.fab.transition_operator.type == "metropolis":
         transition_operator = Metropolis(
             n_ais_intermediate_distributions=cfg.fab.n_intermediate_distributions,
@@ -233,7 +230,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
             max_step_size=cfg.fab.transition_operator.init_step_size,
         )
     else:
-        raise NotImplementedError
+        transition_operator = None
 
     # use GPU if available
     if torch.cuda.is_available() and cfg.training.use_gpu:
@@ -243,6 +240,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         print("\n*************  Utilising CPU  ****************** \n")
 
+    # TODO: Also include non-AIS
     fab_model = FABModel(
         flow=flow,
         target_distribution=target,
@@ -361,7 +359,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
                 "If a buffer is loaded, it is expected to contain enough samples to sample from."
             )
         print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
-    print(f" buffer setup time: {time.time() - buffer_time}")
+    print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
+    print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
 
     print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)
@@ -369,17 +368,18 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     # Create trainer
     print("Setting up trainer...")
     if cfg.training.use_buffer is False:
-        raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
-        # trainer = Trainer(
-        #     model=fab_model,
-        #     optimizer=optimizer,
-        #     logger=logger,
-        #     plot=plot,
-        #     optim_schedular=scheduler,
-        #     save_path=save_path,
-        #     max_gradient_norm=cfg.training.max_grad_norm,
-        #     lr_step=lr_step,
-        # )
+        # TODO: Implement this for forward KL training with MD data!
+        # raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
+        trainer = Trainer(
+            model=fab_model,
+            optimizer=optimizer,
+            logger=logger,
+            plot=plot,
+            optim_schedular=scheduler,
+            save_path=save_path,
+            max_gradient_norm=cfg.training.max_grad_norm,
+            lr_step=lr_step,
+        )
     # elif cfg.training.prioritised_buffer is False:
     #     trainer = BufferTrainer(
     #         model=fab_model,
@@ -407,7 +407,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             w_adjust_max_clip=cfg.training.w_adjust_max_clip,
             alpha=cfg.fab.alpha,
             lr_step=lr_step,
-            warmup_scheduler=lr_warmup,
+            warmup_scheduler=warmup_scheduler,
         )
 
     print("Starting training...")

@@ -59,7 +59,7 @@ class PrioritisedBufferTrainer:
         self.flow_device = next(model.flow.parameters()).device
         self.max_adjust_w_clip = w_adjust_max_clip
         self.w_adjust_in_buffer_after_update = w_adjust_in_buffer_after_update
-        self.warmup_scheduler = warmup_scheduler
+        self.warmup_scheduler = warmup_scheduler  # TODO: currently not used (also not used in original)
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -135,20 +135,27 @@ class PrioritisedBufferTrainer:
         if start_iter >= n_iterations:
             raise Exception("Not running training as start_iter >= total training iterations")
 
-        pbar = tqdm(range(n_iterations - start_iter))
         max_it_time = 0.0
-        for pbar_iter in pbar:
-            i = pbar_iter + start_iter + 1
+        # pbar = tqdm(range(n_iterations - start_iter))
+        # for pbar_iter in pbar:
+        #     i = pbar_iter + start_iter + 1
+        for t in range(start_iter, n_iterations, 1):
+            i = t + 1
+            print(f"Iteration: {i}/{n_iterations}")
+            iter_start = time()
             it_start_time = time()
             self.optimizer.zero_grad()
             # collect samples and log weights with AIS and add to the buffer
+            ais_time = time()
             point_ais, log_w_ais = self.model.annealed_importance_sampler.sample_and_log_weights(
                 batch_size, purpose="fill buffer"
             )
+            print(f" AIS time: {time() - ais_time:.2f}s.")
             x_ais = point_ais.x.detach()
             log_w_ais = log_w_ais.detach()
             log_q_x_ais = point_ais.log_q.detach()
             self.buffer.add(x_ais.detach(), log_w_ais.detach(), log_q_x_ais.detach())
+            print(f" Buffer now contains {self.buffer.get_buffer_size()} points.")
 
             # we log info from the step of the recently generated ais points.
             info = self.model.get_iter_info()
@@ -156,6 +163,7 @@ class PrioritisedBufferTrainer:
             # We now take self.n_batches_buffer_sampling gradient steps using
             # data from the replay buffer.
             mini_dataset = self.buffer.sample_n_batches(batch_size=batch_size, n_batches=self.n_batches_buffer_sampling)
+            print(f" Sampled {self.n_batches_buffer_sampling} batches of size {batch_size}.")
             for (x, log_w, log_q_old, indices) in mini_dataset:
                 x, log_w, log_q_old, indices = (
                     x.to(self.flow_device),
@@ -223,25 +231,30 @@ class PrioritisedBufferTrainer:
                     )
 
             self.logger.write(info)
-            pbar.set_description(
-                f"loss: {loss.cpu().detach().item()}, ess base: {info['ess_base']}," f"ess ais: {info['ess_ais']}"
+            loss_str = (
+                f" Loss: {loss.cpu().detach().item():.4f}, "
+                f"ess base: {info['ess_base']:.4f}, "
+                f"ess ais: {info['ess_ais']:.4f}"
             )
+            # pbar.set_description(loss_str)
+            print(loss_str)
 
             if n_eval is not None:
                 if i in eval_iter:
-                    print("Evaluating...")
+                    print(" Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
-                    print("Making plots...")
+                    print(" Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
-                    print("Saving checkpoint...")
+                    print(" Saving checkpoint...")
                     self.save_checkpoint(i)
 
+            print(f" Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
 
             # End job if necessary
@@ -260,9 +273,7 @@ class PrioritisedBufferTrainer:
                     return
 
         print(f"\n Run completed in {(time() - start_time) / 3600:.2f} hours \n")
-        if tlimit is None:
-            print("Timelimit not set")
-        else:
+        if tlimit is not None:
             print(f"Run finished before timelimit of {tlimit:.2f} hours was reached. \n")
 
         self.logger.close()
