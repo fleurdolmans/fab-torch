@@ -231,7 +231,7 @@ class FABModel(Model):
             flow_info = self.target_distribution.performance_metrics(
                 None, None, self.flow.log_prob, batch_size=inner_batch_size, iteration=iteration
             )
-            info.update({"flow_" + key: val for key, val in flow_info.items()})
+            info.update(flow_info)
 
         return info
 

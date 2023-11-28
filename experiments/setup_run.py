@@ -360,8 +360,9 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
                 "If a buffer is loaded, it is expected to contain enough samples to sample from."
             )
         print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
-    print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
-    print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
+    if buffer is not None:
+        print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
+        print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
 
     print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)

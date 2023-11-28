@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 from fab.utils.logging import Logger, ListLogger
 from fab.types_ import Model
+from fab.core import FABModel
 import pathlib
 import os
 from time import time
@@ -18,7 +19,7 @@ Plotter = Callable[[Model], List[plt.Figure]]
 class Trainer:
     def __init__(
         self,
-        model: Model,
+        model: FABModel,
         optimizer: torch.optim.Optimizer,
         optim_schedular: Optional[lr_scheduler] = None,
         logger: Logger = ListLogger(),
@@ -26,15 +27,14 @@ class Trainer:
         max_gradient_norm: Optional[float] = 5.0,
         save_path: str = "",
         lr_step=1,
-        md_data_path=None,
     ):
-        assert md_data_path is not None, "Must provide `md_data_path` when training without AIS, currently."
         self.model = model
         self.optimizer = optimizer
         self.optim_schedular = optim_schedular
         self.lr_step = lr_step
         self.logger = logger
         self.plot = plot
+        self.flow_device = next(model.flow.parameters()).device
         # if no gradient clipping set max_gradient_norm to inf
         self.max_gradient_norm = max_gradient_norm if max_gradient_norm else float("inf")
         self.save_dir = save_path
@@ -62,6 +62,7 @@ class Trainer:
         eval_info = self.model.get_eval_info(outer_batch_size=eval_batch_size, inner_batch_size=batch_size)
         eval_info.update(step=i)
         self.logger.write(eval_info)
+        print(eval_info)
 
     def run(
         self,
@@ -98,30 +99,32 @@ class Trainer:
         # pbar = tqdm(range(n_iterations - start_iter))
         # for pbar_iter in pbar:
         #     i = pbar_iter + start_iter + 1
-        k, epoch = 0, 0  # Used for Maximum Likelihood (forward KL) training.
+        k, epoch, next_epoch = 0, 0, True  # Used for Maximum Likelihood (forward KL) training.
         for t in range(start_iter, n_iterations, 1):
             i = t + 1
-            print(f"Iteration: {i}/{n_iterations}")
+            if self.model.loss_type == "forward_kl" and next_epoch:
+                print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
+
+            print(f"  Iteration: {i}/{n_iterations}")
             iter_start = time()
             it_start_time = time()
             self.optimizer.zero_grad()
 
             if self.model.loss_type == "forward_kl":
-                if epoch == 0:
-                    print(" Following iterations correspond to epoch 0 of Forward KL training.")
                 train_data = self.model.target_distribution.train_data
                 # shuffle train data if first iteration
                 if k == 0:
                     permutation = torch.randperm(len(train_data))
                     self.model.target_distribution.train_data = train_data[permutation]
-                x_batch = train_data[k * batch_size: (k + 1) * batch_size, ...]
+                x_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
                 loss = self.model.loss(x_batch)
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points
                     epoch += 1
-                    print(f" Following iterations correspond to epoch {epoch} of Forward KL training.")
+                    next_epoch = True
                 else:
                     k += 1
+                    next_epoch = False
             else:
                 loss = self.model.loss(batch_size)
 
@@ -143,7 +146,7 @@ class Trainer:
             info.update(grad_norm=grad_norm.cpu().detach().item())
             self.logger.write(info)
 
-            loss_str = f" Loss: {loss.cpu().detach().item():.4f}"
+            loss_str = f"  Loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
             # pbar.set_description(loss_str)
@@ -151,20 +154,20 @@ class Trainer:
 
             if n_eval is not None:
                 if i in eval_iter:
-                    print(" Evaluating...")
+                    print("  Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
-                    print(" Making plots...")
+                    print("  Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
-                    print(" Saving checkpoint...")
+                    print("  Saving checkpoint...")
                     self.save_checkpoint(i)
 
-            print(f" Iteration time: {time() - iter_start:.2f}s.")
+            print(f"  Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
 
             # End job if necessary

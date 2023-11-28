@@ -213,7 +213,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         if data_path.suffix == ".pt":
             target_data = torch.load(str(data_path))
             assert len(target_data.shape) == 2, "Data must be of shape (num_frames, dim)."
-        elif data_path.suffix == ".pdb":  # TODO: This seems very slow?
+        elif data_path.suffix == ".pdb":  # TODO: This seems very slow for big files?
             pdb = app.PDBFile(str(data_path))
             target_data = []
             for i in range(pdb.getNumFrames()):
@@ -251,12 +251,14 @@ class H2OinH2O(nn.Module, TargetDistribution):
         #         self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
-            if self.eval_mode == "val":
+            if self.eval_mode == "val":  # TODO: batch this?
                 target_data = self.val_data.to(self.device)
             elif self.eval_mode == "test":
                 target_data = self.test_data.to(self.device)
-            with torch.no_grad():
+            with torch.no_grad():  # TODO: Is this correct?
                 log_q_test = log_q_fn(target_data)
+                # TODO: This gives huge negative numbers. Better if we multiply by factor 10: units are wrong
+                #  between MD and simulator? Seems unlikely, since both use the same WaterInWaterBox system...
                 log_p_test = self.log_prob(target_data)
                 test_mean_log_prob = torch.mean(log_q_test)
                 kl_forward = torch.mean(log_p_test - log_q_test)
