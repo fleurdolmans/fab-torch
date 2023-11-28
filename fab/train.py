@@ -26,7 +26,9 @@ class Trainer:
         max_gradient_norm: Optional[float] = 5.0,
         save_path: str = "",
         lr_step=1,
+        md_data_path=None,
     ):
+        assert md_data_path is not None, "Must provide `md_data_path` when training without AIS, currently."
         self.model = model
         self.optimizer = optimizer
         self.optim_schedular = optim_schedular
@@ -92,15 +94,37 @@ class Trainer:
         if start_iter >= n_iterations:
             raise Exception("Not running training as start_iter >= total training iterations")
 
-        pbar = tqdm(range(n_iterations - start_iter))
         max_it_time = 0.0
-
-        for pbar_iter in pbar:
-            i = pbar_iter + start_iter + 1
+        # pbar = tqdm(range(n_iterations - start_iter))
+        # for pbar_iter in pbar:
+        #     i = pbar_iter + start_iter + 1
+        k, epoch = 0, 0  # Used for Maximum Likelihood (forward KL) training.
+        for t in range(start_iter, n_iterations, 1):
+            i = t + 1
+            print(f"Iteration: {i}/{n_iterations}")
+            iter_start = time()
             it_start_time = time()
-
             self.optimizer.zero_grad()
-            loss = self.model.loss(batch_size)
+
+            if self.model.loss_type == "forward_kl":
+                if epoch == 0:
+                    print(" Following iterations correspond to epoch 0 of Forward KL training.")
+                train_data = self.model.target_distribution.train_data
+                # shuffle train data if first iteration
+                if k == 0:
+                    permutation = torch.randperm(len(train_data))
+                    self.model.target_distribution.train_data = train_data[permutation]
+                x_batch = train_data[k * batch_size: (k + 1) * batch_size, ...]
+                loss = self.model.loss(x_batch)
+                if (k + 1) * batch_size >= len(train_data):
+                    k = 0  # Restart epoch if current batch exceeds number of training data points
+                    epoch += 1
+                    print(f" Following iterations correspond to epoch {epoch} of Forward KL training.")
+                else:
+                    k += 1
+            else:
+                loss = self.model.loss(batch_size)
+
             if not torch.isnan(loss) and not torch.isinf(loss):
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
@@ -118,24 +142,29 @@ class Trainer:
             info.update(loss=loss.cpu().detach().item(), step=i)
             info.update(grad_norm=grad_norm.cpu().detach().item())
             self.logger.write(info)
+
+            loss_str = f" Loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
-                pbar.set_description(
-                    f"loss: {loss.cpu().detach().item()}, ess base: {info['ess_base']}," f"ess ais: {info['ess_ais']}"
-                )
-            else:
-                pbar.set_description(f"loss: {loss.cpu().detach().item()}")
+                loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
+            # pbar.set_description(loss_str)
+            print(loss_str)
+
             if n_eval is not None:
                 if i in eval_iter:
+                    print(" Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
+                    print(" Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
+                    print(" Saving checkpoint...")
                     self.save_checkpoint(i)
 
+            print(f" Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
 
             # End job if necessary
@@ -154,9 +183,7 @@ class Trainer:
                     return
 
         print(f"\n Run completed in {(time() - start_time) / 3600:.2f} hours \n")
-        if tlimit is None:
-            print("Timelimit not set")
-        else:
+        if tlimit is not None:
             print(f"Run finished before timelimit of {tlimit:.2f} hours was reached. \n")
 
         self.logger.close()

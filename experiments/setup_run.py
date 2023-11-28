@@ -240,7 +240,6 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         print("\n*************  Utilising CPU  ****************** \n")
 
-    # TODO: Also include non-AIS
     fab_model = FABModel(
         flow=flow,
         target_distribution=target,
@@ -275,17 +274,18 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         save_path = os.path.join(wandb.run.dir, save_path)
     pathlib.Path(save_path).mkdir(parents=True, exist_ok=True)
 
-    n_iterations = get_n_iterations(
-        n_training_iter=cfg.training.n_iterations,
-        n_flow_forward_pass=cfg.training.n_flow_forward_pass,
-        batch_size=cfg.training.batch_size,
-        loss_type=cfg.fab.loss_type,
-        n_transition_operator_inner_steps=cfg.fab.transition_operator.n_inner_steps,
-        n_intermediate_ais_dist=cfg.fab.n_intermediate_distributions,
-        transition_operator_type=cfg.fab.transition_operator.type,
-        use_buffer=cfg.training.use_buffer,
-        min_buffer_length=cfg.training.min_buffer_length,
-    )
+    n_iterations = cfg.training.n_iterations
+    # n_iterations = get_n_iterations(
+    #     n_training_iter=cfg.training.n_iterations,
+    #     n_flow_forward_pass=cfg.training.n_flow_forward_pass,
+    #     batch_size=cfg.training.batch_size,
+    #     loss_type=cfg.fab.loss_type,
+    #     n_transition_operator_inner_steps=cfg.fab.transition_operator.n_inner_steps,
+    #     n_intermediate_ais_dist=cfg.fab.n_intermediate_distributions,
+    #     transition_operator_type=cfg.fab.transition_operator.type,
+    #     use_buffer=cfg.training.use_buffer,
+    #     min_buffer_length=cfg.training.min_buffer_length,
+    # )
     print(f"Running for {n_iterations} iterations.")
     cfg.training.n_iterations = n_iterations
 
@@ -336,6 +336,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     # Scheduler warmup
     lr_warmup = "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None
+    warmup_scheduler = None
     if lr_warmup:
         warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda s: min(1.0, s / cfg.training.warmup_iter)

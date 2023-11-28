@@ -32,7 +32,9 @@ def _run(cfg: DictConfig):
             energy_max=cfg.target.energy_max,
             n_threads=cfg.target.n_threads,
             device="cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu",
-            target_samples_path=cfg.target.samples_path,
+            train_samples_path=cfg.target.train_samples_path,
+            val_samples_path=cfg.target.val_samples_path,
+            test_samples_path=cfg.target.test_samples_path,
             save_dir=cfg.evaluation.save_path,
         )
     else:

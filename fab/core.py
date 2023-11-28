@@ -55,7 +55,7 @@ class FABModel(Model):
             "target_forward_kl",
         ]
         if loss_type in EXPERIMENTAL_LOSSES:
-            raise Exception("Running using experiment loss not used within the main FAB paper.")
+            warnings.warn("Running using experiment loss not used within the main FAB paper.")
         if loss_type in ALPHA_DIV_TARGET_LOSSES:
             assert alpha is not None, "Alpha must be specified if using the alpha div loss."
         self.alpha = alpha
@@ -86,12 +86,11 @@ class FABModel(Model):
         if self.loss_type is None:
             raise NotImplementedError("If loss_type is None, then the loss must be " "manually calculated.")
         if self.loss_type == "fab_alpha_div":
-            # FAB loss estimated with AIS targeting minimum var IS distribution.
-            return self.fab_alpha_div(args)
+            return self.fab_alpha_div(args)  # FAB loss estimated with AIS targeting minimum var IS distribution.
         elif self.loss_type == "forward_kl":
-            return self.forward_kl(args)
+            return self.forward_kl(args)  # Maximum likelihood (forward KL) using samples from p (e.g., MD data).
         elif self.loss_type == "flow_reverse_kl":
-            return self.flow_reverse_kl(args)
+            return self.flow_reverse_kl(args)  # Using samples from the flow: mode seeking.
         elif self.loss_type == "flow_alpha_2_div":
             return self.flow_alpha_2_div(args)
         elif self.loss_type == "flow_alpha_2_div_unbiased":
@@ -99,7 +98,7 @@ class FABModel(Model):
         elif self.loss_type == "flow_alpha_2_div_nis":
             return self.flow_alpha_2_div_nis(args)
         elif self.loss_type == "target_forward_kl":
-            return self.target_forward_kl(args)
+            return self.target_forward_kl(args)  # Maximum likelihood (forward KL) using target p distribution.
         elif self.loss_type == "fab_ub_alpha_2_div":
             return self.fab_ub_alpha_div_loss(args)
         else:
@@ -200,6 +199,7 @@ class FABModel(Model):
             iteration: Optional[int] = None,
             ais_only: bool = False,
     ) -> Dict[str, Any]:
+        info = {}
         if hasattr(self, "annealed_importance_sampler"):
             if set_p_target:
                 self.set_ais_target(min_is_target=False)  # Evaluate with target=p.
@@ -207,10 +207,10 @@ class FABModel(Model):
                 outer_batch_size, inner_batch_size
             )
             # These ESS values will be spurious if the Flow and/or Flow+AIS is missing modes.
-            info = {
+            info.update({
                 "eval_ess_flow": effective_sample_size(log_w=base_log_w, normalised=False).item(),  # Flow only.
                 "eval_ess_ais": effective_sample_size(log_w=ais_log_w, normalised=False).item(),  # Flow+AIS.
-            }
+            })
 
             if not ais_only:
                 flow_info = self.target_distribution.performance_metrics(
@@ -226,11 +226,13 @@ class FABModel(Model):
 
             # Back to target = p^\alpha & q^(1-\alpha).
             self.set_ais_target(min_is_target=True)
-
         else:
-            raise NotImplementedError
-            # TODO: Implement version without AIS: just evaluate the base flow here, similar to the first lines of the
-            #  above code, but not using self.model.flow to generate data.
+            # Evaluates using the flow logprob on the target data
+            flow_info = self.target_distribution.performance_metrics(
+                None, None, self.flow.log_prob, batch_size=inner_batch_size, iteration=iteration
+            )
+            info.update({"flow_" + key: val for key, val in flow_info.items()})
+
         return info
 
     def save(self, path: "str"):

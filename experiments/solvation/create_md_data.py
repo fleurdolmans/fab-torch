@@ -14,16 +14,16 @@ if __name__ == "__main__":
     See also:
     http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#saving-the-results
     """
-    out_dir = pathlib.Path("/home/timsey/Projects/fab-torch/pycharm_tmp/outputs/solvation/md/")
+    out_dir = pathlib.Path("/home/timsey/HDD/data/molecules/md/")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    dim = 3 * (3 + 3 * 8)  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
+    dim = 3 * (3 + 3 * 4)  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
     temperature = 300.0  # Kelvin
     equi_steps = 1e3  # Steps for equilibration
     burnin_steps = 1e5  # Steps for burn-in
-    num_steps = 1e5  # Simulation steps
+    num_steps = 1e4  # Simulation steps
     report_interval = 1e3  # Report to stdout every n steps
-    save_interval = 100  # Save positions every m steps
+    save_interval = 10  # Save positions every m steps
 
     system = WaterInWaterBox(dim)
 

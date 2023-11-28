@@ -1,5 +1,11 @@
 import torch
 from torch import nn
+from torch import Tensor
+from typing import Optional, List, Dict, Any, Callable, Union
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 import numpy as np
 import tempfile
 import pathlib
@@ -8,7 +14,6 @@ import os
 from fab.target_distributions.base import TargetDistribution
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
 
-import boltzgen as bg
 from simtk import openmm as mm
 from simtk import unit
 from simtk.openmm import app
@@ -27,7 +32,7 @@ class WaterInWaterBox(TestSystem):
 
     """
 
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim: int, **kwargs):
         TestSystem.__init__(self, **kwargs)
         # http://docs.openmm.org/latest/userguide/application/02_running_sims.html
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
@@ -84,15 +89,18 @@ class WaterInWaterBox(TestSystem):
 class H2OinH2O(nn.Module, TargetDistribution):
     def __init__(
         self,
-        dim=3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
-        temperature=300,
-        energy_cut=1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
-        energy_max=1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
-        n_threads=4,
-        data_path=None,
-        device="cpu",
-        target_samples_path=None,
-        save_dir=None,
+        dim: int = 3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
+        temperature: float = 300,
+        energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
+        energy_max: float = 1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
+        n_threads: int = 4,
+        train_samples_path: Optional[str] = None,
+        val_samples_path: Optional[str] = None,
+        test_samples_path: Optional[str] = None,
+        eval_mode: Literal["val", "test"] = "val",
+        use_val_data_for_transform: bool = False,
+        device: str = "cpu",
+        save_dir: Optional[str] = None,
     ):
         """
         Boltzmann distribution of H2O in H2O.
@@ -101,9 +109,12 @@ class H2OinH2O(nn.Module, TargetDistribution):
         :param energy_max: Maximum energy allowed, higher energies are cut
         :param n_threads: Number of threads used to evaluate the log
             probability for batches
-        :param data_path: Path to the data used for coordinate transform
+        :param train_samples_path: Path to the target samples for training (e.g., MD samples).
+        :param val_samples_path: Path to the target samples for evaluation (e.g., MD samples).
+        :param test_samples_path: Path to the target samples for testing (e.g., MD samples).
+        :param eval_mode: Whether to use the validation or test set for evaluation.
         :param device: Device on which the model is run
-        :param target_samples_path: Path to the target samples (e.g., MD samples).
+
         :param save_dir: Directory being used for saving models, metric, etc.
         """
         super(H2OinH2O, self).__init__()
@@ -113,43 +124,38 @@ class H2OinH2O(nn.Module, TargetDistribution):
         self.energy_cut = energy_cut
         self.energy_max = energy_max
         self.n_threads = n_threads
-        self.data_path = data_path
         self.device = device
-        self.target_samples_path = pathlib.Path(target_samples_path)
+
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")
         if not os.path.exists(self.metric_dir):
             os.makedirs(self.metric_dir)
 
+        # Initialise system
+        self.system = WaterInWaterBox(dim)
+
+        # Load any MD data
+        self.eval_mode = eval_mode
+        self.train_data, self.val_data, self.test_data = None, None, None
+        self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
+        if train_samples_path:
+            self.train_samples_path = pathlib.Path(train_samples_path)
+            self.train_data = self.load_target_data(self.train_samples_path, dim)
+        if val_samples_path:
+            self.val_samples_path = pathlib.Path(val_samples_path)
+            self.val_data = self.load_target_data(self.val_samples_path, dim)
+        if test_samples_path:
+            self.test_samples_path = pathlib.Path(test_samples_path)
+            self.test_data = self.load_target_data(self.test_samples_path, dim)
+
+        # Generate trajectory for coordinate transform if no data path is specified
         # Steps to take:
         # 1. Load topology of solute.
         # 2. Solvate the solute.
         # 3. Add the solute and solvent force fields.
         # 4. Add the implicit solvent force field / external potential term.
-
-        self.system = WaterInWaterBox(dim)
-        # TODO: What filetype are MD samples usually saved in? Support this.
-        if self.target_samples_path is None:
-            raise ValueError("Cannot evaluate H20inH20 system without target samples.")
-        if self.target_samples_path.suffix == ".pt":
-            self.target_data = torch.load(target_samples_path)
-            assert len(self.target_data.shape) == 2, "Data must be of shape (num_frames, dim)."
-        elif self.target_samples_path.suffix == ".pdb":
-            pdb = app.PDBFile(str(self.target_samples_path))
-            target_data = []
-            for i in range(pdb.getNumFrames()):
-                # in nanometers
-                frame = torch.from_numpy(np.array(pdb.getPositions(asNumpy=True, frame=i))).reshape(-1, dim)
-                target_data.append(frame)
-            self.target_data = torch.cat(target_data, dim=0)
-        else:
-            raise ValueError(
-                "Cannot load MD samples file with suffix: {}. Must be .pt or .pdb".format(target_samples_path.suffix)
-            )
-
-        # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
-        if data_path is None:
+        if not val_samples_path or not use_val_data_for_transform:
             # Used for simulation
             traj_sim = app.Simulation(
                 self.system.topology,
@@ -162,17 +168,15 @@ class H2OinH2O(nn.Module, TargetDistribution):
             state = traj_sim.context.getState(getPositions=True)
             position = state.getPositions(True).value_in_unit(unit.nanometer)
             tmp_dir = pathlib.Path(tempfile.gettempdir())
-            data_path = tmp_dir / f"h2o_in_h2o_{dim}.pt"
-
-            torch.save(torch.tensor(position.reshape(1, dim).astype(np.float64)), data_path)
+            transform_data_path = tmp_dir / f"h2o_in_h2o_{dim}.pt"
+            torch.save(torch.tensor(position.reshape(1, dim).astype(np.float64)), transform_data_path)
             del traj_sim
+        else:
+            transform_data_path = self.val_samples_path
 
-        data_path = pathlib.Path(data_path)
-        assert data_path.suffix == ".pt", "Data path must be a .pt file"
-        self.transform_data = torch.load(data_path)
+        self.transform_data = self.load_target_data(transform_data_path, dim)
         assert self.transform_data.shape[-1] == dim, (
-            f"Data shape ({self.transform_data.shape}) does not match number of "
-            f"coordinates in current system ({dim})."
+            f"Data shape ({self.transform_data.shape}) does not match number of coordinates in current system ({dim})."
         )
 
         self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
@@ -203,11 +207,38 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 transform=self.coordinate_transform,
             )
 
-    def log_prob(self, x: torch.tensor):
+    @staticmethod
+    def load_target_data(data_path: pathlib.Path, dim: int):
+        # TODO: What filetype are MD samples usually saved in? Support this.
+        if data_path.suffix == ".pt":
+            target_data = torch.load(str(data_path))
+            assert len(target_data.shape) == 2, "Data must be of shape (num_frames, dim)."
+        elif data_path.suffix == ".pdb":  # TODO: This seems very slow?
+            pdb = app.PDBFile(str(data_path))
+            target_data = []
+            for i in range(pdb.getNumFrames()):
+                # in nanometers
+                frame = torch.from_numpy(np.array(pdb.getPositions(asNumpy=True, frame=i))).reshape(-1, dim)
+                target_data.append(frame)
+            target_data = torch.cat(target_data, dim=0)
+        else:
+            raise ValueError(
+                "Cannot load MD samples file with suffix: {}. Must be .pt or .pdb".format(data_path.suffix)
+            )
+        return target_data
+
+    def log_prob(self, x: Tensor):
         # Add global potential for implicit solvent here?
         return self.p.log_prob(x)
 
-    def performance_metrics(self, samples, log_w, log_q_fn=None, batch_size=1000, iteration=None):
+    def performance_metrics(
+            self,
+            samples: Optional[Tensor] = None,
+            log_w: Optional[Tensor] = None,
+            log_q_fn: Callable = None,
+            batch_size: int = 1000,
+            iteration: Optional[int] = None
+    ):
         # This function is typically called both with Flow (likelihood available) and with Flow+AIS
         # samples (no likelihood available).
         summary_dict = {}
@@ -215,12 +246,15 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # TODO: Fix self.get_kld_info() to do some kind of eval when we don't have a flow likelihood. Maybe use
         #  aldp.py's evaluate_aldp as an example.
         # These are saved to disk, rather than to a dictionary.
-        # if self.metric_dir is not None:
+        # if self.metric_dir is not None and samples is not None and log_w is not None:
         #     with torch.no_grad():
         #         self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
-            target_data = self.target_data.to(self.device)
+            if self.eval_mode == "val":
+                target_data = self.val_data.to(self.device)
+            elif self.eval_mode == "test":
+                target_data = self.test_data.to(self.device)
             with torch.no_grad():
                 log_q_test = log_q_fn(target_data)
                 log_p_test = self.log_prob(target_data)
@@ -238,12 +272,19 @@ class H2OinH2O(nn.Module, TargetDistribution):
             pass  # There is no evaluation currently that only works for Flow+AIS samples.
         return summary_dict
 
-    def get_kld_info(self, samples, log_w, batch_size=1000, iteration=None):
+    def get_kld_info(
+            self,
+            samples: Optional[Tensor] = None,
+            log_w: Optional[Tensor] = None,
+            batch_size: int = 1000,
+            iteration: Optional[int] = None,
+    ):
         """
         Computes the KLD between the target distribution and the flow distribution, and saves the KLD histogram to
         disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
         need the likelihood, so we can actually evaluate Flow+AIS samples as well.
         """
+        raise NotImplementedError("This function is not yet correctly implemented for H2OinH2O.")
 
         # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
         #  transforms have the opposite forward/inverse convention to ours.
