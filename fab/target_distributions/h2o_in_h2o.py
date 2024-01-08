@@ -1,4 +1,6 @@
 import torch
+import h5py
+import warnings
 from torch import nn
 from torch import Tensor
 from typing import Optional, List, Dict, Any, Callable, Union
@@ -32,7 +34,7 @@ class WaterInWaterBox(TestSystem):
 
     """
 
-    def __init__(self, dim: int, **kwargs):
+    def __init__(self, solvent_pdb_path: str, dim: int, **kwargs):
         TestSystem.__init__(self, **kwargs)
         # http://docs.openmm.org/latest/userguide/application/02_running_sims.html
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
@@ -44,11 +46,17 @@ class WaterInWaterBox(TestSystem):
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
 
-        # pdb example:
+        # Steps to take:
+        # 1. Load topology of solute.
+        # 2. Solvate the solute.
+        # 3. Add the solute and solvent force fields.
+        # 4. Add the implicit solvent force field / external potential term.
+
         # Initial solute molecule
-        pdb = app.PDBFile("/home/timsey/HDD/data/molecules/solvents/water.pdb")
+        pdb = app.PDBFile(solvent_pdb_path)
         # TODO: Add solute force field if not water!
         # Add solvent
+        # This pdb file has a single water molecule, where the OH bonds are approx 0.1 nm in length.
         modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
         forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
         # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
@@ -89,6 +97,7 @@ class WaterInWaterBox(TestSystem):
 class H2OinH2O(nn.Module, TargetDistribution):
     def __init__(
         self,
+        solvent_pdb_path: str,
         dim: int = 3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -132,31 +141,30 @@ class H2OinH2O(nn.Module, TargetDistribution):
             os.makedirs(self.metric_dir)
 
         # Initialise system
-        self.system = WaterInWaterBox(dim)
+        self.system = WaterInWaterBox(solvent_pdb_path, dim)
 
         # Load any MD data
+        # TODO: This data is not put in the standard coordinate form with the solute at the origin. Should use the
+        #  `setup_coordinate_system` function on this data to make sure it matches what the flow outputs after the
+        #  z --> x transform.
         self.eval_mode = eval_mode
+        self.raw_train_data, self.raw_val_data, self.raw_test_data = None, None, None
         self.train_data, self.val_data, self.test_data = None, None, None
         self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
         if train_samples_path:
             self.train_samples_path = pathlib.Path(train_samples_path)
-            self.train_data = self.load_target_data(self.train_samples_path, dim)
+            # OH bonds still ~0.1 nm in length for this data.
+            self.raw_train_data = self.load_target_data(self.train_samples_path, dim)
         if val_samples_path:
             self.val_samples_path = pathlib.Path(val_samples_path)
-            self.val_data = self.load_target_data(self.val_samples_path, dim)
+            self.raw_val_data = self.load_target_data(self.val_samples_path, dim)
         if test_samples_path:
             self.test_samples_path = pathlib.Path(test_samples_path)
-            self.test_data = self.load_target_data(self.test_samples_path, dim)
+            self.raw_test_data = self.load_target_data(self.test_samples_path, dim)
 
         # Generate trajectory for coordinate transform if no data path is specified
-        # Steps to take:
-        # 1. Load topology of solute.
-        # 2. Solvate the solute.
-        # 3. Add the solute and solvent force fields.
-        # 4. Add the implicit solvent force field / external potential term.
         integrator = mm.LangevinMiddleIntegrator
         if not val_samples_path or not use_val_data_for_transform:
-            # Used for simulation
             traj_sim = app.Simulation(
                 self.system.topology,
                 self.system.system,
@@ -166,20 +174,38 @@ class H2OinH2O(nn.Module, TargetDistribution):
             traj_sim.context.setPositions(self.system.positions)
             traj_sim.minimizeEnergy()
             state = traj_sim.context.getState(getPositions=True)
-            position = state.getPositions(True).value_in_unit(unit.nanometer)
-            tmp_dir = pathlib.Path(tempfile.gettempdir())
-            transform_data_path = tmp_dir / f"h2o_in_h2o_{dim}.pt"
-            torch.save(torch.tensor(position.reshape(1, dim).astype(np.float64)), transform_data_path)
+            position = state.getPositions(True).value_in_unit(unit.nanometer)  # TODO: Are these the same units as MD samples?
+            transform_data = torch.tensor(position.reshape(1, dim).astype(np.float64))
             del traj_sim
+            self.transform_data = transform_data
         else:
-            transform_data_path = self.val_samples_path
+            self.transform_data = self.val_data
 
-        self.transform_data = self.load_target_data(transform_data_path, dim)
         assert self.transform_data.shape[-1] == dim, (
             f"Data shape ({self.transform_data.shape}) does not match number of coordinates in current system ({dim})."
         )
 
         self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+
+        # Use this transform to setup the coordinate system for loaded MD data as well.
+        # raw_train/val/test_data = original x data loaded from dist
+        # train/val/test_data = x data in centralised coordinate system
+        if self.raw_train_data is not None:
+            b = self.raw_train_data.shape[0]
+            # OH bonds still ~0.1 nm apart
+            self.train_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
+                self.raw_train_data.reshape(b, -1)  # Setup expects flattened coordinates
+            )
+        if self.raw_val_data is not None:
+            b = self.raw_val_data.shape[0]
+            self.val_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
+                self.raw_val_data.reshape(b, -1)
+            )
+        if self.raw_test_data is not None:
+            b = self.raw_test_data.shape[0]
+            self.test_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
+                self.raw_test_data.reshape(b, -1)
+            )
 
         if n_threads > 1:
             self.p = TransformedBoltzmannParallel(
@@ -210,10 +236,14 @@ class H2OinH2O(nn.Module, TargetDistribution):
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):
         # TODO: What filetype are MD samples usually saved in? Support this.
-        if data_path.suffix == ".pt":
+        if data_path.suffix == ".h5":
+            with h5py.File(str(data_path), "r") as f:
+                target_data = torch.from_numpy(f["coordinates"][()])
+        elif data_path.suffix == ".pt":
             target_data = torch.load(str(data_path))
             assert len(target_data.shape) == 2, "Data must be of shape (num_frames, dim)."
         elif data_path.suffix == ".pdb":  # TODO: This seems very slow for big files?
+            warnings.warn("Loading MD samples from .pdb file. This is very slow. Use .pt or .h5 instead.")
             pdb = app.PDBFile(str(data_path))
             target_data = []
             for i in range(pdb.getNumFrames()):

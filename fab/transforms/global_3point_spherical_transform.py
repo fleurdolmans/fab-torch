@@ -84,17 +84,17 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         std_theta = z.new_ones(1)
         self.register_buffer("std_theta", std_theta)
 
-    def cartesian_to_z(self, x, setup=False):
+    def setup_coordinate_system(self, x):
         """
-        Transform Cartesian coordinates to internal coordinates.
+        Set up the global coordinate system. Essentially just
         :param x: Cartesian coordinates: n_batch x n_atoms . 3
-        :param setup: If True, use to set up coordinate scale for r. x must then be a single frame of shape (1, ndim).
-        :return: Spherical coordinates: n_batch x n_atoms . 3, and log det Jacobian
+
+        :return:
+        x: Centralised Cartesian coordinates: n_batch x n_atoms x 3
+        x_coord: Flattened centralised Cartesian coordinates: n_batch x n_atoms . 3
+        z_axis: definition of z-axis (coordinates): n_batch x 3
+        y_axis: definition of y-axis (coordinates): n_batch x 3
         """
-
-        if setup:
-            assert x.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
-
         x = x.reshape(x.shape[0], -1, 3)
 
         # Setup rotation axes
@@ -107,9 +107,24 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  yz-plane. We then define all other atoms w.r.t. this reference frame, allowing us to use 3D spherical
         #  coordinates. Note that this is equivalent to using planar angles between the solute-molecule-plane and
         #  the plane formed by the first two solute atoms and any other atom in the system.
-        x = self.setup_coordinate_system(x, z_axis, y_axis)
+        # x is then the original x coordinates in the new coordinate system.
+        x = self.rotate_into_global_coordinate_system(x, z_axis, y_axis)
 
-        x_coord = x.reshape(x.shape[0], -1)  # For tests
+        x_coord = x.reshape(x.shape[0], -1)  # The original x coordinates in the new coordinate system, but flattened.
+        return x, x_coord, z_axis, y_axis
+
+    def cartesian_to_z(self, x, setup=False):
+        """
+        Transform Cartesian coordinates to internal coordinates.
+        :param x: Cartesian coordinates: n_batch x n_atoms . 3
+        :param setup: If True, use to set up coordinate scale for r. x must then be a single frame of shape (1, ndim).
+        :return: Spherical coordinates: n_batch x n_atoms . 3, and log det Jacobian
+        """
+
+        if setup:
+            assert x.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
+
+        x, x_coord, z_axis, y_axis = self.setup_coordinate_system(x)
 
         solute_atom0 = x[:, 0, :]
         if not torch.isclose(x.new_zeros(x.shape[0], 3), solute_atom0).all():
@@ -374,7 +389,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         return x, log_det_jac
 
     @staticmethod
-    def setup_coordinate_system(x, z_axis, y_axis):
+    def rotate_into_global_coordinate_system(x, z_axis, y_axis):
         """
         Sets up the global coordinate system that we transform into 3D spherical coordinates.
 
@@ -420,7 +435,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
 
 def unit_vector(vector):
-    """ "
+    """
     Returns the unit vector of the vector.
     """
     return vector / torch.norm(vector, dim=-1, keepdim=True)

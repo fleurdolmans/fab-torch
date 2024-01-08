@@ -1,6 +1,7 @@
 from simtk import openmm as mm
 from simtk import unit
 from simtk.openmm import app
+from mdtraj.reporters import HDF5Reporter
 from sys import stdout
 import pathlib
 
@@ -14,18 +15,19 @@ if __name__ == "__main__":
     See also:
     http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#saving-the-results
     """
+    solvent_pdb_path = "/home/timsey/HDD/data/molecules/solvents/water.pdb"
     out_dir = pathlib.Path("/home/timsey/HDD/data/molecules/md/")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    dim = 3 * (3 + 3 * 4)  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
+    dim = 3 * (3 + 3 * 4)  # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     temperature = 300.0  # Kelvin
     equi_steps = 1e3  # Steps for equilibration
     burnin_steps = 1e5  # Steps for burn-in
-    num_steps = 1e4  # Simulation steps
+    num_steps = 1e3  # Simulation steps
     report_interval = 1e3  # Report to stdout every n steps
     save_interval = 10  # Save positions every m steps
 
-    system = WaterInWaterBox(dim)
+    system = WaterInWaterBox(solvent_pdb_path, dim)
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
     integrator = mm.LangevinMiddleIntegrator(
@@ -39,8 +41,7 @@ if __name__ == "__main__":
         platform=mm.Platform.getPlatformByName("Reference"),
     )
     sim.context.setPositions(system.positions)
-    # Minimize energy: Perform an energy minimization to remove any steric clashes or
-    # irregularities in the initial configuration
+    # Minimize energy: Perform an energy minimization to remove any irregularities in the initial configuration
     sim.minimizeEnergy()
     # Add stdout reporter
     sim.reporters.append(
@@ -63,12 +64,22 @@ if __name__ == "__main__":
     # first few steps to allow the system to reach equilibrium
     sim.step(burnin_steps)
     # Add file reporter
+    # sim.reporters.append(
+    #     app.pdbreporter.PDBReporter(
+    #         out_dir / (
+    #             f"output_dim{int(dim)}_temp{int(temperature)}_eq{int(equi_steps)}_burn{int(burnin_steps)}"
+    #             f"_steps{int(num_steps)}_every{int(save_interval)}.pdb"
+    #         ),
+    #         save_interval,
+    #     )
+    # )
+    # For MDTraj
     sim.reporters.append(
-        app.pdbreporter.PDBReporter(
-            out_dir / (
+        HDF5Reporter(
+            str(out_dir / (
                 f"output_dim{int(dim)}_temp{int(temperature)}_eq{int(equi_steps)}_burn{int(burnin_steps)}"
-                f"_steps{int(num_steps)}_every{int(save_interval)}.pdb"
-            ),
+                f"_steps{int(num_steps)}_every{int(save_interval)}.h5"
+            )),
             save_interval,
         )
     )

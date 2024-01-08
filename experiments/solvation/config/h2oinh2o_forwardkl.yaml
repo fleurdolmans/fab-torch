@@ -8,8 +8,9 @@ target:                               # Properties of molecular system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.pdb  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.pdb
+  solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
+  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5  # Filepath to load samples from
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5
   test_samples_path: null
 
 
@@ -52,7 +53,7 @@ training:                             # Properties of the training procedure
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
   n_iterations: 100 #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
-  batch_size: 1024 # 1024               # Int, batch size used during training
+  batch_size: 4 # 1024               # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true

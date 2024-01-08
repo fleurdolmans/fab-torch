@@ -1,5 +1,5 @@
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from fab.utils.plotting import plot_contours, plot_marginal_pair
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 from fab.target_distributions.h2o_in_h2o import H2OinH2O
@@ -26,6 +26,7 @@ def _run(cfg: DictConfig):
     if cfg.target.solute == "water" and cfg.target.solvent == "water":
         assert cfg.target.dim % 3 == 0, "Dimension must be divisible by 3 for water in water."
         target = H2OinH2O(
+            solvent_pdb_path=cfg.target.solvent_pdb_path,
             dim=cfg.target.dim,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,
@@ -48,6 +49,7 @@ def _run(cfg: DictConfig):
 
 @hydra.main(config_path="./config/", config_name="h2oinh2o_fab_pbuff.yaml", version_base="1.1")
 def run(cfg: DictConfig):
+    print(OmegaConf.to_yaml(cfg))
     _run(cfg)
 
 
