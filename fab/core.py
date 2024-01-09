@@ -237,7 +237,10 @@ class FABModel(Model):
 
     def save(self, path: "str"):
         """Save FAB model to file."""
-        torch.save({"flow": self.flow.state_dict(), "trans_op": self.transition_operator.state_dict()}, path)
+        save_dict = {"flow": self.flow.state_dict()}
+        if hasattr(self, "transition_operator"):
+            save_dict.update({"trans_op": self.transition_operator.state_dict()})
+        torch.save(save_dict, path)
 
     def load(
         self,
