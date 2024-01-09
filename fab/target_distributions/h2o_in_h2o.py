@@ -154,13 +154,13 @@ class H2OinH2O(nn.Module, TargetDistribution):
         if train_samples_path:
             self.train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
-            self.raw_train_data = self.load_target_data(self.train_samples_path, dim)
+            self.raw_train_data = self.load_target_data(self.train_samples_path, dim).double()
         if val_samples_path:
             self.val_samples_path = pathlib.Path(val_samples_path)
-            self.raw_val_data = self.load_target_data(self.val_samples_path, dim)
+            self.raw_val_data = self.load_target_data(self.val_samples_path, dim).double()
         if test_samples_path:
             self.test_samples_path = pathlib.Path(test_samples_path)
-            self.raw_test_data = self.load_target_data(self.test_samples_path, dim)
+            self.raw_test_data = self.load_target_data(self.test_samples_path, dim).double()
 
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
@@ -175,11 +175,11 @@ class H2OinH2O(nn.Module, TargetDistribution):
             traj_sim.minimizeEnergy()
             state = traj_sim.context.getState(getPositions=True)
             position = state.getPositions(True).value_in_unit(unit.nanometer)  # TODO: Are these the same units as MD samples?
-            transform_data = torch.tensor(position.reshape(1, dim).astype(np.float64))
+            transform_data = torch.tensor(position.reshape(1, dim)).double()
             del traj_sim
             self.transform_data = transform_data
         else:
-            self.transform_data = self.val_data
+            self.transform_data = self.raw_val_data.clone()[0].reshape(1, dim)
 
         assert self.transform_data.shape[-1] == dim, (
             f"Data shape ({self.transform_data.shape}) does not match number of coordinates in current system ({dim})."
@@ -191,20 +191,31 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # raw_train/val/test_data = original x data loaded from dist
         # train/val/test_data = x data in centralised coordinate system
         if self.raw_train_data is not None:
-            b = self.raw_train_data.shape[0]
-            # OH bonds still ~0.1 nm apart
+            # OH bonds are still ~0.1 nm apart
             self.train_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_train_data.reshape(b, -1)  # Setup expects flattened coordinates
+                self.raw_train_data.reshape(-1, self.dim)  # Setup expects flattened coordinates
             )
+            # Store new coordinates for visualisation tests (notebook).
+            fr = h5py.File(str(self.train_samples_path), "r")
+            orig_coords = torch.from_numpy(fr["coordinates"][()])
+            new_coords = self.train_data.numpy()
+            new_filepath = str(self.train_samples_path.parent / self.train_samples_path.stem) + "_centered.h5"
+            with h5py.File(new_filepath, "w") as fw:
+                for obj in fr.keys():
+                    fr.copy(obj, fw)
+                assert np.isclose(fw["coordinates"][...], orig_coords).all(), (
+                    "Original coordinates not copied correctly."
+                )
+                fw["coordinates"][...] = new_coords
+            fr.close()
+
         if self.raw_val_data is not None:
-            b = self.raw_val_data.shape[0]
             self.val_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_val_data.reshape(b, -1)
+                self.raw_val_data.reshape(-1, self.dim)
             )
         if self.raw_test_data is not None:
-            b = self.raw_test_data.shape[0]
             self.test_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_test_data.reshape(b, -1)
+                self.raw_test_data.reshape(-1, self.dim)
             )
 
         if n_threads > 1:
@@ -257,9 +268,12 @@ class H2OinH2O(nn.Module, TargetDistribution):
             )
         return target_data
 
-    def log_prob(self, x: Tensor):
+    def log_prob(self, z: Tensor):
         # Add global potential for implicit solvent here?
-        return self.p.log_prob(x)
+        return self.p.log_prob(z)
+
+    def log_prob_x(self, x: Tensor):
+        return self.p.log_prob_x(x)
 
     def performance_metrics(
             self,
@@ -282,19 +296,19 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
             if self.eval_mode == "val":  # TODO: batch this?
-                target_data = self.val_data.to(self.device)
+                target_data = self.val_data.reshape(-1, self.dim).to(self.device)
             elif self.eval_mode == "test":
-                target_data = self.test_data.to(self.device)
+                target_data = self.test_data.reshape(-1, self.dim).to(self.device)
             with torch.no_grad():  # TODO: Is this correct?
-                log_q_test = log_q_fn(target_data)
+                log_q_test = log_q_fn(target_data)  # log_q_fn is the log_prob(x) function of the flow.
                 # TODO: This gives huge negative numbers. Better if we multiply by factor 10: units are wrong
                 #  between MD and simulator? Seems unlikely, since both use the same WaterInWaterBox system...
-                log_p_test = self.log_prob(target_data)
-                test_mean_log_prob = torch.mean(log_q_test)
+                log_p_test = self.log_prob_x(target_data)  # logprob of MD data under target distribution.
                 kl_forward = torch.mean(log_p_test - log_q_test)
                 # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
                 #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
                 ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
+                test_mean_log_prob = torch.mean(log_q_test)
             summary_dict.update({
                 "flow_test_log_prob": test_mean_log_prob.cpu().item(),
                 "flow_ess_over_p": ess_over_p.cpu().item(),

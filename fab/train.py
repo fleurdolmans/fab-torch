@@ -111,7 +111,7 @@ class Trainer:
             self.optimizer.zero_grad()
 
             if self.model.loss_type == "forward_kl":
-                train_data = self.model.target_distribution.train_data
+                train_data = self.model.target_distribution.train_data.reshape(-1, self.model.target_distribution.dim)
                 # shuffle train data if first iteration
                 if k == 0:
                     permutation = torch.randperm(len(train_data))

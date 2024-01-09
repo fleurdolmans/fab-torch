@@ -8,8 +8,9 @@ target:                               # Properties of molecular system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
+  solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
   train_samples_path: null  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000000_every10.pdb
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
   test_samples_path: null
 
 
@@ -36,6 +37,7 @@ flow:                                  # Properties of the flow model
 
 fab:
   loss_type: fab_alpha_div            # Whether to use AIS, and type of loss for AIS. E.g., `flow_reverse_kl` for non-AIS.
+  use_ais: true                       # Dummy, for consistency between configs.
   n_intermediate_distributions: 8     # Int, number of intermediate distributions
   alpha: 2.0
   transition_operator:
@@ -52,7 +54,7 @@ training:                             # Properties of the training procedure
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
   n_iterations: 1000 #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
-  batch_size: 1024 # 1024               # Int, batch size used during training
+  batch_size: 4 # 1024               # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
@@ -66,8 +68,8 @@ training:                             # Properties of the training procedure
   use_buffer: true  # true                 # Buffer args follow below here
   prioritised_buffer: true  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
   maximum_buffer_length: 524288       # ALDP used 512 * 1024 (batch_size)
-  min_buffer_length: 16384  # 65536            # ALDP used 64 * 1024 (batch_size)
-  n_batches_buffer_sampling: 8 # 8        # Number of updates (batches) to do after every buffer sampling step
+  min_buffer_length: 4  # 65536            # ALDP used 64 * 1024 (batch_size)
+  n_batches_buffer_sampling: 1 # 8        # Number of updates (batches) to do after every buffer sampling step
   w_adjust_max_clip: 10               # clipping of weight adjustment factor for prioritised replay
   buffer_temp: 1.0                    # Rate that we weight new experience over old (for non-prioritised replay only)
   log_w_clip_frac: null               # Null for no clipping, for non-prioritised replay only.

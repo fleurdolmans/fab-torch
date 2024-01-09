@@ -247,6 +247,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         transition_operator=transition_operator,
         alpha=cfg.fab.alpha,
         loss_type=cfg.fab.loss_type,
+        use_ais=cfg.fab.use_ais,
     )
     return fab_model
 

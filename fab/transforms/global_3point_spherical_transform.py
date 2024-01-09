@@ -69,7 +69,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         return z, log_det_jac
 
     def _setup_std_r(self, z):
-        std_r = torch.std(z[0:1, ::3], dim=-1)
+        std_r = torch.std(z[0:1, 3::3], dim=-1)  # std of r between solute oxygen and all other oxygens in the system
         self.register_buffer("std_r", std_r)
 
     def _setup_std_phi(self, z):

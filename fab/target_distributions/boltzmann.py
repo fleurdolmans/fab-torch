@@ -56,6 +56,9 @@ class TransformedBoltzmann(nn.Module):
         z, log_det = self.transform(z)  # Z --> X
         return -self.norm_energy(z) + log_det
 
+    def log_prob_x(self, x):
+        return -self.norm_energy(x)
+
 
 class TransformedBoltzmannParallel(nn.Module):
     """
@@ -99,6 +102,9 @@ class TransformedBoltzmannParallel(nn.Module):
     def log_prob(self, z):
         z_, log_det = self.transform(z)
         return -self.norm_energy(z_) + log_det
+
+    def log_prob_x(self, x):
+        return -self.norm_energy(x)
 
 
 class OpenMMEnergyInterface(torch.autograd.Function):

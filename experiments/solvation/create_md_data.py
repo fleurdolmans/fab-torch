@@ -19,7 +19,7 @@ if __name__ == "__main__":
     out_dir = pathlib.Path("/home/timsey/HDD/data/molecules/md/")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    dim = 3 * (3 + 3 * 4)  # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
+    dim = 3 * (3 + 3 * 15)  # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     temperature = 300.0  # Kelvin
     equi_steps = 1e3  # Steps for equilibration
     burnin_steps = 1e5  # Steps for burn-in
