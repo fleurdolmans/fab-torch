@@ -20,7 +20,7 @@ flow:                                  # Properties of the flow model
   resampled_base: false               # Bool, flag whether to use resampled base distribution
   type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
   base:
-    type: gauss
+    type: gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
   blocks: 12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer

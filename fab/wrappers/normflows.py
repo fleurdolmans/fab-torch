@@ -24,6 +24,22 @@ class WrappedNormFlowModel(TrainableDistribution):
     def log_prob(self, x: torch.Tensor) -> torch.Tensor:
         return self._nf_model.log_prob(x)
 
+        # # Explicit code from Normflows package copied here.
+        # log_q = torch.zeros(len(x), dtype=x.dtype, device=x.device)
+        # z = x
+        # print("I[0]", x[0])
+        # for i in range(len(self._nf_model.flows) - 1, -1, -1):
+        #     z, log_det = self._nf_model.flows[i].inverse(z)
+        #     log_q += log_det
+        # base_log_prob = self._nf_model.q0.log_prob(z)
+        # # print(f"Base log Q: {base_log_prob.mean():.4f}, Log det Jac: {log_q.mean():.4f}")
+        # print("Z[0]", z[0])
+        # print("Base Q", base_log_prob)
+        # print("J_IZ", log_q)
+        # return log_q + base_log_prob
+
+
+
     @property
     def event_shape(self) -> Tuple[int, ...]:
         try:

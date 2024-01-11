@@ -62,7 +62,7 @@ class Trainer:
         eval_info = self.model.get_eval_info(outer_batch_size=eval_batch_size, inner_batch_size=batch_size)
         eval_info.update(step=i)
         self.logger.write(eval_info)
-        print(eval_info)
+        print({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
 
     def run(
         self,
@@ -100,6 +100,7 @@ class Trainer:
         # for pbar_iter in pbar:
         #     i = pbar_iter + start_iter + 1
         k, epoch, next_epoch = 0, 0, True  # Used for Maximum Likelihood (forward KL) training.
+        target_dist = self.model.target_distribution
         for t in range(start_iter, n_iterations, 1):
             i = t + 1
             if self.model.loss_type == "forward_kl" and next_epoch:
@@ -111,13 +112,21 @@ class Trainer:
             self.optimizer.zero_grad()
 
             if self.model.loss_type == "forward_kl":
-                train_data = self.model.target_distribution.train_data.reshape(-1, self.model.target_distribution.dim)
+                # 'z' here represents that the data has already been transformed to internal coordinates, rather than
+                #  Cartesian. This is what we feed into the flow.
+                train_data = target_dist.train_data_z.clone().reshape(-1, target_dist.internal_dim)
+                # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
+                train_logdet_xz = target_dist.train_logdet_xz.clone()
                 # shuffle train data if first iteration
                 if k == 0:
                     permutation = torch.randperm(len(train_data))
-                    self.model.target_distribution.train_data = train_data[permutation]
+                    train_data = train_data[permutation]
+                    train_logdet_xz = train_logdet_xz[permutation]
                 x_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
-                loss = self.model.loss(x_batch)
+                flow_loss = self.model.loss(x_batch)
+                # print("J_XI", train_logdet_xz)
+                transform_loss = train_logdet_xz.mean()
+                loss = flow_loss + transform_loss
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points
                     epoch += 1

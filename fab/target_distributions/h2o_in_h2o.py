@@ -128,7 +128,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
         """
         super(H2OinH2O, self).__init__()
 
-        self.dim = dim
+        self.cartesian_dim = dim
+        self.internal_dim = dim - 6
         self.temperature = temperature
         self.energy_cut = energy_cut
         self.energy_max = energy_max
@@ -141,26 +142,27 @@ class H2OinH2O(nn.Module, TargetDistribution):
             os.makedirs(self.metric_dir)
 
         # Initialise system
-        self.system = WaterInWaterBox(solvent_pdb_path, dim)
+        self.system = WaterInWaterBox(solvent_pdb_path, self.cartesian_dim)
 
         # Load any MD data
         # TODO: This data is not put in the standard coordinate form with the solute at the origin. Should use the
         #  `setup_coordinate_system` function on this data to make sure it matches what the flow outputs after the
         #  z --> x transform.
         self.eval_mode = eval_mode
-        self.raw_train_data, self.raw_val_data, self.raw_test_data = None, None, None
-        self.train_data, self.val_data, self.test_data = None, None, None
         self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
+        self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
+        self.train_data_z, self.val_data_z, self.test_data_z = None, None, None
+        self.train_logdet_xz, self.val_logdet_xz, self.test_logdet_xz = None, None, None
         if train_samples_path:
             self.train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
-            self.raw_train_data = self.load_target_data(self.train_samples_path, dim).double()
+            self.train_data_x = self.load_target_data(self.train_samples_path, self.cartesian_dim).double()
         if val_samples_path:
             self.val_samples_path = pathlib.Path(val_samples_path)
-            self.raw_val_data = self.load_target_data(self.val_samples_path, dim).double()
+            self.val_data_x = self.load_target_data(self.val_samples_path, self.cartesian_dim).double()
         if test_samples_path:
             self.test_samples_path = pathlib.Path(test_samples_path)
-            self.raw_test_data = self.load_target_data(self.test_samples_path, dim).double()
+            self.test_data_x = self.load_target_data(self.test_samples_path, self.cartesian_dim).double()
 
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
@@ -175,47 +177,47 @@ class H2OinH2O(nn.Module, TargetDistribution):
             traj_sim.minimizeEnergy()
             state = traj_sim.context.getState(getPositions=True)
             position = state.getPositions(True).value_in_unit(unit.nanometer)  # TODO: Are these the same units as MD samples?
-            transform_data = torch.tensor(position.reshape(1, dim)).double()
+            transform_data = torch.tensor(position.reshape(1, self.cartesian_dim)).double()
             del traj_sim
             self.transform_data = transform_data
         else:
-            self.transform_data = self.raw_val_data.clone()[0].reshape(1, dim)
+            self.transform_data = self.val_data_x.clone()[0].reshape(1, self.cartesian_dim)
 
-        assert self.transform_data.shape[-1] == dim, (
-            f"Data shape ({self.transform_data.shape}) does not match number of coordinates in current system ({dim})."
+        assert self.transform_data.shape[-1] == self.cartesian_dim, (
+            f"Data shape ({self.transform_data.shape}) does not match number of "
+            f"coordinates in current system ({self.cartesian_dim})."
         )
 
         self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
 
-        # Use this transform to setup the coordinate system for loaded MD data as well.
-        # raw_train/val/test_data = original x data loaded from dist
-        # train/val/test_data = x data in centralised coordinate system
-        if self.raw_train_data is not None:
+        # Transform MD data to internal coordinates (X --> Z): these are the coordinates that we feed into the flow on
+        #  the output end.
+        if self.train_data_x is not None:
             # OH bonds are still ~0.1 nm apart
-            self.train_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_train_data.reshape(-1, self.dim)  # Setup expects flattened coordinates
+            self.train_data_z, self.train_logdet_xz = self.coordinate_transform.inverse(
+                self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
             )
-            # Store new coordinates for visualisation tests (notebook).
-            fr = h5py.File(str(self.train_samples_path), "r")
-            orig_coords = torch.from_numpy(fr["coordinates"][()])
-            new_coords = self.train_data.numpy()
-            new_filepath = str(self.train_samples_path.parent / self.train_samples_path.stem) + "_centered.h5"
-            with h5py.File(new_filepath, "w") as fw:
-                for obj in fr.keys():
-                    fr.copy(obj, fw)
-                assert np.isclose(fw["coordinates"][...], orig_coords).all(), (
-                    "Original coordinates not copied correctly."
-                )
-                fw["coordinates"][...] = new_coords
-            fr.close()
+            # # Store new coordinates for visualisation tests (notebook).
+            # fr = h5py.File(str(self.train_samples_path), "r")
+            # orig_coords = torch.from_numpy(fr["coordinates"][()])
+            # new_coords = self.train_data.numpy()
+            # new_filepath = str(self.train_samples_path.parent / self.train_samples_path.stem) + "_centered.h5"
+            # with h5py.File(new_filepath, "w") as fw:
+            #     for obj in fr.keys():
+            #         fr.copy(obj, fw)
+            #     assert np.isclose(fw["coordinates"][...], orig_coords).all(), (
+            #         "Original coordinates not copied correctly."
+            #     )
+            #     fw["coordinates"][...] = new_coords
+            # fr.close()
 
-        if self.raw_val_data is not None:
-            self.val_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_val_data.reshape(-1, self.dim)
+        if self.val_data_x is not None:
+            self.val_data_z, self.val_logdet_xz = self.coordinate_transform.inverse(
+                self.val_data_x.reshape(-1, self.cartesian_dim)
             )
-        if self.raw_test_data is not None:
-            self.test_data, _, _, _ = self.coordinate_transform.setup_coordinate_system(
-                self.raw_test_data.reshape(-1, self.dim)
+        if self.test_data_x is not None:
+            self.test_data_z, self.test_logdet_xz = self.coordinate_transform.inverse(
+                self.test_data_x.reshape(-1, self.cartesian_dim)
             )
 
         if n_threads > 1:
@@ -281,7 +283,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
             log_w: Optional[Tensor] = None,
             log_q_fn: Callable = None,
             batch_size: int = 1000,
-            iteration: Optional[int] = None
+            iteration: Optional[int] = None,
+            flow: Optional[nn.Module] = None,
     ):
         # This function is typically called both with Flow (likelihood available) and with Flow+AIS
         # samples (no likelihood available).
@@ -296,24 +299,71 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
             if self.eval_mode == "val":  # TODO: batch this?
-                target_data = self.val_data.reshape(-1, self.dim).to(self.device)
+                target_data_x = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+                target_data_z = self.val_data_z.reshape(-1, self.internal_dim).to(self.device)
+                target_logdet_xz = self.val_logdet_xz.to(self.device)
             elif self.eval_mode == "test":
-                target_data = self.test_data.reshape(-1, self.dim).to(self.device)
+                target_data_x = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+                target_data_z = self.test_data_z.reshape(-1, self.internal_dim).to(self.device)
+                target_logdet_xz = self.test_logdet_xz.to(self.device)
+            else:
+                raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
             with torch.no_grad():  # TODO: Is this correct?
-                log_q_test = log_q_fn(target_data)  # log_q_fn is the log_prob(x) function of the flow.
-                # TODO: This gives huge negative numbers. Better if we multiply by factor 10: units are wrong
-                #  between MD and simulator? Seems unlikely, since both use the same WaterInWaterBox system...
-                log_p_test = self.log_prob_x(target_data)  # logprob of MD data under target distribution.
+                # log_q_fn is the log_prob function of the flow.
+                log_q_test = log_q_fn(target_data_z) + target_logdet_xz
+                # logprob of MD data under target distribution: feed Cartesian data into openMM
+                log_p_test = self.log_prob_x(target_data_x)
+                # Compute KL
                 kl_forward = torch.mean(log_p_test - log_q_test)
                 # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
                 #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
                 ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
                 test_mean_log_prob = torch.mean(log_q_test)
-            summary_dict.update({
-                "flow_test_log_prob": test_mean_log_prob.cpu().item(),
-                "flow_ess_over_p": ess_over_p.cpu().item(),
-                "flow_kl_forward": kl_forward.cpu().item(),
-            })
+                print("P log P", log_p_test.mean())
+                print("P log Q", log_q_test.mean())
+                print("P (log P - log Q)", kl_forward)
+
+                summary_dict.update({
+                    "log_p_test": log_p_test.mean().cpu().item(),
+                    "flow_test_log_prob": test_mean_log_prob.cpu().item(),
+                    "flow_ess_over_p": ess_over_p.cpu().item(),
+                    "flow_kl_forward": kl_forward.cpu().item(),
+                })
+
+                # Evaluate samples from flow
+                if flow is not None:
+                    flow_samples, flow_logprob = flow.sample_and_log_prob((10,))
+                    boltzmann_logprob = self.log_prob(flow_samples)
+                    kl_reverse = torch.mean(flow_logprob - boltzmann_logprob)
+                    print("Q log Q", flow_logprob.mean())
+                    print("Q log P", boltzmann_logprob.mean())
+                    print("Q (log Q - log P)", kl_reverse)
+                    summary_dict.update({"flow_kl_reverse": kl_reverse.cpu().item()})
+
+                # Check that flow gives probability distribution along certain dimensions
+                data_point = target_data_z[0]
+                # Vary a single dimension along a grid: e.g. phi angle of third atom.
+                # In the internal representation that gets fed into the flow, phi is in the range [0, pi].
+                grid_resolution = 1000
+                max_val = np.pi
+                phi_vals = torch.linspace(0, max_val, grid_resolution)
+                theta_vals = torch.linspace(-max_val / 2, max_val / 2, grid_resolution)
+                data = data_point.clone().repeat(grid_resolution, 1)
+                data[:, 2] = phi_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace phi2
+                flow_probs = log_q_fn(data).exp()
+                integrated_probs = flow_probs.sum() * max_val / grid_resolution
+                print("int_{phi_atom3} Q(internal_coords):", integrated_probs)
+                data = data_point.clone().repeat(grid_resolution, 1)
+                data[:, 4] = phi_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace phi3
+                flow_probs = log_q_fn(data).exp()
+                integrated_probs = flow_probs.sum() * max_val / grid_resolution
+                print("int_{phi_atom4} Q(internal_coords):", integrated_probs)
+                data = data_point.clone().repeat(grid_resolution, 1)
+                data[:, 5] = theta_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace theta3
+                flow_probs = log_q_fn(data).exp()
+                integrated_probs = flow_probs.sum() * max_val / grid_resolution
+                print("int_{theta_atom4} Q(internal_coords):", integrated_probs)
+
         else:  # Evaluate Flow+AIS samples: no likelihood available.
             pass  # There is no evaluation currently that only works for Flow+AIS samples.
         return summary_dict

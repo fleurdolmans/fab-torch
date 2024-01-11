@@ -101,7 +101,10 @@ class TransformedBoltzmannParallel(nn.Module):
 
     def log_prob(self, z):
         z_, log_det = self.transform(z)
-        return -self.norm_energy(z_) + log_det
+        energy_term = -self.norm_energy(z_)
+        # print("Boltzmann E:", energy_term)
+        # print("Boltzmann J_IX:", log_det)
+        return energy_term + log_det
 
     def log_prob_x(self, x):
         return -self.norm_energy(x)

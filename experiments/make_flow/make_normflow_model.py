@@ -158,7 +158,7 @@ def make_wrapped_normflow_resampled_flow(
     return wrapped_dist
 
 
-def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
+def make_wrapped_normflow_solvent_flow(config, target):
     """
     Setup Flow model.
     """
@@ -166,7 +166,13 @@ def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
     # Flow parameters
     flow_type = config["flow"]["type"]
     seed = config["training"]["seed"]
-    dim = target.dim
+    dim = target.internal_dim  # 6 degrees of freedom are fixed in the target distribution
+
+    # Periodic indices for solvent are phi and theta. In the representation with explicit dofs, these are all indices
+    # except [0::3], which represent the radial distance instead. In the representation with the 6 dofs removed, these
+    # are indices [2] (representing phi of the third atom), and then all indices except [3::3]. Indices 0 and 1 are the
+    # radial distance of atom2 and atom3 (atom1 has all zeros for r, phi, theta).
+    periodic_inds = np.array([2] + [i for i in range(3, dim) if i % 3 != 0])
 
     # TODO: Check that base distribution is correct. Check scales of base distribution at initialisation. I think it
     #  might be initialised at [-pi, pi], instead of [0, pi]? Or even [-pi/2, pi/2], as a symmetric interval that has
@@ -291,32 +297,32 @@ def make_wrapped_normflow_solvent_flow(config, target, periodic_inds):
         else:
             raise NotImplementedError("The flow type " + flow_type + " is not implemented for solvent systems.")
 
-        if config["flow"]["mixing"] == "affine":
-            layers.append(nf.flows.InvertibleAffine(dim, use_lu=True))
-        elif config["flow"]["mixing"] == "permute":
-            layers.append(nf.flows.Permute(dim))
-
-        if config["flow"]["actnorm"]:
-            layers.append(nf.flows.ActNorm(dim))
-
-        # Shift the periodic angles.
-        if i % 2 == 1 and i != n_layers - 1:
-            if circ_shift == "constant":
-                layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=bound_circ))
-            elif circ_shift == "random":
-                gen = torch.Generator().manual_seed(seed + i)
-                shift_scale = torch.rand([], generator=gen) + 0.5
-                layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=shift_scale * bound_circ))
-
-        # SNF
-        if "snf" in config["flow"]:
-            if (i + 1) % config["flow"]["snf"]["every_n"] == 0:
-                prop_scale = config["flow"]["snf"]["proposal_std"] * np.ones(dim)
-                steps = config["flow"]["snf"]["steps"]
-                proposal = nf.distributions.DiagGaussianProposal((dim,), prop_scale)
-                lam = (i + 1) / n_layers
-                dist = nf.distributions.LinearInterpolation(target, base, lam)
-                layers.append(nf.flows.MetropolisHastings(dist, proposal, steps))
+        # if config["flow"]["mixing"] == "affine":
+        #     layers.append(nf.flows.InvertibleAffine(dim, use_lu=True))
+        # elif config["flow"]["mixing"] == "permute":
+        #     layers.append(nf.flows.Permute(dim))
+        #
+        # if config["flow"]["actnorm"]:
+        #     layers.append(nf.flows.ActNorm(dim))
+        #
+        # # Shift the periodic angles.
+        # if i % 2 == 1 and i != n_layers - 1:
+        #     if circ_shift == "constant":
+        #         layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=bound_circ))
+        #     elif circ_shift == "random":
+        #         gen = torch.Generator().manual_seed(seed + i)
+        #         shift_scale = torch.rand([], generator=gen) + 0.5
+        #         layers.append(nf.flows.PeriodicShift(periodic_inds, bound=bound_circ, shift=shift_scale * bound_circ))
+        #
+        # # SNF
+        # if "snf" in config["flow"]:
+        #     if (i + 1) % config["flow"]["snf"]["every_n"] == 0:
+        #         prop_scale = config["flow"]["snf"]["proposal_std"] * np.ones(dim)
+        #         steps = config["flow"]["snf"]["steps"]
+        #         proposal = nf.distributions.DiagGaussianProposal((dim,), prop_scale)
+        #         lam = (i + 1) / n_layers
+        #         dist = nf.distributions.LinearInterpolation(target, base, lam)
+        #         layers.append(nf.flows.MetropolisHastings(dist, proposal, steps))
 
     # Map input to periodic interval
     # The purpose is that incoming samples from a dataset get periodically wrapped to the interval [-pi, pi],

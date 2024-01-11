@@ -38,9 +38,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
             z, _, _, _ = self.cartesian_to_z(transform_data, setup=True)
-            self._setup_std_r(z)  # Rescale r (by std of z[0, ::3])
-            self._setup_std_phi(z)  # Rescale phi (by 2pi)
-            self._setup_std_theta(z)  # Rescale theta (by pi)
+            self._setup_scale_r(z)  # Rescale r (by mean r between solute center and solvent atoms)
+            self._setup_scale_phi(z)  # Rescale phi (by 2pi)
+            self._setup_scale_theta(z)  # Rescale theta (by pi)
             # TODO: Do we need means as well? We set our coordinate system around (0, 0, 0) by default, so probably
             #  not.
 
@@ -49,10 +49,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms after transforming to Cartesian.
         # Transform Z --> X. Return x and log det Jacobian.
-        # Sometimes on cpu and sometimes on gpu, so we need to make sure the stds are on the right device.
-        self.std_r = self.std_r.to(z.device)
-        self.std_phi = self.std_phi.to(z.device)
-        self.std_theta = self.std_theta.to(z.device)
+        # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
+        self.scale_r = self.scale_r.to(z.device)
+        self.scale_phi = self.scale_phi.to(z.device)
+        self.scale_theta = self.scale_theta.to(z.device)
         x, log_det_jac = self.z_to_cartesian(z)
         return x, log_det_jac
 
@@ -61,28 +61,39 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms before transforming to Z.
         # Transform X --> Z. Return z and log det Jacobian.
-        # Sometimes on cpu and sometimes on gpu, so we need to make sure the stds are on the right device.
-        self.std_r = self.std_r.to(x.device)
-        self.std_phi = self.std_phi.to(x.device)
-        self.std_theta = self.std_theta.to(x.device)
+        # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
+        self.scale_r = self.scale_r.to(x.device)
+        self.scale_phi = self.scale_phi.to(x.device)
+        self.scale_theta = self.scale_theta.to(x.device)
         z, log_det_jac, _, _ = self.cartesian_to_z(x)
         return z, log_det_jac
 
-    def _setup_std_r(self, z):
-        std_r = torch.std(z[0:1, 3::3], dim=-1)  # std of r between solute oxygen and all other oxygens in the system
-        self.register_buffer("std_r", std_r)
+    def _setup_scale_r(self, z):
+        # Some dofs are removed, so radial coordinates are at index 0, 1, 3, and every third index after.
+        scale_r = z.new_ones(1)  # Scale 1 best? Since softplus already changes the necessary resolution of fr.
 
-    def _setup_std_phi(self, z):
+        # Or scale by the mean / max of the output values of the flow for the radial coordinates.
+        # We have that r = softplus(fr), where fr is the flow output. This ensures that r is positive. To improve
+        #  stability, we can scale fr such that the flow output is closer to unity. Thus, we scale by some mean / max of
+        #  softplus^(-1)(r). This value can be negative, so we take the absolute value appropriately (in that case,
+        #  the flow outputs values closer to -1 instead of 1, but that is fine).
+        # mean r between solute oxygen and all other oxygens in the system
+        # radial_coords = torch.cat((z[:, 0:2], z[0:1, 3::3]), dim=1)
+        # scale_r = torch.max(radial_coords.abs(), dim=-1)[0]
+        # scale_r = torch.mean(radial_coords, dim=-1).abs()
+        self.register_buffer("scale_r", scale_r)
+
+    def _setup_scale_phi(self, z):
         # TODO: With Circular Flow, we can make sure phi and theta are periodic. Currently we have [0, pi]
-        #  by default, which means that we can use this stddev to scale up the phi to the [0, 2pi] range. Theta we
+        #  by default, which means that we can use this scale to scale up the phi to the [0, 2pi] range. Theta we
         #  can leave untouched, except that we do have to shift it to the [-pi/2, pi/2] range. We can do this in the
         #  actual z_to_cartesian() function.
-        std_phi = z.new_ones(1) * 2
-        self.register_buffer("std_phi", std_phi)
+        scale_phi = z.new_ones(1) * 2
+        self.register_buffer("scale_phi", scale_phi)
 
-    def _setup_std_theta(self, z):
-        std_theta = z.new_ones(1)
-        self.register_buffer("std_theta", std_theta)
+    def _setup_scale_theta(self, z):
+        scale_theta = z.new_ones(1)
+        self.register_buffer("scale_theta", scale_theta)
 
     def setup_coordinate_system(self, x):
         """
@@ -117,8 +128,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         """
         Transform Cartesian coordinates to internal coordinates.
         :param x: Cartesian coordinates: n_batch x n_atoms . 3
-        :param setup: If True, use to set up coordinate scale for r. x must then be a single frame of shape (1, ndim).
-        :return: Spherical coordinates: n_batch x n_atoms . 3, and log det Jacobian
+        :param setup: If True, use to set up coordinate scale for r. x must then be a single frame of shape (1, ndim),
+            where ndim = n_atoms . 3.
+        :return: Spherical coordinates: n_batch x (n_atoms . 3 - 6), and log det Jacobian
         """
 
         if setup:
@@ -169,10 +181,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 unnorm_z[:, atom_num, 0] = fr_scaled
                 if not setup:  # Setup determines scaling, so don't try to scale here.
                     # Normalise
-                    fr = fr_scaled / self.std_r  # This is f_r, i.e., the flow output
+                    fr = fr_scaled / self.scale_r  # This is f_r, i.e., the flow output
                     # Log det Jacobian contribution of scaling.
                     log_det_jac += -1 * (  # Notation chosen for consistency with 2D and 3D case
-                        torch.log(self.std_r)  # s_r
+                        torch.log(self.scale_r)  # s_r
                     )
                 else:
                     fr = fr_scaled
@@ -190,10 +202,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 unnorm_z[:, atom_num, 1] = phi
                 if not setup:
                     # Normalise
-                    fr = fr_scaled / self.std_r
-                    fphi = phi / self.std_phi
+                    fr = fr_scaled / self.scale_r
+                    fphi = phi / self.scale_phi
                     # Log det Jacobian contribution of scaling.
-                    log_det_jac += -1 * (torch.log(self.std_r) + torch.log(self.std_phi))
+                    log_det_jac += -1 * (torch.log(self.scale_r) + torch.log(self.scale_phi))
                 else:
                     fr = fr_scaled
                     fphi = phi
@@ -220,11 +232,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 unnorm_z[:, atom_num, 2] = theta
                 if not setup:
                     # Normalise
-                    fr = fr_scaled / self.std_r
-                    fphi = phi / self.std_phi
-                    ftheta = theta / self.std_theta
+                    fr = fr_scaled / self.scale_r
+                    fphi = phi / self.scale_phi
+                    ftheta = theta / self.scale_theta
                     # Log det Jacobian contribution of scaling.
-                    log_det_jac += -1 * (torch.log(self.std_r) + torch.log(self.std_phi) + torch.log(self.std_theta))
+                    log_det_jac += -1 * (
+                            torch.log(self.scale_r) + torch.log(self.scale_phi) + torch.log(self.scale_theta)
+                    )
                 else:
                     fr = fr_scaled
                     fphi = phi
@@ -245,18 +259,35 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         z = z.reshape(z.shape[0], -1)
         unnorm_z = unnorm_z.reshape(unnorm_z.shape[0], -1)
 
+        # We have lost 6 degrees of freedom: we will remove these in the internal coordinate representation, but keep
+        #  them explicit in Cartesian space.
+        # Internal coordinates are ordered as: r, phi, theta per atom. The chosen orientation sets all three to 0 for
+        #  the first atom, phi and theta to 0 for the second atom, and theta to 0 for the third atom. We therefore
+        #  remove these by slicing z.
+        z = torch.cat((z[:, 3:4], z[:, 6:8], z[:, 9:]), dim=1)
+        unnorm_z = torch.cat((unnorm_z[:, 3:4], unnorm_z[:, 6:8], unnorm_z[:, 9:]), dim=1)
+        assert z.shape[1] == len(x[0].flatten()) - 6, (
+            "Expected internal coordinates to have 6 fewer dofs than Cartesian."
+        )
+
         return z, log_det_jac, x_coord, unnorm_z
 
     def z_to_cartesian(self, z):
-        """
+        """  # TODO: internal coordinates have 6 fewer dofs than Cartesian.
         Transform Spherical coordinates to Cartesian coordinates.
-        :param z: Spherical coordinates: n_batch x n_atoms . 3
+        :param z: Spherical coordinates: n_batch x (n_atoms . 3 - 6).
         :return: Cartesian coordinates: n_batch x n_atoms . 3, and log det Jacobian
-        :param from_flow:  Should be set to True when z is the flow output. If True, mask out the 6 coordinates that
-        define the reference frame, and apply softplus to r.
 
         OpenMM expects specific atom types at specific indices. For water in water, this order is OHH OHH OHH etc.
         """
+
+        # We add the 6 degrees of freedom back in here. 0s for the first atom, 0 for phi and theta for the second atom,
+        #  and 0 for theta for the third atom.
+        internal_atom1 = torch.zeros_like(z)[:, :3]
+        internal_atom2 = torch.cat((z[:, 0:1], torch.zeros_like(z)[:, :2]), dim=1)
+        internal_atom3 = torch.cat((z[:, 1:3], torch.zeros_like(z)[:, :1]), dim=1)
+        internal_rest = z[:, 3:]
+        z = torch.cat((internal_atom1, internal_atom2, internal_atom3, internal_rest), dim=1)
 
         # Reshape z from n_batch x n_dim to n_batch x n_atoms x 3
         z = z.reshape(z.shape[0], -1, 3)
@@ -270,13 +301,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         x = z.new_zeros(z.shape)
         log_det_jac = z.new_zeros(z.shape[0])  # n_batch
 
-        # Flow output should have 6 degrees of freedom masked out: these correspond to the orientation we choose
-        # for the first three atoms.
-        mask = z.new_ones(z.shape)
-        mask[:, 0, :] = 0
-        mask[:, 1, 1:] = 0
-        mask[:, 2, 2] = 0
-        z = mask * z
+        # # Flow output should have 6 degrees of freedom masked out: these correspond to the orientation we choose
+        # # for the first three atoms.
+        # mask = z.new_ones(z.shape)
+        # mask[:, 0, :] = 0
+        # mask[:, 1, 1:] = 0
+        # mask[:, 2, 2] = 0
+        # z = mask * z
 
         for atom_num in range(z.shape[1]):
             atom_coords = z[:, atom_num, :]
@@ -298,11 +329,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                         )
                     )
                 fr = atom_coords[:, 0]  # this is f_r
-                fr_scaled = fr * self.std_r  # Scale back: this is f_r * s_r
+                fr_scaled = fr * self.scale_r  # Scale back: this is f_r * s_r
                 r = F.softplus(fr_scaled)  # Fix r to lie in [0, inf]: This is softplus(f_r * s_r)
                 x[:, atom_num, 2] = r
                 # Jacobian determinant contribution: d/d(f_r) softplus(f_r * s_r) = sigmoid(f_r * s_r) * s_r
-                log_det_jac += torch.log(torch.sigmoid(fr_scaled)) + torch.log(self.std_r)  # sigmoid(f_r * s_r) * s_r
+                log_det_jac += torch.log(torch.sigmoid(fr_scaled)) + torch.log(self.scale_r)  # sigmoid(f_r * s_r) * s_r
             elif atom_num == 2:  # distance and angle: reconstruct x
                 # theta should be 0 for this atom
                 if not torch.isclose(z.new_zeros(z.shape[0], 1), atom_coords[:, 2:]).all():
@@ -314,9 +345,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 fr = atom_coords[:, 0]  # This is f_r
                 fphi = atom_coords[:, 1]  # This is f_phi
                 # Scaling
-                fr_scaled = fr * self.std_r  # Fix r to lie in [0, inf]: This is f_r * s_r
+                fr_scaled = fr * self.scale_r  # Fix r to lie in [0, inf]: This is f_r * s_r
                 r = F.softplus(fr_scaled)  # This is r = softplus(f_r * s_r)
-                phi = fphi * self.std_phi  # This is phi = f_phi * s_phi
+                phi = fphi * self.scale_phi  # This is phi = f_phi * s_phi
                 # Fix phi to lie in [0, 2pi]. We assume the flow output maps to this range. This does not
                 #  affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow.
@@ -338,8 +369,8 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # Jacobian determinant contribution
                 log_det_jac += (
                     torch.log(r)  # r = softplus(f_r * s_r) = norm(x, y, z)
-                    + torch.log(self.std_r)  # Scaling contribution for r: s_r
-                    + torch.log(self.std_phi)  # Scaling contribution for phi: s_phi  # sigmoid(f_r * s_r)
+                    + torch.log(self.scale_r)  # Scaling contribution for r: s_r
+                    + torch.log(self.scale_phi)  # Scaling contribution for phi: s_phi  # sigmoid(f_r * s_r)
                     + torch.log(torch.sigmoid(fr_scaled))
                 )
             else:
@@ -348,10 +379,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 fphi = atom_coords[:, 1]  # atom-to-reconstruct phi
                 ftheta = atom_coords[:, 2]  # atom-to-reconstruct dihedral
                 # Scaling
-                fr_scaled = fr * self.std_r  # This is r = softplus(f_r * s_r)
+                fr_scaled = fr * self.scale_r  # This is r = softplus(f_r * s_r)
                 r = F.softplus(fr_scaled)  # Fix r to lie in [0, inf]: This is f_r * s_r
-                phi = fphi * self.std_phi  # This is phi = f_phi * s_phi
-                theta = ftheta * self.std_theta  # This is theta = f_theta * s_theta
+                phi = fphi * self.scale_phi  # This is phi = f_phi * s_phi
+                theta = ftheta * self.scale_theta  # This is theta = f_theta * s_theta
                 # Fix phi to lie in [0, 2pi]. This does not affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow. E.g., we should see no
                 #  phi values < 0 or > pi here.
@@ -377,9 +408,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 log_det_jac += (
                     2 * torch.log(r)  # r^2: r = softplus(f_r * s_r) = norm(x, y, z)
                     + torch.log(torch.abs(torch.sin(phi)))  # theta rotation Jacobian bit
-                    + torch.log(self.std_r)  # Scaling from r: s_r
-                    + torch.log(self.std_phi)  # here: phi = f_phi * s_phi, so scaling from phi: s_phi
-                    + torch.log(self.std_theta)  # Scaling from theta: s_theta
+                    + torch.log(self.scale_r)  # Scaling from r: s_r
+                    + torch.log(self.scale_phi)  # here: phi = f_phi * s_phi, so scaling from phi: s_phi
+                    + torch.log(self.scale_theta)  # Scaling from theta: s_theta
                     + torch.log(torch.sigmoid(fr_scaled))  # sigmoid(f_r * s_r)
                 )
 
@@ -592,21 +623,25 @@ if __name__ == "__main__":
     t_x = torch.randn(1, n_atoms * 3)
     t = Global3PointSphericalTransform(transform_data=t_x)
     print(
-        "Scaling params for (r, phi, theta): ({:.3f}, {:.3f}, {:.3f})\n".format(
-            t.std_r.item(), t.std_phi.item(), t.std_theta.item()
+        "\nScaling params for (r, phi, theta): ({:.3f}, {:.3f}, {:.3f})\n".format(
+            t.scale_r.item(), t.scale_phi.item(), t.scale_theta.item()
         )
     )
 
     x = torch.randn(n_batch, n_atoms * 3)
-    z, _, x_coord, unnorm_z = t.cartesian_to_z(x)
-    x_recon, _ = t.z_to_cartesian(z)
+    print("Cartesian dim: {}".format(x.shape))
+    z, jac_xi, x_coord, _ = t.cartesian_to_z(x)
+    print("Internal dim: {}".format(z.shape))
+    x_recon, jac_ix = t.z_to_cartesian(z)
+    print("\nJacobian Cart --> Internal: {:.5f}".format(jac_xi.mean().item()))
+    print("Jacobian Internal --> Cart: {:.5f}".format(jac_ix.mean().item()))
 
-    print(x_coord.reshape(x_coord.shape[0], -1, 3)[0, :7, :])
-    print(x_recon.reshape(x_recon.shape[0], -1, 3)[0, :7, :])
+    print("\nOriginal Cart:", x_coord.reshape(x_coord.shape[0], -1, 3)[0, :7, :])
+    print("Reconstruction:", x_recon.reshape(x_recon.shape[0], -1, 3)[0, :7, :])
 
     errs = torch.abs(x_coord - x_recon)
     norm_err = torch.norm(x_coord - x_recon, dim=-1)
-    print("Max error (xyz): {:.5f}".format(errs.max().item()))
+    print("\nMax error (xyz): {:.5f}".format(errs.max().item()))
     print("Mean error (xyz): {:.8f}".format(errs.mean().item()))
     print("Min error (xyz): {:.8f}".format(errs.min().item()))
     print("Max error norm (r): {:.5f}".format(norm_err.max().item()))

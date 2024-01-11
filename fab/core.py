@@ -193,7 +193,8 @@ class FABModel(Model):
         return {}
 
     def get_eval_info(
-            self, outer_batch_size: int,
+            self,
+            outer_batch_size: int,
             inner_batch_size: int,
             set_p_target: bool = True,
             iteration: Optional[int] = None,
@@ -214,14 +215,21 @@ class FABModel(Model):
 
             if not ais_only:
                 flow_info = self.target_distribution.performance_metrics(
-                    base_samples, base_log_w, self.flow.log_prob, batch_size=inner_batch_size, iteration=iteration
+                    base_samples,
+                    base_log_w,
+                    self.flow.log_prob,
+                    batch_size=inner_batch_size,
+                    iteration=iteration,
+                    flow=self.flow,
                 )
                 info.update({"flow_" + key: val for key, val in flow_info.items()})
 
             # TODO: Evaluating Flow+AIS samples is more difficult, because we don't have a likelihood. This requires
             #  problem-specific approaches (although ESS can always be done, but is spurious if the flow is
             #  missing modes: ESS already computed above).
-            ais_info = self.target_distribution.performance_metrics(ais_samples, ais_log_w, iteration=iteration)
+            ais_info = self.target_distribution.performance_metrics(
+                ais_samples, ais_log_w, iteration=iteration, flow=self.flow
+            )
             info.update(ais_info)
 
             # Back to target = p^\alpha & q^(1-\alpha).
@@ -229,7 +237,12 @@ class FABModel(Model):
         else:
             # Evaluates using the flow logprob on the target data
             flow_info = self.target_distribution.performance_metrics(
-                None, None, self.flow.log_prob, batch_size=inner_batch_size, iteration=iteration
+                None,
+                None,
+                self.flow.log_prob,
+                batch_size=inner_batch_size,
+                iteration=iteration,
+                flow=self.flow,
             )
             info.update(flow_info)
 

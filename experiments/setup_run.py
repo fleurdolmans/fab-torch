@@ -165,13 +165,9 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     dim = cfg.target.dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
     if cfg.flow.solvent_flow:
-        # Periodic indices for solvent are phi and theta. This is all indices except [0::3], which represent the
-        #  radial distance instead.
-        periodic_inds = np.array([i for i in range(dim) if i % 3 != 0])
         flow = make_wrapped_normflow_solvent_flow(
             cfg,
-            target,
-            periodic_inds=periodic_inds,
+            target
         )
     elif cfg.flow.resampled_base:
         flow = make_wrapped_normflow_resampled_flow(
