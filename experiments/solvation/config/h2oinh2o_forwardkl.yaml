@@ -3,14 +3,14 @@
 target:                               # Properties of molecular system
   solute: water
   solvent: water
-  dim: 45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 18  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
+  n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
   solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.h5
+  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5  # Filepath to load samples from
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
   test_samples_path: null
 
 
@@ -20,7 +20,7 @@ flow:                                  # Properties of the flow model
   resampled_base: false               # Bool, flag whether to use resampled base distribution
   type: circ-coup-nsf  # circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
   base:
-    type: gauss-uni
+    type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
   blocks: 12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
@@ -30,7 +30,7 @@ flow:                                  # Properties of the flow model
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
-  circ_shift: constant  #random                  # String, whether to shift circular coordinates, can be none, constant, or random
+  circ_shift: random  # constant, random                  # String, whether to shift circular coordinates, can be none, constant, or random
   actnorm: False                      # Bool, flag whether to include an ActNorm layers
   mixing: null                        # String, how features are mixed
 
@@ -70,6 +70,7 @@ training:                             # Properties of the training procedure
 
 
 evaluation:  # TODO
+  plot_per_dim: false
   n_plots: 20                         # number of times we visualise the model throughout training.
   n_eval: 50  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024              # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)

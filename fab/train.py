@@ -103,9 +103,10 @@ class Trainer:
         target_dist = self.model.target_distribution
         for t in range(start_iter, n_iterations, 1):
             i = t + 1
-            if self.model.loss_type == "forward_kl" and next_epoch:
-                print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
+            # if self.model.loss_type == "forward_kl" and next_epoch:
+            #     print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
 
+            # if i % 100 == 0:
             print(f"  Iteration: {i}/{n_iterations}")
             iter_start = time()
             it_start_time = time()
@@ -114,18 +115,18 @@ class Trainer:
             if self.model.loss_type == "forward_kl":
                 # 'z' here represents that the data has already been transformed to internal coordinates, rather than
                 #  Cartesian. This is what we feed into the flow.
-                train_data = target_dist.train_data_z.clone().reshape(-1, target_dist.internal_dim)
+                train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
-                train_logdet_xz = target_dist.train_logdet_xz.clone()
+                train_logdet_xi = target_dist.train_logdet_xi.clone()
                 # shuffle train data if first iteration
                 if k == 0:
                     permutation = torch.randperm(len(train_data))
                     train_data = train_data[permutation]
-                    train_logdet_xz = train_logdet_xz[permutation]
-                x_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
-                flow_loss = self.model.loss(x_batch)
-                # print("J_XI", train_logdet_xz)
-                transform_loss = train_logdet_xz.mean()
+                    train_logdet_xi = train_logdet_xi[permutation]
+                i_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
+                flow_loss = self.model.loss(i_batch)
+                transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
+                # print("J_XI", transform_loss)
                 loss = flow_loss + transform_loss
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points
@@ -155,11 +156,12 @@ class Trainer:
             info.update(grad_norm=grad_norm.cpu().detach().item())
             self.logger.write(info)
 
-            loss_str = f"  Loss: {loss.cpu().detach().item():.4f}"
+            loss_str = f"  Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
             # pbar.set_description(loss_str)
-            print(loss_str)
+            if i % 10 == 0:
+                print(loss_str)
 
             if n_eval is not None:
                 if i in eval_iter:
@@ -176,7 +178,7 @@ class Trainer:
                     print("  Saving checkpoint...")
                     self.save_checkpoint(i)
 
-            print(f"  Iteration time: {time() - iter_start:.2f}s.")
+            # print(f"  Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
 
             # End job if necessary

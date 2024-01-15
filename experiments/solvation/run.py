@@ -37,6 +37,7 @@ def _run(cfg: DictConfig):
             val_samples_path=cfg.target.val_samples_path,
             test_samples_path=cfg.target.test_samples_path,
             save_dir=cfg.evaluation.save_path,
+            plot_per_dim=cfg.evaluation.plot_per_dim,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

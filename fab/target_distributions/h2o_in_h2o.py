@@ -1,3 +1,5 @@
+import math
+
 import torch
 import h5py
 import warnings
@@ -110,6 +112,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         use_val_data_for_transform: bool = False,
         device: str = "cpu",
         save_dir: Optional[str] = None,
+        plot_per_dim: bool = False,  # Whether to plot the marginal distributions of a sample when doing eval.
     ):
         """
         Boltzmann distribution of H2O in H2O.
@@ -135,6 +138,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         self.energy_max = energy_max
         self.n_threads = n_threads
         self.device = device
+        self.plot_per_dim = plot_per_dim
 
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")
@@ -147,12 +151,12 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # Load any MD data
         # TODO: This data is not put in the standard coordinate form with the solute at the origin. Should use the
         #  `setup_coordinate_system` function on this data to make sure it matches what the flow outputs after the
-        #  z --> x transform.
+        #  i --> x transform.
         self.eval_mode = eval_mode
         self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
-        self.train_data_z, self.val_data_z, self.test_data_z = None, None, None
-        self.train_logdet_xz, self.val_logdet_xz, self.test_logdet_xz = None, None, None
+        self.train_data_i, self.val_data_i, self.test_data_i = None, None, None
+        self.train_logdet_xi, self.val_logdet_xi, self.test_logdet_xi = None, None, None
         if train_samples_path:
             self.train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
@@ -194,7 +198,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         #  the output end.
         if self.train_data_x is not None:
             # OH bonds are still ~0.1 nm apart
-            self.train_data_z, self.train_logdet_xz = self.coordinate_transform.inverse(
+            self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
             )
             # # Store new coordinates for visualisation tests (notebook).
@@ -212,11 +216,11 @@ class H2OinH2O(nn.Module, TargetDistribution):
             # fr.close()
 
         if self.val_data_x is not None:
-            self.val_data_z, self.val_logdet_xz = self.coordinate_transform.inverse(
+            self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
                 self.val_data_x.reshape(-1, self.cartesian_dim)
             )
         if self.test_data_x is not None:
-            self.test_data_z, self.test_logdet_xz = self.coordinate_transform.inverse(
+            self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
                 self.test_data_x.reshape(-1, self.cartesian_dim)
             )
 
@@ -270,9 +274,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
             )
         return target_data
 
-    def log_prob(self, z: Tensor):
-        # Add global potential for implicit solvent here?
-        return self.p.log_prob(z)
+    def log_prob(self, i: Tensor):
+        return self.p.log_prob(i)
 
     def log_prob_x(self, x: Tensor):
         return self.p.log_prob_x(x)
@@ -290,79 +293,164 @@ class H2OinH2O(nn.Module, TargetDistribution):
         # samples (no likelihood available).
         summary_dict = {}
 
-        # TODO: Fix self.get_kld_info() to do some kind of eval when we don't have a flow likelihood. Maybe use
-        #  aldp.py's evaluate_aldp as an example.
-        # These are saved to disk, rather than to a dictionary.
-        # if self.metric_dir is not None and samples is not None and log_w is not None:
-        #     with torch.no_grad():
-        #         self.get_kld_info(samples, log_w, batch_size=batch_size, iteration=iteration)
-
         if log_q_fn:  # Evaluate base flow samples: likelihood available.
             if self.eval_mode == "val":  # TODO: batch this?
                 target_data_x = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                target_data_z = self.val_data_z.reshape(-1, self.internal_dim).to(self.device)
-                target_logdet_xz = self.val_logdet_xz.to(self.device)
+                target_data_i = self.val_data_i.reshape(-1, self.internal_dim).to(self.device)
+                target_logdet_xi = self.val_logdet_xi.to(self.device)
             elif self.eval_mode == "test":
                 target_data_x = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                target_data_z = self.test_data_z.reshape(-1, self.internal_dim).to(self.device)
-                target_logdet_xz = self.test_logdet_xz.to(self.device)
+                target_data_i = self.test_data_i.reshape(-1, self.internal_dim).to(self.device)
+                target_logdet_xi = self.test_logdet_xi.to(self.device)
             else:
                 raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
-            with torch.no_grad():  # TODO: Is this correct?
+            with torch.no_grad():
                 # log_q_fn is the log_prob function of the flow.
-                log_q_test = log_q_fn(target_data_z) + target_logdet_xz
-                # logprob of MD data under target distribution: feed Cartesian data into openMM
-                log_p_test = self.log_prob_x(target_data_x)
-                # Compute KL
-                kl_forward = torch.mean(log_p_test - log_q_test)
-                # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
-                #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
-                ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
+                log_q_test = log_q_fn(target_data_i) + target_logdet_xi
+                # # logprob of MD data under target distribution: feed Cartesian data into openMM
+                # log_p_test = self.log_prob_x(target_data_x)  # TODO: This is an unnormalised logprob! So KL is off-by-constant.
+                # # Compute KL
+                # kl_forward = torch.mean(log_p_test - log_q_test)
+                # # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
+                # #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
+                # ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
                 test_mean_log_prob = torch.mean(log_q_test)
-                print("P log P", log_p_test.mean())
-                print("P log Q", log_q_test.mean())
-                print("P (log P - log Q)", kl_forward)
+                # print("P log P", log_p_test.mean())
+                # print("P log Q", log_q_test.mean())
+                # print("P (log P - log Q)", kl_forward)
 
                 summary_dict.update({
-                    "log_p_test": log_p_test.mean().cpu().item(),
+                    # "log_pZ_test": log_p_test.mean().cpu().item(),
                     "flow_test_log_prob": test_mean_log_prob.cpu().item(),
-                    "flow_ess_over_p": ess_over_p.cpu().item(),
-                    "flow_kl_forward": kl_forward.cpu().item(),
+                    # "flow_ess_over_p": ess_over_p.cpu().item(),
+                    # "flow_unnorm_KL_forward": kl_forward.cpu().item(),
                 })
 
                 # Evaluate samples from flow
                 if flow is not None:
-                    flow_samples, flow_logprob = flow.sample_and_log_prob((10,))
-                    boltzmann_logprob = self.log_prob(flow_samples)
-                    kl_reverse = torch.mean(flow_logprob - boltzmann_logprob)
-                    print("Q log Q", flow_logprob.mean())
-                    print("Q log P", boltzmann_logprob.mean())
-                    print("Q (log Q - log P)", kl_reverse)
-                    summary_dict.update({"flow_kl_reverse": kl_reverse.cpu().item()})
+                    num_flow_samples = 1000
+                    flow_samples, flow_logprob = flow.sample_and_log_prob((num_flow_samples,))
+                    # boltzmann_logprob = self.log_prob(flow_samples)  # TODO: This is an unnormalised logprob! So KL is off-by-constant.
+                    # kl_reverse = torch.mean(flow_logprob - boltzmann_logprob)
+                    # print("Q log Q", flow_logprob.mean())
+                    # print("Q log P", boltzmann_logprob.mean())
+                    # print("Q (log Q - log P)", kl_reverse)
+                    # summary_dict.update({"flow_kl+C_reverse": kl_reverse.cpu().item()})
 
-                # Check that flow gives probability distribution along certain dimensions
-                data_point = target_data_z[0]
-                # Vary a single dimension along a grid: e.g. phi angle of third atom.
-                # In the internal representation that gets fed into the flow, phi is in the range [0, pi].
-                grid_resolution = 1000
-                max_val = np.pi
-                phi_vals = torch.linspace(0, max_val, grid_resolution)
-                theta_vals = torch.linspace(-max_val / 2, max_val / 2, grid_resolution)
-                data = data_point.clone().repeat(grid_resolution, 1)
-                data[:, 2] = phi_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace phi2
-                flow_probs = log_q_fn(data).exp()
-                integrated_probs = flow_probs.sum() * max_val / grid_resolution
-                print("int_{phi_atom3} Q(internal_coords):", integrated_probs)
-                data = data_point.clone().repeat(grid_resolution, 1)
-                data[:, 4] = phi_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace phi3
-                flow_probs = log_q_fn(data).exp()
-                integrated_probs = flow_probs.sum() * max_val / grid_resolution
-                print("int_{phi_atom4} Q(internal_coords):", integrated_probs)
-                data = data_point.clone().repeat(grid_resolution, 1)
-                data[:, 5] = theta_vals  # [r1, r2, phi2, r3, phi3, theta3, ...] and we want to replace theta3
-                flow_probs = log_q_fn(data).exp()
-                integrated_probs = flow_probs.sum() * max_val / grid_resolution
-                print("int_{theta_atom4} Q(internal_coords):", integrated_probs)
+                    # Alternative KL computation that gets around the off-by-constant issue: estimate the KL per
+                    # dimension using the given samples; we can normalise this using the samples themselves. Here
+                    # we're essentially estimating the KL as the average of marginal KLs (per dimension.
+                    nbins = 200
+                    hist_range = [-5, 5]  # in nanometers or radians, depending on the dimension
+                    target_data_kl = target_data_i.cpu().clone().numpy()
+                    flow_samples_kl = flow_samples.cpu().clone().numpy()
+                    hists_test = np.zeros((nbins, self.internal_dim))
+                    hists_flow = np.zeros((nbins, self.internal_dim))
+                    for dim in range(self.internal_dim):
+                        # TODO: KL in I space or in X space? Also, what to do with the Jacobian term then?
+                        #  Jacobian term is unnecessary in KL estimate, since we use samples + histograms, rather
+                        #  than the log probability density.
+                        hist_test, _ = np.histogram(target_data_kl[:, dim], bins=nbins, range=hist_range, density=True)
+                        hist_flow, _ = np.histogram(flow_samples_kl[:, dim], bins=nbins, range=hist_range, density=True)
+                        hists_test[:, dim] = hist_test
+                        hists_flow[:, dim] = hist_flow
+                    # KL of marginals
+                    eps = 1e-10
+                    forward_kl_marginals_unscaled = np.sum(
+                        hists_test * (np.log(hists_test + eps) - np.log(hists_flow + eps)), axis=0
+                    )
+                    forward_kl_marginals = forward_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
+                    # print(f" Forward KL est.: {forward_kl_marginals.mean():.3f}")
+                    reverse_kl_marginals_unscaled = np.sum(
+                        hists_flow * (np.log(hists_flow + eps) - np.log(hists_test + eps)), axis=0
+                    )
+                    reverse_kl_marginals = reverse_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
+                    # print(f" Reverse KL est.: {reverse_kl_marginals.mean():.3f}")
+                    summary_dict.update({
+                        # "log_pZ_test": log_p_test.mean().cpu().item(),
+                        "avg_forward_kl_from_marginals": forward_kl_marginals.mean(),
+                        "avg_reverse_kl_from_marginals": reverse_kl_marginals.mean(),
+                    })
+
+                # TODO: Seems the constraints were not implemented in the energy computation here! Implementing them
+                #  mostly fixes the issue (although there is perhaps still some offset between MD sample optimum and
+                #  energy optimum? Check this.
+                # TODO: Does applying constraints post-flow sampling not break the use-case of the flow? Check with
+                #  Alberto.
+                if self.plot_per_dim:
+                    # Check some integrals (sums over grids) of certain feature dimensions.
+                    import matplotlib.pyplot as plt
+                    import torch.nn.functional as F
+                    # TODO: Plot more dimensions, modularise.
+                    dim_labels = ["H11", "H12", "H12"] + 3 * ["O2"] + 3 * ["H21"] + 3 * ["H22"]
+                    num_molecules_to_plot = 2
+                    num_first_molecule_dims = 3
+                    remaining_dims = (num_molecules_to_plot - 1) * 3 * 3
+                    total_dims = num_first_molecule_dims + remaining_dims
+                    assert len(dim_labels) >= total_dims, "Not enough atom labels given for number of dimensions."
+                    r_dims = [0, 1] + [i for i in range(3, self.cartesian_dim, 3)]
+                    phi_dims = [2] + [i for i in range(4, self.cartesian_dim, 3)]
+                    theta_dims = [i for i in range(5, self.cartesian_dim, 3)]
+
+                    # Pick a single data point to make into a grid along various dimensions
+                    data_point = target_data_i[0]
+                    grid_resolution = 100
+                    # Flow output ranges to plot for
+                    min_fr, max_fr = -3, 1
+                    min_fphi, max_fphi = 0, np.pi
+                    min_ftheta, max_ftheta = 0, np.pi
+
+                    # Figure setup
+                    ncols = 3
+                    nrows = total_dims // ncols if total_dims % ncols == 0 else total_dims // ncols + 1
+                    plt.figure(figsize=(13, 4 * nrows))
+                    # Plot each dimension
+                    for dim in range(total_dims):
+                        plt.subplot(nrows, ncols, dim + 1)
+                        md_f_val = data_point[dim].cpu()  # MD value of feature in flow-output space
+                        if dim in r_dims:
+                            f_vals = torch.linspace(min_fr, max_fr, grid_resolution)
+                            x_vals = F.softplus(f_vals)
+                            md_val = F.softplus(md_f_val)  # Transformation to r coordinate from flow output
+                            label, unit = "r", "nm"
+                            plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
+                        elif dim in phi_dims:
+                            f_vals = torch.linspace(min_fphi, max_fphi, grid_resolution)
+                            x_vals = f_vals * 2
+                            md_val = md_f_val * 2  # Transformation to phi coordinate from flow output
+                            label, unit = "phi", "rad"
+                            plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
+                        elif dim in theta_dims:
+                            f_vals = torch.linspace(min_ftheta, max_ftheta, grid_resolution)
+                            x_vals = f_vals - np.pi / 2
+                            md_val = md_f_val - np.pi / 2  # Transformation to theta coordinate from flow output
+                            label, unit = "theta", "rad"
+                            plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
+                        else:
+                            raise ValueError(f"Unexpected dim index {dim}.")
+                        # Axes labels
+                        if dim % ncols == 0:
+                            plt.ylabel("probability")
+                        if dim > total_dims - ncols:
+                            plt.xlabel(f"{label} ({unit})")
+                        # Repeat data point and replace the dimension we want to plot with the value grid.
+                        data = data_point.clone().repeat(grid_resolution, 1)
+                        data[:, dim] = f_vals
+
+                        # Get prob of grid under flow
+                        flow_sliceprobs = log_q_fn(data).exp()
+                        flow_probs = flow_sliceprobs.cpu() / flow_sliceprobs.cpu().sum()
+                        # Get prob of grid under Boltzmann
+                        boltzmann_sliceprobs = self.log_prob(data).exp()
+                        boltzmann_probs = boltzmann_sliceprobs.cpu() / boltzmann_sliceprobs.cpu().sum()
+                        plt.plot(x_vals, flow_probs, label="flow")
+                        plt.plot(x_vals, boltzmann_probs, label="boltzmann")
+                        ymax = max(flow_probs.cpu().max().item(), boltzmann_probs.cpu().max().item())
+                        plt.vlines(md_val, 0, ymax, label=f"MD {label}", color="k", linestyle="--")
+                        plt.legend()
+
+                    plt.show()
+                    plt.close()
 
         else:  # Evaluate Flow+AIS samples: no likelihood available.
             pass  # There is no evaluation currently that only works for Flow+AIS samples.

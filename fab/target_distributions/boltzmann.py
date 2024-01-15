@@ -54,6 +54,16 @@ class TransformedBoltzmann(nn.Module):
 
     def log_prob(self, z):
         z, log_det = self.transform(z)  # Z --> X
+        # # For use with debugger:
+        # # First two rows correspond to molecule with both H at same place.
+        # # Last two rows correspond to molecule at original spot in MD simulation (at ~104.5 degrees).
+        # # The first one should be impossible, and the second one should have highest energies.
+        # print(
+        #     f"Cartesian coords of first molecule (xyz): \n{z[0, :9].reshape(3, 3).cpu().numpy()}, "
+        #     f"Energy: {-self.norm_energy(z)[0]:.3f}\n"
+        #     f"Cartesian coords of first molecule (xyz): \n{z[29, :9].reshape(3, 3).cpu().numpy()}, "
+        #     f"Energy: {-self.norm_energy(z)[29]:.3f}"
+        # )
         return -self.norm_energy(z) + log_det
 
     def log_prob_x(self, x):
@@ -130,6 +140,7 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
+                openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
                 state = openmm_context.getState(getForces=True, getEnergy=True)
 
                 # get energy
@@ -184,6 +195,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             force = np.zeros_like(input)
         else:
             openmm_context.setPositions(input)
+            openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
             state = openmm_context.getState(getForces=True, getEnergy=True)
 
             # get energy
