@@ -3,14 +3,14 @@
 target:                               # Properties of molecular system
   solute: water
   solvent: water
-  dim: 18  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 45  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
+  n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
   solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
+  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.h5  # Filepath to load samples from
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5
   test_samples_path: null
 
 
@@ -26,7 +26,7 @@ flow:                                  # Properties of the flow model
   blocks: 12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
   blocks_per_layer: 1                 # Int, number of blocks per layer
   hidden_units: 256                   # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 8                         # Int, number of bins of the neural splines
+  num_bins: 9                        # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -70,8 +70,8 @@ training:                             # Properties of the training procedure
 
 
 evaluation:  # TODO
-  plot_per_dim: false
-  n_plots: 20                         # number of times we visualise the model throughout training.
+  plot_per_dim: true
+  n_plots: 0  #20                        # number of times we visualise the model throughout training.
   n_eval: 50  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024              # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
   n_checkpoints: 10                   # number of model checkpoints saved
@@ -79,13 +79,13 @@ evaluation:  # TODO
 
 
 logger:
-  pandas_logger:
-    save_period: 100                  # how often to save the pandas dataframe as a csv
 #  wandb:
-#    name: ${fab.loss_type}_pr${training.prioritised_buffer}_alpha${fab.alpha}
+#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
 #    project: H2O_in_H2O
 #    entity: timsey
-#    tags: [fab_explore]
+#    tags: [kl_H2O]
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv
 
 
 # TODO:

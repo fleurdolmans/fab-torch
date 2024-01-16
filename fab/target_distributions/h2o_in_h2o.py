@@ -368,8 +368,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
                     # print(f" Reverse KL est.: {reverse_kl_marginals.mean():.3f}")
                     summary_dict.update({
                         # "log_pZ_test": log_p_test.mean().cpu().item(),
-                        "avg_forward_kl_from_marginals": forward_kl_marginals.mean(),
-                        "avg_reverse_kl_from_marginals": reverse_kl_marginals.mean(),
+                        "mean_forward_kl_marginals": forward_kl_marginals.mean(),
+                        "mean_reverse_kl_marginals": reverse_kl_marginals.mean(),
                     })
 
                 # TODO: Seems the constraints were not implemented in the energy computation here! Implementing them

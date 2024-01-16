@@ -62,7 +62,7 @@ class Trainer:
         eval_info = self.model.get_eval_info(outer_batch_size=eval_batch_size, inner_batch_size=batch_size)
         eval_info.update(step=i)
         self.logger.write(eval_info)
-        print({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
+        print("   Eval metrics: " + str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"}))
 
     def run(
         self,
@@ -103,14 +103,20 @@ class Trainer:
         target_dist = self.model.target_distribution
         for t in range(start_iter, n_iterations, 1):
             i = t + 1
-            # if self.model.loss_type == "forward_kl" and next_epoch:
-            #     print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
+            if self.model.loss_type == "forward_kl" and next_epoch:
+                print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
 
-            # if i % 100 == 0:
-            print(f"  Iteration: {i}/{n_iterations}")
+            if i % 100 == 1:
+                print(f"  Iteration: {i}/{n_iterations}")
             iter_start = time()
             it_start_time = time()
             self.optimizer.zero_grad()
+
+            # with torch.no_grad():
+            #     s = self.model.flow.sample((10000,))
+            #     print("r range:", s[:, 3::3].min(), s[:, 3::3].max())
+            #     print("phi range:", s[:, 4::3].min(), s[:, 4::3].max())
+            #     print("theta range:", s[:, 5::3].min(), s[:, 5::3].max())
 
             if self.model.loss_type == "forward_kl":
                 # 'z' here represents that the data has already been transformed to internal coordinates, rather than
@@ -156,26 +162,23 @@ class Trainer:
             info.update(grad_norm=grad_norm.cpu().detach().item())
             self.logger.write(info)
 
-            loss_str = f"  Train loss: {loss.cpu().detach().item():.4f}"
+            loss_str = f"   Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
             # pbar.set_description(loss_str)
-            if i % 10 == 0:
+            if i % 10 == 1:
                 print(loss_str)
 
             if n_eval is not None:
                 if i in eval_iter:
-                    print("  Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
-                    print("  Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
-                    print("  Saving checkpoint...")
                     self.save_checkpoint(i)
 
             # print(f"  Iteration time: {time() - iter_start:.2f}s.")

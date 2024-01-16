@@ -23,7 +23,7 @@ if __name__ == "__main__":
     temperature = 300.0  # Kelvin
     equi_steps = 1e3  # Steps for equilibration
     burnin_steps = 1e5  # Steps for burn-in
-    num_steps = 1e5  # Simulation steps
+    num_steps = 1e3  # Simulation steps
     report_interval = 1e3  # Report to stdout every n steps
     save_interval = 10  # Save positions every m steps
 
