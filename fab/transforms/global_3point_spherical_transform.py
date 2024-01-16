@@ -38,11 +38,10 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
             z, _, _, _ = self.cartesian_to_z(transform_data, setup=True)
-            self._setup_scale_r(z)  # Rescale r (by mean r between solute center and solvent atoms)
-            self._setup_scale_phi(z)  # Rescale phi (by 2pi)
-            self._setup_scale_theta(z)  # Rescale theta (by pi)
-            # TODO: Do we need means as well? We set our coordinate system around (0, 0, 0) by default, so probably
-            #  not.
+            self._setup_scale_r(z)
+            self._setup_scale_phi(z)
+            self._setup_offset_phi(z)
+            self._setup_scale_theta(z)
 
     def forward(self, z):
         # TODO: For water in water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
@@ -52,6 +51,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(z.device)
         self.scale_phi = self.scale_phi.to(z.device)
+        self.offset_phi = self.offset_phi.to(z.device)
         self.scale_theta = self.scale_theta.to(z.device)
         x, log_det_jac = self.z_to_cartesian(z)
         return x, log_det_jac
@@ -64,6 +64,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(x.device)
         self.scale_phi = self.scale_phi.to(x.device)
+        self.offset_phi = self.offset_phi.to(x.device)
         self.scale_theta = self.scale_theta.to(x.device)
         z, log_det_jac, _, _ = self.cartesian_to_z(x)
         return z, log_det_jac
@@ -84,15 +85,24 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         self.register_buffer("scale_r", scale_r)
 
     def _setup_scale_phi(self, z):
-        # TODO: With Circular Flow, we can make sure phi and theta are periodic. Currently we have [0, pi]
-        #  by default, which means that we can use this scale to scale up the phi to the [0, 2pi] range. Theta we
-        #  can leave untouched, except that we do have to shift it to the [-pi/2, pi/2] range. We can do this in the
-        #  actual z_to_cartesian() function.
-        scale_phi = z.new_ones(1) * 2
+        # With Circular Flow, we can make sure phi and theta are periodic. Currently, we have that the flow outputs
+        # values in [-pi, pi], which means that we need to shift phi to get the desired [0, 2pi] range. We do not do
+        # this with a scale operation though, so we can leave the phi scale on 1.
+        scale_phi = z.new_ones(1)
         self.register_buffer("scale_phi", scale_phi)
 
+    def _setup_offset_phi(self, z):
+        # With Circular Flow, we can make sure phi and theta are periodic. Currently, we have that the flow outputs
+        # values in [-pi, pi], which means that we need to shift phi to get the desired [0, 2pi] range. We do this
+        # by applying an offset of pi.
+        offset_phi = z.new_ones(1) * math.pi
+        self.register_buffer("offset_phi", offset_phi)
+
     def _setup_scale_theta(self, z):
-        scale_theta = z.new_ones(1)
+        # With Circular Flow, we can make sure phi and theta are periodic. Currently, we have that the flow outputs
+        # values in [-pi, pi], which means that we need to half this to get values in the desired theta range of
+        # [-pi/2, pi/2].
+        scale_theta = z.new_ones(1) / 2
         self.register_buffer("scale_theta", scale_theta)
 
     def setup_coordinate_system(self, x):
@@ -203,7 +213,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 if not setup:
                     # Normalise
                     fr = fr_scaled / self.scale_r
-                    fphi = phi / self.scale_phi
+                    fphi = (phi - self.offset_phi) / self.scale_phi
                     # Log det Jacobian contribution of scaling.
                     log_det_jac += -1 * (torch.log(self.scale_r) + torch.log(self.scale_phi))
                 else:
@@ -233,7 +243,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 if not setup:
                     # Normalise
                     fr = fr_scaled / self.scale_r
-                    fphi = phi / self.scale_phi
+                    fphi = (phi - self.offset_phi) / self.scale_phi
                     ftheta = theta / self.scale_theta
                     # Log det Jacobian contribution of scaling.
                     log_det_jac += -1 * (
@@ -347,7 +357,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # Scaling
                 fr_scaled = fr * self.scale_r  # Fix r to lie in [0, inf]: This is f_r * s_r
                 r = F.softplus(fr_scaled)  # This is r = softplus(f_r * s_r)
-                phi = fphi * self.scale_phi  # This is phi = f_phi * s_phi
+                phi = fphi * self.scale_phi + self.offset_phi  # This is phi = f_phi * s_phi
                 # Fix phi to lie in [0, 2pi]. We assume the flow output maps to this range. This does not
                 #  affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow.
@@ -381,7 +391,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 # Scaling
                 fr_scaled = fr * self.scale_r  # This is r = softplus(f_r * s_r)
                 r = F.softplus(fr_scaled)  # Fix r to lie in [0, inf]: This is f_r * s_r
-                phi = fphi * self.scale_phi  # This is phi = f_phi * s_phi
+                phi = fphi * self.scale_phi + self.offset_phi  # This is phi = f_phi * s_phi
                 theta = ftheta * self.scale_theta  # This is theta = f_theta * s_theta
                 # Fix phi to lie in [0, 2pi]. This does not affect the Jacobian.
                 # TODO: This should in principle do nothing if we're using the Circular Flow. E.g., we should see no

@@ -396,9 +396,13 @@ class H2OinH2O(nn.Module, TargetDistribution):
                     data_point = target_data_i[0]
                     grid_resolution = 100
                     # Flow output ranges to plot for
+                    # fr is in R in principle (positive after softplus, but generally r values are smaller than 1nm,
+                    #  so fr < 1 is sufficient scale.
+                    # fphi and ftheta are in [-pi, pi] (see PeriodicWrap in make_wrapped_normflow_solvent_flow() with
+                    #  bound_circ = np.pi). Note that we want phi in [0, 2pi] and theta in [-pi/2, pi/2].
                     min_fr, max_fr = -3, 1
-                    min_fphi, max_fphi = 0, np.pi
-                    min_ftheta, max_ftheta = 0, np.pi
+                    min_fphi, max_fphi = -np.pi, np.pi
+                    min_ftheta, max_ftheta = -np.pi, np.pi
 
                     # Figure setup
                     ncols = 3
@@ -416,14 +420,14 @@ class H2OinH2O(nn.Module, TargetDistribution):
                             plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
                         elif dim in phi_dims:
                             f_vals = torch.linspace(min_fphi, max_fphi, grid_resolution)
-                            x_vals = f_vals * 2
-                            md_val = md_f_val * 2  # Transformation to phi coordinate from flow output
+                            x_vals = f_vals + np.pi
+                            md_val = md_f_val + np.pi # Transformation to phi coordinate from flow output
                             label, unit = "phi", "rad"
                             plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
                         elif dim in theta_dims:
                             f_vals = torch.linspace(min_ftheta, max_ftheta, grid_resolution)
-                            x_vals = f_vals - np.pi / 2
-                            md_val = md_f_val - np.pi / 2  # Transformation to theta coordinate from flow output
+                            x_vals = f_vals / 2
+                            md_val = md_f_val / 2  # Transformation to theta coordinate from flow output
                             label, unit = "theta", "rad"
                             plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
                         else:

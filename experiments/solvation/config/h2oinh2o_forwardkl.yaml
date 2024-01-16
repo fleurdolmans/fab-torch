@@ -10,7 +10,7 @@ target:                               # Properties of molecular system
   n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
   solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
   train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10.h5
   test_samples_path: null
 
 
