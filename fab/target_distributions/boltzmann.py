@@ -140,11 +140,32 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
-                openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
-                state = openmm_context.getState(getForces=True, getEnergy=True)
+                # TODO: It seems that OpenMM is relying on the constraints to determine that certain atoms belong to
+                #  the same molecule. That means that not applying the constraints heavily underestimates the energy,
+                #  since larger distances between O and H atoms in the same molecule are less penalised. Unfortunately,
+                #  applying the constraints using applyConstraints() projects the system onto allowed configurations,
+                #  with fixed bond distances, which is not what we want. We want OpenMM to 1) know which atoms are
+                #  bonded as well as any other relevant constraints, and 2) not apply the constraints by changing
+                #  the coordinates, but rather by increasing the energy. How to do this?
+                # openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
+                # xc = openmm_context.getState(getPositions=True).getPositions(asNumpy=True)._value
+                state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
 
                 # get energy
                 energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
+                positions = np.array(state.getPositions().value_in_unit(unit.nanometer))
+                assert np.isclose(positions, x).all(), "OpenMM changed the positions!"
+                assert np.isclose(positions[0, :], np.zeros_like(positions[0, :])).all(), "First atom not at origin!"
+                r = np.sqrt(np.sum(positions**2, axis=1))
+                # Add constraint potential manually
+                # try:
+                #     # k = openmm_context.getParameters()["k"]
+                #     # TODO: Do we need to scale by kBT here? Depends on units of force in system construction.
+                #     w = openmm_context.getParameter("w") / kBT  # Get constraint force constant
+                #     constraint_potential = w * np.sum((r[np.where(r > 1)] - 1)**3 / 3)
+                #     energies[i, 0] = energies[i, 0] + constraint_potential
+                # except ValueError:  # raised if np.where(r>1) is empty
+                #     pass
 
                 # get forces
                 f = state.getForces(asNumpy=True).value_in_unit(unit.kilojoule / unit.mole / unit.nanometer) / kBT
@@ -195,7 +216,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             force = np.zeros_like(input)
         else:
             openmm_context.setPositions(input)
-            openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
+            # openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
             state = openmm_context.getState(getForces=True, getEnergy=True)
 
             # get energy

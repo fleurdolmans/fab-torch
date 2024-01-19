@@ -162,7 +162,7 @@ class Trainer:
             info.update(grad_norm=grad_norm.cpu().detach().item())
             self.logger.write(info)
 
-            loss_str = f"   Train loss: {loss.cpu().detach().item():.4f}"
+            loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
             # pbar.set_description(loss_str)

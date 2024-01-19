@@ -58,7 +58,7 @@ class WaterInWaterBox(TestSystem):
         pdb = app.PDBFile(solvent_pdb_path)
         # TODO: Add solute force field if not water!
         # Add solvent
-        # This pdb file has a single water molecule, where the OH bonds are approx 0.1 nm in length.
+        # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
         modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
         forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
         # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
@@ -66,26 +66,31 @@ class WaterInWaterBox(TestSystem):
             forcefield, model="tip3p", numAdded=self.num_solvent_molecules
         )
         # Create system
-        # Default nonbondedCutoff is 1.0 nm, but this is too big:
-        #  openmm.OpenMMException:
-        #   NonbondedForce: The cutoff distance cannot be greater than half the periodic box size.
         self.system = forcefield.createSystem(
             modeller.topology,
             nonbondedMethod=app.CutoffNonPeriodic,
             nonbondedCutoff=1 * unit.nanometers,
-            constraints=app.HBonds,
+            constraints=app.HBonds,  # TODO: This is enforcing OH bond and HH angle lengths, but we want to enforce this based on energy, not constraints...
         )
 
         # add origin restraint for the central water (156)
         # this should actually be a rigid constraint!
         # constraints require dummy atoms
         # but topology doesn't play well. Will check tomorrow
-        center = mm.CustomExternalForce('100000*max(0, r)^2; r=sqrt(x*x+y*y+z*z)')
+        # This keeps the first atom around the origin.
+        # TODO: Is the sign of this force correct?
+        center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
+        center.addGlobalParameter("k", 100000.0)
+        # center.addGlobalParameter("k", 1.0)
         self.system.addForce(center)
         center.addParticle(0, [])
 
         # add spherical restraint to hold the droplet
-        force = mm.CustomExternalForce('100*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
+        # TODO: Is the sign of this force correct?
+        # TODO: Does this add energy in units of kBT? If so, we may need to scale the energy term (if we
+        #  do manual energy computation) by kBT as well.
+        force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
+        force.addGlobalParameter("w", 100.0)
         self.system.addForce(force)
         for i in range(self.system.getNumParticles()):
             force.addParticle(i, [])
@@ -149,9 +154,6 @@ class H2OinH2O(nn.Module, TargetDistribution):
         self.system = WaterInWaterBox(solvent_pdb_path, self.cartesian_dim)
 
         # Load any MD data
-        # TODO: This data is not put in the standard coordinate form with the solute at the origin. Should use the
-        #  `setup_coordinate_system` function on this data to make sure it matches what the flow outputs after the
-        #  i --> x transform.
         self.eval_mode = eval_mode
         self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
@@ -161,6 +163,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
             self.train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
             self.train_data_x = self.load_target_data(self.train_samples_path, self.cartesian_dim).double()
+            # print(torch.sqrt((self.train_data_x[:, 0, :]**2).sum(dim=1)))
         if val_samples_path:
             self.val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(self.val_samples_path, self.cartesian_dim).double()
@@ -252,7 +255,6 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):
-        # TODO: What filetype are MD samples usually saved in? Support this.
         if data_path.suffix == ".h5":
             with h5py.File(str(data_path), "r") as f:
                 target_data = torch.from_numpy(f["coordinates"][()])
@@ -372,11 +374,6 @@ class H2OinH2O(nn.Module, TargetDistribution):
                         "mean_reverse_kl_marginals": reverse_kl_marginals.mean(),
                     })
 
-                # TODO: Seems the constraints were not implemented in the energy computation here! Implementing them
-                #  mostly fixes the issue (although there is perhaps still some offset between MD sample optimum and
-                #  energy optimum? Check this.
-                # TODO: Does applying constraints post-flow sampling not break the use-case of the flow? Check with
-                #  Alberto.
                 if self.plot_per_dim:
                     # Check some integrals (sums over grids) of certain feature dimensions.
                     import matplotlib.pyplot as plt
@@ -392,69 +389,74 @@ class H2OinH2O(nn.Module, TargetDistribution):
                     phi_dims = [2] + [i for i in range(4, self.cartesian_dim, 3)]
                     theta_dims = [i for i in range(5, self.cartesian_dim, 3)]
 
-                    # Pick a single data point to make into a grid along various dimensions
-                    data_point = target_data_i[0]
                     grid_resolution = 100
                     # Flow output ranges to plot for
                     # fr is in R in principle (positive after softplus, but generally r values are smaller than 1nm,
                     #  so fr < 1 is sufficient scale.
                     # fphi and ftheta are in [-pi, pi] (see PeriodicWrap in make_wrapped_normflow_solvent_flow() with
                     #  bound_circ = np.pi). Note that we want phi in [0, 2pi] and theta in [-pi/2, pi/2].
-                    min_fr, max_fr = -3, 1
+                    min_fr, max_fr = -3, 3
                     min_fphi, max_fphi = -np.pi, np.pi
                     min_ftheta, max_ftheta = -np.pi, np.pi
 
                     # Figure setup
                     ncols = 3
                     nrows = total_dims // ncols if total_dims % ncols == 0 else total_dims // ncols + 1
-                    plt.figure(figsize=(13, 4 * nrows))
-                    # Plot each dimension
-                    for dim in range(total_dims):
-                        plt.subplot(nrows, ncols, dim + 1)
-                        md_f_val = data_point[dim].cpu()  # MD value of feature in flow-output space
-                        if dim in r_dims:
-                            f_vals = torch.linspace(min_fr, max_fr, grid_resolution)
-                            x_vals = F.softplus(f_vals)
-                            md_val = F.softplus(md_f_val)  # Transformation to r coordinate from flow output
-                            label, unit = "r", "nm"
-                            plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
-                        elif dim in phi_dims:
-                            f_vals = torch.linspace(min_fphi, max_fphi, grid_resolution)
-                            x_vals = f_vals + np.pi
-                            md_val = md_f_val + np.pi # Transformation to phi coordinate from flow output
-                            label, unit = "phi", "rad"
-                            plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
-                        elif dim in theta_dims:
-                            f_vals = torch.linspace(min_ftheta, max_ftheta, grid_resolution)
-                            x_vals = f_vals / 2
-                            md_val = md_f_val / 2  # Transformation to theta coordinate from flow output
-                            label, unit = "theta", "rad"
-                            plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
-                        else:
-                            raise ValueError(f"Unexpected dim index {dim}.")
-                        # Axes labels
-                        if dim % ncols == 0:
-                            plt.ylabel("probability")
-                        if dim > total_dims - ncols:
-                            plt.xlabel(f"{label} ({unit})")
-                        # Repeat data point and replace the dimension we want to plot with the value grid.
-                        data = data_point.clone().repeat(grid_resolution, 1)
-                        data[:, dim] = f_vals
 
-                        # Get prob of grid under flow
-                        flow_sliceprobs = log_q_fn(data).exp()
-                        flow_probs = flow_sliceprobs.cpu() / flow_sliceprobs.cpu().sum()
-                        # Get prob of grid under Boltzmann
-                        boltzmann_sliceprobs = self.log_prob(data).exp()
-                        boltzmann_probs = boltzmann_sliceprobs.cpu() / boltzmann_sliceprobs.cpu().sum()
-                        plt.plot(x_vals, flow_probs, label="flow")
-                        plt.plot(x_vals, boltzmann_probs, label="boltzmann")
-                        ymax = max(flow_probs.cpu().max().item(), boltzmann_probs.cpu().max().item())
-                        plt.vlines(md_val, 0, ymax, label=f"MD {label}", color="k", linestyle="--")
-                        plt.legend()
+                    num_datapoints = 1
+                    # Pick a single data point to make into a grid along various dimensions
+                    for m in range(len(target_data_i)):
+                        if m >= num_datapoints:
+                            break
+                        data_point = target_data_i[m]
+                        plt.figure(figsize=(13, 4 * nrows))
+                        # Plot each dimension
+                        for dim in range(total_dims):
+                            plt.subplot(nrows, ncols, dim + 1)
+                            md_f_val = data_point[dim].cpu()  # MD value of feature in flow-output space
+                            if dim in r_dims:
+                                f_vals = torch.linspace(min_fr, max_fr, grid_resolution)
+                                x_vals = F.softplus(f_vals)
+                                md_val = F.softplus(md_f_val)  # Transformation to r coordinate from flow output
+                                label, unit = "r", "nm"
+                                plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
+                            elif dim in phi_dims:
+                                f_vals = torch.linspace(min_fphi, max_fphi, grid_resolution)
+                                x_vals = f_vals + np.pi
+                                md_val = md_f_val + np.pi # Transformation to phi coordinate from flow output
+                                label, unit = "phi", "rad"
+                                plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
+                            elif dim in theta_dims:
+                                f_vals = torch.linspace(min_ftheta, max_ftheta, grid_resolution)
+                                x_vals = f_vals / 2
+                                md_val = md_f_val / 2  # Transformation to theta coordinate from flow output
+                                label, unit = "theta", "rad"
+                                plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
+                            else:
+                                raise ValueError(f"Unexpected dim index {dim}.")
+                            # Axes labels
+                            if dim % ncols == 0:
+                                plt.ylabel("probability")
+                            if dim >= total_dims - ncols:
+                                plt.xlabel(f"{label} ({unit})")
+                            # Repeat data point and replace the dimension we want to plot with the value grid.
+                            data = data_point.clone().repeat(grid_resolution, 1)
+                            data[:, dim] = f_vals
 
-                    plt.show()
-                    plt.close()
+                            # Get prob of grid under flow
+                            flow_sliceprobs = log_q_fn(data).exp()
+                            flow_probs = flow_sliceprobs.cpu() / flow_sliceprobs.cpu().sum()
+                            # Get prob of grid under Boltzmann
+                            boltzmann_sliceprobs = self.log_prob(data).exp()
+                            boltzmann_probs = boltzmann_sliceprobs.cpu() / boltzmann_sliceprobs.cpu().sum()
+                            plt.plot(x_vals, flow_probs, label="flow")
+                            plt.plot(x_vals, boltzmann_probs, label="boltzmann")
+                            ymax = max(flow_probs.cpu().max().item(), boltzmann_probs.cpu().max().item())
+                            plt.vlines(md_val, 0, ymax, label=f"MD {label}", color="k", linestyle="--")
+                            plt.legend()
+
+                        plt.show()
+                        plt.close()
 
         else:  # Evaluate Flow+AIS samples: no likelihood available.
             pass  # There is no evaluation currently that only works for Flow+AIS samples.

@@ -3,14 +3,14 @@
 target:                               # Properties of molecular system
   solute: water
   solvent: water
-  dim: 18  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 45  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
+  n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
   solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000000_every10.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
+  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5  # Filepath to load samples from
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5
   test_samples_path: null
 
 
@@ -52,7 +52,7 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4  # 4                 # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 50  #50000                 # Int, maximum number of iteration
+  n_iterations: 500  #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
   batch_size: 1024               # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
@@ -79,10 +79,10 @@ evaluation:
 
 
 logger:
-  wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
-    project: H2O_in_H2O
-    entity: timsey
-    tags: [kl_H2O]
-#  pandas_logger:
-#    save_period: 100                  # how often to save the pandas dataframe as a csv
+#  wandb:
+#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+#    project: H2O_in_H2O
+#    entity: timsey
+#    tags: [kl_H2O]
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv
