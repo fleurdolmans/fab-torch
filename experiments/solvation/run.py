@@ -37,7 +37,11 @@ def _run(cfg: DictConfig):
             val_samples_path=cfg.target.val_samples_path,
             test_samples_path=cfg.target.test_samples_path,
             save_dir=cfg.evaluation.save_path,
+            plot_MD_energies=cfg.evaluation.plot_MD_energies,
             plot_per_dim=cfg.evaluation.plot_per_dim,
+            external_constraints=cfg.target.external_constraints,
+            internal_constraints=cfg.target.internal_constraints,
+            rigidwater=cfg.target.rigidwater,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

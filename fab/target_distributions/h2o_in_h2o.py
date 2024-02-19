@@ -1,5 +1,3 @@
-import math
-
 import torch
 import h5py
 import warnings
@@ -11,8 +9,10 @@ try:
 except ImportError:
     from typing_extensions import Literal
 import numpy as np
-import tempfile
+import matplotlib.pyplot as plt
+import torch.nn.functional as F
 import pathlib
+import json
 import os
 
 from fab.target_distributions.base import TargetDistribution
@@ -26,6 +26,12 @@ from fab.utils.numerical import effective_sample_size_over_p
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 
 
+constraints_dict = {
+    "hbonds": app.HBonds,
+    "none": None,
+}
+
+
 class WaterInWaterBox(TestSystem):
 
     """Water box with water micro-solvation system.
@@ -36,7 +42,15 @@ class WaterInWaterBox(TestSystem):
 
     """
 
-    def __init__(self, solvent_pdb_path: str, dim: int, **kwargs):
+    def __init__(
+            self,
+            solvent_pdb_path: str,
+            dim: int,
+            external_constraints: bool,
+            internal_constraints: str,
+            rigidwater: bool,
+            **kwargs,
+    ):
         TestSystem.__init__(self, **kwargs)
         # http://docs.openmm.org/latest/userguide/application/02_running_sims.html
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
@@ -62,38 +76,42 @@ class WaterInWaterBox(TestSystem):
         modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
         forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
         # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
-        modeller.addSolvent(
-            forcefield, model="tip3p", numAdded=self.num_solvent_molecules
-        )
+        if self.num_solvent_molecules > 0:
+            modeller.addSolvent(
+                forcefield, model="tip3p", numAdded=self.num_solvent_molecules
+            )
         # Create system
+        # TODO: This is enforcing OH bond and HH angle lengths, but we want to enforce this based on energy, not constraints...
         self.system = forcefield.createSystem(
             modeller.topology,
             nonbondedMethod=app.CutoffNonPeriodic,
-            nonbondedCutoff=1 * unit.nanometers,
-            constraints=app.HBonds,  # TODO: This is enforcing OH bond and HH angle lengths, but we want to enforce this based on energy, not constraints...
+            nonbondedCutoff=1.0 * unit.nanometers,
+            constraints=constraints_dict[internal_constraints],
+            rigidWater=rigidwater,
         )
 
-        # add origin restraint for the central water (156)
-        # this should actually be a rigid constraint!
-        # constraints require dummy atoms
-        # but topology doesn't play well. Will check tomorrow
-        # This keeps the first atom around the origin.
-        # TODO: Is the sign of this force correct?
-        center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
-        center.addGlobalParameter("k", 100000.0)
-        # center.addGlobalParameter("k", 1.0)
-        self.system.addForce(center)
-        center.addParticle(0, [])
+        if external_constraints:
+            # add origin restraint for the central water (156)
+            # this should actually be a rigid constraint!
+            # constraints require dummy atoms
+            # but topology doesn't play well. Will check tomorrow
+            # This keeps the first atom around the origin.
+            # TODO: Is the sign of this force correct?
+            center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
+            center.addGlobalParameter("k", 100000.0)
+            # center.addGlobalParameter("k", 1.0)
+            self.system.addForce(center)
+            center.addParticle(0, [])
 
-        # add spherical restraint to hold the droplet
-        # TODO: Is the sign of this force correct?
-        # TODO: Does this add energy in units of kBT? If so, we may need to scale the energy term (if we
-        #  do manual energy computation) by kBT as well.
-        force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
-        force.addGlobalParameter("w", 100.0)
-        self.system.addForce(force)
-        for i in range(self.system.getNumParticles()):
-            force.addParticle(i, [])
+            # add spherical restraint to hold the droplet
+            # TODO: Is the sign of this force correct?
+            # TODO: Does this add energy in units of kBT? If so, we may need to scale the energy term (if we
+            #  do manual energy computation) by kBT as well.
+            force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
+            force.addGlobalParameter("w", 100.0)
+            self.system.addForce(force)
+            for i in range(self.system.getNumParticles()):
+                force.addParticle(i, [])
 
         self.topology, self.positions = modeller.getTopology(), modeller.getPositions()
         # self.topology.atoms() yields the atom order, which is OHH OHH OHH etc.
@@ -117,7 +135,11 @@ class H2OinH2O(nn.Module, TargetDistribution):
         use_val_data_for_transform: bool = False,
         device: str = "cpu",
         save_dir: Optional[str] = None,
-        plot_per_dim: bool = False,  # Whether to plot the marginal distributions of a sample when doing eval.
+        plot_MD_energies: bool = False,  # Whether to plot the energies of the MD data as a sanity check.
+        plot_per_dim: int = 0,  # Every this many eval iterations, plot the marginal energy distributions of a sample. Set to 0 for no plotting.
+        external_constraints: bool = True,  # Whether to use external force constraints for keeping the system in place.
+        internal_constraints: str = "none",  # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
+        rigidwater: bool = False,  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
     ):
         """
         Boltzmann distribution of H2O in H2O.
@@ -143,6 +165,8 @@ class H2OinH2O(nn.Module, TargetDistribution):
         self.energy_max = energy_max
         self.n_threads = n_threads
         self.device = device
+
+        self.plot_MD_energies = plot_MD_energies
         self.plot_per_dim = plot_per_dim
 
         self.save_dir = save_dir
@@ -150,12 +174,10 @@ class H2OinH2O(nn.Module, TargetDistribution):
         if not os.path.exists(self.metric_dir):
             os.makedirs(self.metric_dir)
 
-        # Initialise system
-        self.system = WaterInWaterBox(solvent_pdb_path, self.cartesian_dim)
-
         # Load any MD data
         self.eval_mode = eval_mode
         self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
+        self.train_data_config, self.val_data_config, self.test_data_config = None, None, None
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
         self.train_data_i, self.val_data_i, self.test_data_i = None, None, None
         self.train_logdet_xi, self.val_logdet_xi, self.test_logdet_xi = None, None, None
@@ -163,13 +185,30 @@ class H2OinH2O(nn.Module, TargetDistribution):
             self.train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
             self.train_data_x = self.load_target_data(self.train_samples_path, self.cartesian_dim).double()
-            # print(torch.sqrt((self.train_data_x[:, 0, :]**2).sum(dim=1)))
+            # Load associated config
+            with open(self.train_samples_path.with_suffix(".json"), "r") as f:
+                self.train_data_config = json.load(f)
         if val_samples_path:
             self.val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(self.val_samples_path, self.cartesian_dim).double()
+            # Load associated config
+            with open(self.val_samples_path.with_suffix(".json"), "r") as f:
+                self.val_data_config = json.load(f)
         if test_samples_path:
             self.test_samples_path = pathlib.Path(test_samples_path)
             self.test_data_x = self.load_target_data(self.test_samples_path, self.cartesian_dim).double()
+            # Load associated config
+            with open(self.test_samples_path.with_suffix(".json"), "r") as f:
+                self.test_data_config = json.load(f)
+
+        # Initialise system
+        self.system = WaterInWaterBox(
+            solvent_pdb_path,
+            self.cartesian_dim,
+            external_constraints,
+            internal_constraints,
+            rigidwater,
+        )
 
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
@@ -204,20 +243,6 @@ class H2OinH2O(nn.Module, TargetDistribution):
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
             )
-            # # Store new coordinates for visualisation tests (notebook).
-            # fr = h5py.File(str(self.train_samples_path), "r")
-            # orig_coords = torch.from_numpy(fr["coordinates"][()])
-            # new_coords = self.train_data.numpy()
-            # new_filepath = str(self.train_samples_path.parent / self.train_samples_path.stem) + "_centered.h5"
-            # with h5py.File(new_filepath, "w") as fw:
-            #     for obj in fr.keys():
-            #         fr.copy(obj, fw)
-            #     assert np.isclose(fw["coordinates"][...], orig_coords).all(), (
-            #         "Original coordinates not copied correctly."
-            #     )
-            #     fw["coordinates"][...] = new_coords
-            # fr.close()
-
         if self.val_data_x is not None:
             self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
                 self.val_data_x.reshape(-1, self.cartesian_dim)
@@ -253,6 +278,23 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 transform=self.coordinate_transform,
             )
 
+        # Plot energies of the MD data as a sanity check if desired.
+        if self.plot_MD_energies:
+            if self.eval_mode == "val":
+                target_data_i = self.val_data_i.reshape(-1, self.internal_dim).to(self.device)
+            elif self.eval_mode == "test":
+                target_data_i = self.test_data_i.reshape(-1, self.internal_dim).to(self.device)
+
+            prob, jac = self.log_prob_and_jac(target_data_i)
+            energy = -1 * (prob - jac).cpu()
+            energy_in_kJ_per_mol = energy * 0.008314 * self.temperature  # R = 8.314 J/(mol K)
+            plt.plot(list(range(len(target_data_i))), energy_in_kJ_per_mol)
+            plt.xlabel("MD sample index")
+            plt.ylabel(f"Boltzmann energy (kJ/mol)")
+            plt.ylim(min(energy_in_kJ_per_mol) * 1.05, 0)
+            plt.show()
+            plt.close()
+
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):
         if data_path.suffix == ".h5":
@@ -278,6 +320,9 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
     def log_prob(self, i: Tensor):
         return self.p.log_prob(i)
+
+    def log_prob_and_jac(self, i: Tensor):
+        return self.p.log_prob_and_jac(i)
 
     def log_prob_x(self, x: Tensor):
         return self.p.log_prob_x(x)
@@ -374,230 +419,246 @@ class H2OinH2O(nn.Module, TargetDistribution):
                         "mean_reverse_kl_marginals": reverse_kl_marginals.mean(),
                     })
 
-                if self.plot_per_dim:
-                    # Check some integrals (sums over grids) of certain feature dimensions.
-                    import matplotlib.pyplot as plt
-                    import torch.nn.functional as F
-                    # TODO: Plot more dimensions, modularise.
-                    dim_labels = ["H11", "H12", "H12"] + 3 * ["O2"] + 3 * ["H21"] + 3 * ["H22"]
-                    num_molecules_to_plot = 2
-                    num_first_molecule_dims = 3
-                    remaining_dims = (num_molecules_to_plot - 1) * 3 * 3
-                    total_dims = num_first_molecule_dims + remaining_dims
-                    assert len(dim_labels) >= total_dims, "Not enough atom labels given for number of dimensions."
-                    r_dims = [0, 1] + [i for i in range(3, self.cartesian_dim, 3)]
-                    phi_dims = [2] + [i for i in range(4, self.cartesian_dim, 3)]
-                    theta_dims = [i for i in range(5, self.cartesian_dim, 3)]
+                if self.plot_per_dim != 0:
+                    if iteration % self.plot_per_dim == 0:
+                        # Check some integrals (sums over grids) of certain feature dimensions.
+                        dim_labels = ["H11", "H12", "H12"] + 3 * ["O2"] + 3 * ["H21"] + 3 * ["H22"]
+                        num_molecules_to_plot = min(2, self.cartesian_dim // 9)
+                        num_first_molecule_dims = 3
+                        remaining_dims = (num_molecules_to_plot - 1) * 3 * 3
+                        total_dims = num_first_molecule_dims + remaining_dims
+                        assert len(dim_labels) >= total_dims, "Not enough atom labels given for number of dimensions."
+                        r_dims = [0, 1] + [i for i in range(3, self.cartesian_dim, 3)]
+                        phi_dims = [2] + [i for i in range(4, self.cartesian_dim, 3)]
+                        theta_dims = [i for i in range(5, self.cartesian_dim, 3)]
 
-                    grid_resolution = 100
-                    # Flow output ranges to plot for
-                    # fr is in R in principle (positive after softplus, but generally r values are smaller than 1nm,
-                    #  so fr < 1 is sufficient scale.
-                    # fphi and ftheta are in [-pi, pi] (see PeriodicWrap in make_wrapped_normflow_solvent_flow() with
-                    #  bound_circ = np.pi). Note that we want phi in [0, 2pi] and theta in [-pi/2, pi/2].
-                    min_fr, max_fr = -3, 3
-                    min_fphi, max_fphi = -np.pi, np.pi
-                    min_ftheta, max_ftheta = -np.pi, np.pi
+                        grid_resolution = 100
+                        # Flow output ranges to plot for
+                        # fr is in R in principle (positive after softplus, but generally r values are smaller than 1nm,
+                        #  so fr < 1 is sufficient scale.
+                        # fphi and ftheta are in [-pi, pi] (see PeriodicWrap in make_wrapped_normflow_solvent_flow() with
+                        #  bound_circ = np.pi). Note that we want phi in [0, 2pi] and theta in [-pi/2, pi/2].
+                        min_fr, max_fr = -3, -1
+                        min_fphi, max_fphi = -np.pi, np.pi
+                        min_ftheta, max_ftheta = -np.pi, np.pi
 
-                    # Figure setup
-                    ncols = 3
-                    nrows = total_dims // ncols if total_dims % ncols == 0 else total_dims // ncols + 1
+                        # Figure setup
+                        ncols = 3
+                        nrows = total_dims // ncols if total_dims % ncols == 0 else total_dims // ncols + 1
 
-                    num_datapoints = 1
-                    # Pick a single data point to make into a grid along various dimensions
-                    for m in range(len(target_data_i)):
-                        if m >= num_datapoints:
-                            break
-                        data_point = target_data_i[m]
-                        plt.figure(figsize=(13, 4 * nrows))
-                        # Plot each dimension
-                        for dim in range(total_dims):
-                            plt.subplot(nrows, ncols, dim + 1)
-                            md_f_val = data_point[dim].cpu()  # MD value of feature in flow-output space
-                            if dim in r_dims:
-                                f_vals = torch.linspace(min_fr, max_fr, grid_resolution)
-                                x_vals = F.softplus(f_vals)
-                                md_val = F.softplus(md_f_val)  # Transformation to r coordinate from flow output
-                                label, unit = "r", "nm"
-                                plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
-                            elif dim in phi_dims:
-                                f_vals = torch.linspace(min_fphi, max_fphi, grid_resolution)
-                                x_vals = f_vals + np.pi
-                                md_val = md_f_val + np.pi # Transformation to phi coordinate from flow output
-                                label, unit = "phi", "rad"
-                                plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
-                            elif dim in theta_dims:
-                                f_vals = torch.linspace(min_ftheta, max_ftheta, grid_resolution)
-                                x_vals = f_vals / 2
-                                md_val = md_f_val / 2  # Transformation to theta coordinate from flow output
-                                label, unit = "theta", "rad"
-                                plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
-                            else:
-                                raise ValueError(f"Unexpected dim index {dim}.")
-                            # Axes labels
-                            if dim % ncols == 0:
-                                plt.ylabel("probability")
-                            if dim >= total_dims - ncols:
-                                plt.xlabel(f"{label} ({unit})")
-                            # Repeat data point and replace the dimension we want to plot with the value grid.
-                            data = data_point.clone().repeat(grid_resolution, 1)
-                            data[:, dim] = f_vals
+                        num_datapoints = 1
+                        # Pick a single data point to make into a grid along various dimensions
+                        for m in range(len(target_data_i)):
+                            if m >= num_datapoints:
+                                break
+                            data_point = target_data_i[m]
+                            plt.figure(figsize=(13, 4 * nrows))
+                            # Plot each dimension
+                            for dim in range(total_dims):
+                                plt.subplot(nrows, ncols, dim + 1)
+                                md_f_val = data_point[dim].cpu()  # MD value of feature in flow-output space
+                                if dim in r_dims:
+                                    f_vals = torch.linspace(min_fr, max_fr, grid_resolution)
+                                    i_vals = F.softplus(f_vals)
+                                    md_val = F.softplus(md_f_val)  # Transformation to r coordinate from flow output
+                                    label, unit = "r", "nm"
+                                    plt.title(f"r({dim_labels[dim]}), r_MD = {md_val:.4f}nm")
+                                elif dim in phi_dims:
+                                    # 1e-6 to prevent getting exactly 0, which tends to give nans.
+                                    f_vals = torch.linspace(min_fphi + 1e-6, max_fphi, grid_resolution)
+                                    i_vals = f_vals + np.pi
+                                    md_val = md_f_val + np.pi  # Transformation to phi coordinate from flow output
+                                    label, unit = "phi", "rad"
+                                    plt.title(f"phi({dim_labels[dim]}), phi_MD = {md_val:.4f}rad")
+                                elif dim in theta_dims:
+                                    # 1e-6 to prevent getting exactly 0, which tends to give nans.
+                                    f_vals = torch.linspace(min_ftheta + 1e-6, max_ftheta, grid_resolution)
+                                    theta_scale = 1.0 / 2.0
+                                    i_vals = f_vals * theta_scale
+                                    md_val = md_f_val * theta_scale  # Transformation to theta coordinate from flow output
+                                    label, unit = "theta", "rad"
+                                    plt.title(f"theta({dim_labels[dim]}), theta_MD = {md_val:.4f}rad")
+                                else:
+                                    raise ValueError(f"Unexpected dim index {dim}.")
+                                # Axes labels
+                                if dim % ncols == 0:
+                                    plt.ylabel("probability")
+                                if dim >= total_dims - ncols:
+                                    plt.xlabel(f"{label} ({unit})")
+                                # Repeat data point and replace the dimension we want to plot with the value grid.
+                                data = data_point.clone().repeat(grid_resolution, 1)
+                                data[:, dim] = f_vals
 
-                            # Get prob of grid under flow
-                            flow_sliceprobs = log_q_fn(data).exp()
-                            flow_probs = flow_sliceprobs.cpu() / flow_sliceprobs.cpu().sum()
-                            # Get prob of grid under Boltzmann
-                            boltzmann_sliceprobs = self.log_prob(data).exp()
-                            boltzmann_probs = boltzmann_sliceprobs.cpu() / boltzmann_sliceprobs.cpu().sum()
-                            plt.plot(x_vals, flow_probs, label="flow")
-                            plt.plot(x_vals, boltzmann_probs, label="boltzmann")
-                            ymax = max(flow_probs.cpu().max().item(), boltzmann_probs.cpu().max().item())
-                            plt.vlines(md_val, 0, ymax, label=f"MD {label}", color="k", linestyle="--")
-                            plt.legend()
-
-                        plt.show()
-                        plt.close()
+                                # Get prob of grid under flow
+                                # Add logdetjac to compensate for the fact that we are plotting as a function of r, phi
+                                #  and theta, but computing logprobs starting from the flow output space. Essentially, we
+                                #  are plotting prob densities, rather than prob volumes of the grid-patches, and this
+                                #  means we need to compensate for the fact that the grid patches are not of equal size
+                                #  under our transforms from flow output to (true) internal coordinates.
+                                flow_sliceprobs = torch.exp(log_q_fn(data))  # TODO: See below for potential issue.
+                                flow_probs = flow_sliceprobs.cpu() / flow_sliceprobs.cpu().sum()
+                                # Get prob of grid under Boltzmann
+                                # TODO: We are plotting a grid, but we are evaluating a continuous logprob. This means that
+                                #  naively plotting would lead to us plotting densities evaluated at a point within a grid
+                                #  patch, rather than the probability volume of the grid patch (we would need to integrate
+                                #  the logprob over the whole grid patch for that). To compensate, we need to subtract the
+                                #  logdetjac from the energies again to visualise correctly. This does mean that the
+                                #  energy values we visualise here and the actual energies seen by the flow are offset,
+                                #  since the flow deals with densities, whereas we are visualising probability volumes here.
+                                #  Not sure how to deal with this properly for the flow logprobs though... Do we need to
+                                #  also remove the whole logdetjac to the base probability?
+                                boltzmann_logprobs, logdetjac = self.log_prob_and_jac(data)
+                                boltzmann_sliceprobs = torch.exp(self.log_prob(data) - logdetjac)
+                                boltzmann_probs = boltzmann_sliceprobs.cpu() / boltzmann_sliceprobs.cpu().sum()
+                                plt.plot(i_vals, flow_probs, label="flow")
+                                plt.plot(i_vals, boltzmann_probs, label="boltzmann")
+                                ymax = max(flow_probs.cpu().max().item(), boltzmann_probs.cpu().max().item())
+                                plt.vlines(md_val, 0, ymax, label=f"MD {label}", color="k", linestyle="--")
+                                plt.legend()
+                            plt.tight_layout()
+                            plt.show()
+                            plt.close()
 
         else:  # Evaluate Flow+AIS samples: no likelihood available.
             pass  # There is no evaluation currently that only works for Flow+AIS samples.
         return summary_dict
-
-    def get_kld_info(
-            self,
-            samples: Optional[Tensor] = None,
-            log_w: Optional[Tensor] = None,
-            batch_size: int = 1000,
-            iteration: Optional[int] = None,
-    ):
-        """
-        Computes the KLD between the target distribution and the flow distribution, and saves the KLD histogram to
-        disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
-        need the likelihood, so we can actually evaluate Flow+AIS samples as well.
-        """
-        raise NotImplementedError("This function is not yet correctly implemented for H2OinH2O.")
-
-        # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
-        #  transforms have the opposite forward/inverse convention to ours.
-        assert iteration, "Must pass iteration number for doing KLD histogram."
-
-        z_test = self.target_data
-        z_sample = samples  # TODO: might need to fix PeriodicWrap for this (see last layer in Flow and Vincent email).
-
-        # Determine likelihood of test data and transform it (mostly taken from aldp.py)
-        z_d_np = z_test
-        x_d_np = torch.zeros(0, self.dim)
-        log_p_sum = 0
-        n_batches = int(np.ceil(len(z_test) / batch_size))
-        for i in range(n_batches):
-            if i == n_batches - 1:
-                end = len(z_test)
-            else:
-                end = (i + 1) * batch_size
-            z = z_test[(i * batch_size): end, :]
-            # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
-            # TODO: This gives an error in get_angle_and_normal() that finds a rotation around and axis with x=0. This
-            #  presumably happens because one of the test data points has a non-solute atom with y=0. This can indeed
-            #  happen (although exactly 0 is kind of strange), so we should figure out how to deal with it. What would
-            #  work, is to pick a convention for the case where x=0 (i.e., pick a rotation direction,
-            #  such as the x>0 direction), and make sure that this convention is used when the code rotates our
-            #  molecule (otherwise we rotate wrong!).
-            # TODO: Error in batch i=190?
-            x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
-            x_d_np = torch.cat((x_d_np, x), dim=0)
-            log_p = self.log_prob(z)  # TODO: This is the logprob under the target, of the z-space samples?! Weird.
-            log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
-        log_p_avg = log_p_sum / len(z_test)
-
-        # Transform samples
-        z_np = torch.zeros(0, self.dim)
-        x_np = torch.zeros(0, self.dim)
-        n_batches = int(np.ceil(len(samples) / batch_size))
-        for i in range(n_batches):
-            if i == n_batches - 1:
-                end = len(z_sample)
-            else:
-                end = (i + 1) * batch_size
-            z = z_sample[(i * batch_size): end, :]
-            # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
-            x, _ = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
-            x_np = torch.cat((x_np, x), dim=0)
-            z, _ = self.coordinate_transform.forward(x)  # Actually: Z --> X
-            z_np = torch.cat((z_np, z), dim=0)
-
-        # To numpy
-        z_np = z_np.cpu().data.numpy()
-        z_d_np = z_d_np.cpu().data.numpy()
-
-        # Estimate density of marginals
-        nbins = 200
-        hist_range = [-5, 5]
-        ndims = z_np.shape[1]
-
-        hists_test = np.zeros((nbins, ndims))
-        hists_gen = np.zeros((nbins, ndims))
-
-        for i in range(ndims):
-            htest, _ = np.histogram(z_d_np[:, i], nbins, range=hist_range, density=True)
-            hgen, _ = np.histogram(z_np[:, i], nbins, range=hist_range, density=True)
-            hists_test[:, i] = htest
-            hists_gen[:, i] = hgen
-
-        # Compute KLD of marginals
-        eps = 1e-10
-        kld_unscaled = np.sum(hists_test * np.log((hists_test + eps) / (hists_gen + eps)), axis=0)
-        kld = kld_unscaled * (hist_range[1] - hist_range[0]) / nbins
-
-        # Split KLD into groups
-        r_ind = np.arange(0, self.dim, 3)
-        phi_ind = np.arange(1, self.dim, 3)
-        theta_ind = np.arange(2, self.dim, 3)
-
-        kld_r = kld[r_ind]
-        kld_phi = kld[phi_ind]
-        kld_theta = kld[theta_ind]
-
-        # Calculate and save KLD stats of marginals
-        kld = (kld_r, kld_phi, kld_theta)
-        kld_labels = ["bond", "angle", "dih"]
-        kld_ = np.concatenate(kld)
-        kld_append = np.array([[iteration + 1, np.median(kld_), np.mean(kld_)]])
-        kld_path = os.path.join(self.metric_dir, "kld.csv")
-        if os.path.exists(kld_path):
-            kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
-            if len(kld_hist.shape) == 1:
-                kld_hist = kld_hist[None, :]
-            kld_hist = np.concatenate([kld_hist, kld_append])
-        else:
-            kld_hist = kld_append
-        np.savetxt(kld_path, kld_hist, delimiter=",", header="it,kld_median,kld_mean", comments="")
-
-        # Save KLD per coordinate (r, phi, theta)
-        for kld_label, kld_ in zip(kld_labels, kld):
-            kld_append = np.concatenate([np.array([iteration + 1, np.median(kld_), np.mean(kld_)]), kld_])
-            kld_append = kld_append[None, :]
-            kld_path = os.path.join(self.metric_dir, "kld_" + kld_label + ".csv")
-            if os.path.exists(kld_path):
-                kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
-                if len(kld_hist.shape) == 1:
-                    kld_hist = kld_hist[None, :]
-                kld_hist = np.concatenate([kld_hist, kld_append])
-            else:
-                kld_hist = kld_append
-            header = "it,kld_median,kld_mean"
-            for kld_ind in range(len(kld_)):
-                header += ",kld" + str(kld_ind)
-            np.savetxt(kld_path, kld_hist, delimiter=",", header=header, comments="")
-
-        # Save log probability
-        log_p_append = np.array([[iteration + 1, log_p_avg]])
-        log_p_path = os.path.join(self.metric_dir, "log_p_test.csv")
-        if os.path.exists(log_p_path):
-            log_p_hist = np.loadtxt(log_p_path, skiprows=1, delimiter=",")
-            if len(log_p_hist.shape) == 1:
-                log_p_hist = log_p_hist[None, :]
-            log_p_hist = np.concatenate([log_p_hist, log_p_append])
-        else:
-            log_p_hist = log_p_append
-        np.savetxt(log_p_path, log_p_hist, delimiter=",", header="it,log_p", comments="")
-
-        return  # TODO: Return anything to save in the dict or just save to disk?
+    #
+    # def get_kld_info(
+    #         self,
+    #         samples: Optional[Tensor] = None,
+    #         log_w: Optional[Tensor] = None,
+    #         batch_size: int = 1000,
+    #         iteration: Optional[int] = None,
+    # ):
+    #     """
+    #     Computes the KLD between the target distribution and the flow distribution, and saves the KLD histogram to
+    #     disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
+    #     need the likelihood, so we can actually evaluate Flow+AIS samples as well.
+    #     """
+    #     raise NotImplementedError("This function is not yet correctly implemented for H2OinH2O.")
+    #
+    #     # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
+    #     #  transforms have the opposite forward/inverse convention to ours.
+    #     assert iteration, "Must pass iteration number for doing KLD histogram."
+    #
+    #     z_test = self.target_data
+    #     z_sample = samples  # TODO: might need to fix PeriodicWrap for this (see last layer in Flow and Vincent email).
+    #
+    #     # Determine likelihood of test data and transform it (mostly taken from aldp.py)
+    #     z_d_np = z_test
+    #     x_d_np = torch.zeros(0, self.dim)
+    #     log_p_sum = 0
+    #     n_batches = int(np.ceil(len(z_test) / batch_size))
+    #     for i in range(n_batches):
+    #         if i == n_batches - 1:
+    #             end = len(z_test)
+    #         else:
+    #             end = (i + 1) * batch_size
+    #         z = z_test[(i * batch_size): end, :]
+    #         # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
+    #         # TODO: This gives an error in get_angle_and_normal() that finds a rotation around and axis with x=0. This
+    #         #  presumably happens because one of the test data points has a non-solute atom with y=0. This can indeed
+    #         #  happen (although exactly 0 is kind of strange), so we should figure out how to deal with it. What would
+    #         #  work, is to pick a convention for the case where x=0 (i.e., pick a rotation direction,
+    #         #  such as the x>0 direction), and make sure that this convention is used when the code rotates our
+    #         #  molecule (otherwise we rotate wrong!).
+    #         # TODO: Error in batch i=190?
+    #         x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
+    #         x_d_np = torch.cat((x_d_np, x), dim=0)
+    #         log_p = self.log_prob(z)  # TODO: This is the logprob under the target, of the z-space samples?! Weird.
+    #         log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
+    #     log_p_avg = log_p_sum / len(z_test)
+    #
+    #     # Transform samples
+    #     z_np = torch.zeros(0, self.dim)
+    #     x_np = torch.zeros(0, self.dim)
+    #     n_batches = int(np.ceil(len(samples) / batch_size))
+    #     for i in range(n_batches):
+    #         if i == n_batches - 1:
+    #             end = len(z_sample)
+    #         else:
+    #             end = (i + 1) * batch_size
+    #         z = z_sample[(i * batch_size): end, :]
+    #         # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
+    #         x, _ = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
+    #         x_np = torch.cat((x_np, x), dim=0)
+    #         z, _ = self.coordinate_transform.forward(x)  # Actually: Z --> X
+    #         z_np = torch.cat((z_np, z), dim=0)
+    #
+    #     # To numpy
+    #     z_np = z_np.cpu().data.numpy()
+    #     z_d_np = z_d_np.cpu().data.numpy()
+    #
+    #     # Estimate density of marginals
+    #     nbins = 200
+    #     hist_range = [-5, 5]
+    #     ndims = z_np.shape[1]
+    #
+    #     hists_test = np.zeros((nbins, ndims))
+    #     hists_gen = np.zeros((nbins, ndims))
+    #
+    #     for i in range(ndims):
+    #         htest, _ = np.histogram(z_d_np[:, i], nbins, range=hist_range, density=True)
+    #         hgen, _ = np.histogram(z_np[:, i], nbins, range=hist_range, density=True)
+    #         hists_test[:, i] = htest
+    #         hists_gen[:, i] = hgen
+    #
+    #     # Compute KLD of marginals
+    #     eps = 1e-10
+    #     kld_unscaled = np.sum(hists_test * np.log((hists_test + eps) / (hists_gen + eps)), axis=0)
+    #     kld = kld_unscaled * (hist_range[1] - hist_range[0]) / nbins
+    #
+    #     # Split KLD into groups
+    #     r_ind = np.arange(0, self.dim, 3)
+    #     phi_ind = np.arange(1, self.dim, 3)
+    #     theta_ind = np.arange(2, self.dim, 3)
+    #
+    #     kld_r = kld[r_ind]
+    #     kld_phi = kld[phi_ind]
+    #     kld_theta = kld[theta_ind]
+    #
+    #     # Calculate and save KLD stats of marginals
+    #     kld = (kld_r, kld_phi, kld_theta)
+    #     kld_labels = ["bond", "angle", "dih"]
+    #     kld_ = np.concatenate(kld)
+    #     kld_append = np.array([[iteration + 1, np.median(kld_), np.mean(kld_)]])
+    #     kld_path = os.path.join(self.metric_dir, "kld.csv")
+    #     if os.path.exists(kld_path):
+    #         kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
+    #         if len(kld_hist.shape) == 1:
+    #             kld_hist = kld_hist[None, :]
+    #         kld_hist = np.concatenate([kld_hist, kld_append])
+    #     else:
+    #         kld_hist = kld_append
+    #     np.savetxt(kld_path, kld_hist, delimiter=",", header="it,kld_median,kld_mean", comments="")
+    #
+    #     # Save KLD per coordinate (r, phi, theta)
+    #     for kld_label, kld_ in zip(kld_labels, kld):
+    #         kld_append = np.concatenate([np.array([iteration + 1, np.median(kld_), np.mean(kld_)]), kld_])
+    #         kld_append = kld_append[None, :]
+    #         kld_path = os.path.join(self.metric_dir, "kld_" + kld_label + ".csv")
+    #         if os.path.exists(kld_path):
+    #             kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
+    #             if len(kld_hist.shape) == 1:
+    #                 kld_hist = kld_hist[None, :]
+    #             kld_hist = np.concatenate([kld_hist, kld_append])
+    #         else:
+    #             kld_hist = kld_append
+    #         header = "it,kld_median,kld_mean"
+    #         for kld_ind in range(len(kld_)):
+    #             header += ",kld" + str(kld_ind)
+    #         np.savetxt(kld_path, kld_hist, delimiter=",", header=header, comments="")
+    #
+    #     # Save log probability
+    #     log_p_append = np.array([[iteration + 1, log_p_avg]])
+    #     log_p_path = os.path.join(self.metric_dir, "log_p_test.csv")
+    #     if os.path.exists(log_p_path):
+    #         log_p_hist = np.loadtxt(log_p_path, skiprows=1, delimiter=",")
+    #         if len(log_p_hist.shape) == 1:
+    #             log_p_hist = log_p_hist[None, :]
+    #         log_p_hist = np.concatenate([log_p_hist, log_p_append])
+    #     else:
+    #         log_p_hist = log_p_append
+    #     np.savetxt(log_p_path, log_p_hist, delimiter=",", header="it,log_p", comments="")
+    #
+    #     return  # TODO: Return anything to save in the dict or just save to disk?

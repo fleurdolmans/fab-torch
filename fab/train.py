@@ -59,7 +59,11 @@ class Trainer:
             plt.close(figure)
 
     def perform_eval(self, i, eval_batch_size, batch_size):
-        eval_info = self.model.get_eval_info(outer_batch_size=eval_batch_size, inner_batch_size=batch_size)
+        eval_info = self.model.get_eval_info(
+            outer_batch_size=eval_batch_size,
+            inner_batch_size=batch_size,
+            iteration=i,
+        )
         eval_info.update(step=i)
         self.logger.write(eval_info)
         print("   Eval metrics: " + str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"}))

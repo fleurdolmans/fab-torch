@@ -1,0 +1,12 @@
+solvent_pdb_path: "/home/timsey/HDD/data/molecules/solvents/water.pdb"
+out_dir: "/home/timsey/HDD/data/molecules/md/"
+num_solvent_molecules: 2
+temperature: 300.0
+equi_steps: 1e3
+burnin_steps: 1e5
+num_steps: 1e4
+report_interval: 1e3
+save_interval: 10
+external_constraints: true
+internal_constraints: "hbonds"  # "hbonds" "none"
+rigidwater: true

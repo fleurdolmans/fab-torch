@@ -53,18 +53,18 @@ class TransformedBoltzmann(nn.Module):
         self.transform = transform
 
     def log_prob(self, z):
-        z, log_det = self.transform(z)  # Z --> X
-        # # For use with debugger:
-        # # First two rows correspond to molecule with both H at same place.
-        # # Last two rows correspond to molecule at original spot in MD simulation (at ~104.5 degrees).
-        # # The first one should be impossible, and the second one should have highest energies.
-        # print(
-        #     f"Cartesian coords of first molecule (xyz): \n{z[0, :9].reshape(3, 3).cpu().numpy()}, "
-        #     f"Energy: {-self.norm_energy(z)[0]:.3f}\n"
-        #     f"Cartesian coords of first molecule (xyz): \n{z[29, :9].reshape(3, 3).cpu().numpy()}, "
-        #     f"Energy: {-self.norm_energy(z)[29]:.3f}"
-        # )
-        return -self.norm_energy(z) + log_det
+        z, log_det = self.transform(z)  # I --> X
+        energy_term = -self.norm_energy(z)
+        #  UNITS: We add logdetjac to energy, because energy is essentially log probability.
+        #   Energy has units of kJ/mol by default (openMM). If we divide energy by N_A kBT = R * T,
+        #   we get kJ/mol / (kJ/mol) = unitless!
+        #   Check: R = N_A * kB, so R * T = N_A kBT, which has units of J / mol.
+        #    because N_A (Avogadro) has units of /mol, and kB has units of J/K.
+        return energy_term + log_det
+
+    def log_prob_and_jac(self, z):
+        z, log_det = self.transform(z)  # I --> X
+        return -self.norm_energy(z) + log_det, log_det
 
     def log_prob_x(self, x):
         return -self.norm_energy(x)
@@ -110,11 +110,13 @@ class TransformedBoltzmannParallel(nn.Module):
         self.transform = transform
 
     def log_prob(self, z):
-        z_, log_det = self.transform(z)
-        energy_term = -self.norm_energy(z_)
-        # print("Boltzmann E:", energy_term)
-        # print("Boltzmann J_IX:", log_det)
+        z, log_det = self.transform(z)  # I --> X
+        energy_term = -self.norm_energy(z)
         return energy_term + log_det
+
+    def log_prob_and_jac(self, z):
+        z, log_det = self.transform(z)  # I --> X
+        return -self.norm_energy(z) + log_det, log_det
 
     def log_prob_x(self, x):
         return -self.norm_energy(x)
@@ -140,25 +142,13 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
-                # TODO: It seems that OpenMM is relying on the constraints to determine that certain atoms belong to
-                #  the same molecule. That means that not applying the constraints heavily underestimates the energy,
-                #  since larger distances between O and H atoms in the same molecule are less penalised. Unfortunately,
-                #  applying the constraints using applyConstraints() projects the system onto allowed configurations,
-                #  with fixed bond distances, which is not what we want. We want OpenMM to 1) know which atoms are
-                #  bonded as well as any other relevant constraints, and 2) not apply the constraints by changing
-                #  the coordinates, but rather by increasing the energy. How to do this?
-                # openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
-                # xc = openmm_context.getState(getPositions=True).getPositions(asNumpy=True)._value
                 state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
 
                 # get energy
                 energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
-                positions = np.array(state.getPositions().value_in_unit(unit.nanometer))
-                assert np.isclose(positions, x).all(), "OpenMM changed the positions!"
-                assert np.isclose(positions[0, :], np.zeros_like(positions[0, :])).all(), "First atom not at origin!"
-                r = np.sqrt(np.sum(positions**2, axis=1))
-                # Add constraint potential manually
-                # try:
+                # positions = np.array(state.getPositions().value_in_unit(unit.nanometer))
+                # r = np.sqrt(np.sum(positions**2, axis=1))
+                # try:  # Add constraint potential manually
                 #     # k = openmm_context.getParameters()["k"]
                 #     # TODO: Do we need to scale by kBT here? Depends on units of force in system construction.
                 #     w = openmm_context.getParameter("w") / kBT  # Get constraint force constant
@@ -167,9 +157,16 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 # except ValueError:  # raised if np.where(r>1) is empty
                 #     pass
 
+                # for j, frc in enumerate(openmm_context.getSystem().getForces()):
+                #     stt = openmm_context.getState(getEnergy=True, groups={j})
+                #     poten = stt.getPotentialEnergy()._value  # kJ/mol
+                #     if np.abs(poten) > 1e-10:
+                #         print(f" {frc.getName()}: {poten:.2f} kJ/mol")
+
                 # get forces
                 f = state.getForces(asNumpy=True).value_in_unit(unit.kilojoule / unit.mole / unit.nanometer) / kBT
                 forces[i, :] = torch.from_numpy(-f)
+
         forces = forces.view(n_batch, n_dim * 3)
         # Save the forces for the backward step, uploading to the gpu if needed
         ctx.save_for_backward(forces.to(device=device))
@@ -216,7 +213,6 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             force = np.zeros_like(input)
         else:
             openmm_context.setPositions(input)
-            # openmm_context.applyConstraints(1e-2)  # TODO: Is this okay to add? Seems necessary!
             state = openmm_context.getState(getForces=True, getEnergy=True)
 
             # get energy

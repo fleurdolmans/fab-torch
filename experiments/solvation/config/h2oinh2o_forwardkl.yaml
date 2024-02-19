@@ -3,16 +3,19 @@
 target:                               # Properties of molecular system
   solute: water
   solvent: water
-  dim: 45  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 27  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
   solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000_every10.h5
+  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # Filepath to load samples from
+  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # _noextconstraints.h5
   test_samples_path: null
-
+  # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
+  external_constraints: true          # Whether to use external force contraints for keeping the system in place.
+  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
+  rigidwater: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
 
 flow:                                  # Properties of the flow model
   solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the paper
@@ -52,7 +55,7 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4  # 4                 # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 500  #50000                 # Int, maximum number of iteration
+  n_iterations: 50  #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
   batch_size: 1024               # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
@@ -70,7 +73,8 @@ training:                             # Properties of the training procedure
 
 
 evaluation:
-  plot_per_dim: true
+  plot_MD_energies: false              # Bool, flag whether to plot MD energies as a sanity check.
+  plot_per_dim: 10                     # Int, plot per-dimension energy 'histograms' every n'th evaluation iteration (0 for no plotting).
   n_plots: 0  #20                        # number of times we visualise the model throughout training.
   n_eval: 50  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024              # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
