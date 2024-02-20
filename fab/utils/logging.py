@@ -74,8 +74,12 @@ class WandbLogger(Logger):
         wandb.run.name = name + "-" + wandb.run.name.split("-")[-1]  # Append run number to name
         self.iter: int = 0
 
-    def write(self, data: Dict[str, Any]) -> None:
-        self.run.log(data, step=self.iter, commit=False)
+    def write(self, data: Dict[str, Any], it: int) -> None:
+        self.run.log(data, step=self.iter, commit=False, iter=it)
+        self.iter += 1
+
+    def write_fig(self, name, figure: Any, it: int) -> None:
+        self.run.log({name: wandb.Image(figure)}, step=self.iter, commit=False, iter=it)
         self.iter += 1
 
     def close(self) -> None:

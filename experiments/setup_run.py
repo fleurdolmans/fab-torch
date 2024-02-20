@@ -14,7 +14,6 @@ import torch
 
 from fab import Trainer, BufferTrainer, PrioritisedBufferTrainer
 from fab.target_distributions.base import TargetDistribution
-from fab.utils.logging import PandasLogger, WandbLogger, Logger, ListLogger
 from fab.utils.replay_buffer import ReplayBuffer
 from fab.utils.plotting import plot_history
 
@@ -22,6 +21,7 @@ from fab import FABModel, HamiltonianMonteCarlo, Metropolis
 from fab.core import ALPHA_DIV_TARGET_LOSSES
 from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
+from experiments.logger_setup import setup_logger
 from experiments.make_flow import (
     make_wrapped_normflow_realnvp,
     make_wrapped_normflow_resampled_flow,
@@ -87,20 +87,6 @@ def get_n_iterations(
             n_iter = int((n_flow_forward_pass - buffer_init_flow_eval) / n_flow_eval_per_iter)
     print(f"{n_iter} iter for {n_flow_forward_pass} flow forward passes")
     return n_iter
-
-
-def setup_logger(cfg: DictConfig, save_path: str) -> Logger:
-    if hasattr(cfg.logger, "pandas_logger"):
-        logger = PandasLogger(
-            save=True, save_path=save_path + "logging_hist.csv", save_period=cfg.logger.pandas_logger.save_period
-        )
-    elif hasattr(cfg.logger, "wandb"):
-        logger = WandbLogger(**cfg.logger.wandb, config=dict(cfg))
-    elif hasattr(cfg.logger, "list_logger"):
-        logger = ListLogger(save_path=save_path + "logging_hist.pkl")
-    else:
-        raise Exception("No logger specified, try adding the wandb or " "pandas logger to the config file.")
-    return logger
 
 
 def setup_buffer(
@@ -264,12 +250,18 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         chkpt_dir = None
         iter_number = 0
 
-    save_path = os.path.join(cfg.evaluation.save_path, str(datetime.now().isoformat()))
-    logger = setup_logger(cfg, save_path)
-    if hasattr(cfg.logger, "wandb"):
-        # if using wandb then save to wandb path
-        save_path = os.path.join(wandb.run.dir, save_path)
-    pathlib.Path(save_path).mkdir(parents=True, exist_ok=True)
+    # Take logger and save dir from Target if it has those, else create them for backwards compatibility.
+    if hasattr(target, "logger"):
+        logger = target.logger
+        assert hasattr(target, "save_dir"), "Target must have a save_dir attribute when it has a logger."
+        save_path = target.save_dir
+    else:
+        save_path = os.path.join(cfg.evaluation.save_path, str(datetime.now().isoformat()))
+        logger = setup_logger(cfg, save_path)
+        if hasattr(cfg.logger, "wandb"):
+            # if using wandb then save to wandb path
+            save_path = os.path.join(wandb.run.dir, save_path)
+        pathlib.Path(save_path).mkdir(parents=True, exist_ok=True)
 
     n_iterations = cfg.training.n_iterations
     # n_iterations = get_n_iterations(

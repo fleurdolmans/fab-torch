@@ -50,10 +50,13 @@ class Trainer:
             torch.save(self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
-        figures = self.plot(self.model)
+        print("   Plotting...")
+        plot_only_md_energies = True if i == 0 else False  # Only plot pre-training.
+        figures = self.plot(self.model, plot_only_md_energies)
         for j, figure in enumerate(figures):
             if save:
-                figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
+                # figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
+                self.logger.write_fig(f"it{i}_fig{j}", figure, i)
             else:
                 plt.show()
             plt.close(figure)
@@ -65,8 +68,11 @@ class Trainer:
             iteration=i,
         )
         eval_info.update(step=i)
-        self.logger.write(eval_info)
-        print("   Eval metrics: " + str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"}))
+        self.logger.write(eval_info, i)
+        print(
+            "   Eval metrics: " +
+            str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
+        )
 
     def run(
         self,
@@ -84,13 +90,17 @@ class Trainer:
         if save:
             pathlib.Path(self.plots_dir).mkdir(exist_ok=True)
             pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True)
+        # Linspace (0, 100, 11) = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        #  We can remove the first entry, since we want special behaviour before training anyway.
+        #  Our primary loop uses a 0-indexed `t` variable, but the `iteration` or `i` count used for evaluation is
+        #   1-indexed, so n_iteration=100 will give `t`=99 for the final iteration, but `i`=100 so it will be evaluated.
         if n_checkpoints:
-            checkpoint_iter = list(np.linspace(1, n_iterations, n_checkpoints, dtype="int"))
+            checkpoint_iter = list(np.linspace(0, n_iterations, n_checkpoints + 1, dtype="int")[1:])
         if n_eval is not None:
-            eval_iter = list(np.linspace(1, n_iterations, n_eval, dtype="int"))
+            eval_iter = list(np.linspace(0, n_iterations, n_eval + 1, dtype="int")[1:])
             assert eval_batch_size is not None
         if n_plot is not None:
-            plot_iter = list(np.linspace(1, n_iterations, n_plot, dtype="int"))
+            plot_iter = list(np.linspace(0, n_iterations, n_plot + 1, dtype="int")[1:])
         if tlimit is not None:
             assert n_checkpoints is not None, "Time limited specified but not checkpoints are " "being saved."
         if start_time is not None:
@@ -105,22 +115,21 @@ class Trainer:
         #     i = pbar_iter + start_iter + 1
         k, epoch, next_epoch = 0, 0, True  # Used for Maximum Likelihood (forward KL) training.
         target_dist = self.model.target_distribution
+
+        if n_eval is not None:  # Save any pre-training eval metrics
+            self.perform_eval(0, eval_batch_size, batch_size)
+        if n_plot is not None:  # Save any pre-training plots
+            self.make_and_save_plots(0, save)
+
         for t in range(start_iter, n_iterations, 1):
             i = t + 1
             if self.model.loss_type == "forward_kl" and next_epoch:
                 print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
-
             if i % 100 == 1:
                 print(f"  Iteration: {i}/{n_iterations}")
             iter_start = time()
             it_start_time = time()
             self.optimizer.zero_grad()
-
-            # with torch.no_grad():
-            #     s = self.model.flow.sample((10000,))
-            #     print("r range:", s[:, 3::3].min(), s[:, 3::3].max())
-            #     print("phi range:", s[:, 4::3].min(), s[:, 4::3].max())
-            #     print("theta range:", s[:, 5::3].min(), s[:, 5::3].max())
 
             if self.model.loss_type == "forward_kl":
                 # 'z' here represents that the data has already been transformed to internal coordinates, rather than
@@ -164,13 +173,13 @@ class Trainer:
             info = self.model.get_iter_info()
             info.update(loss=loss.cpu().detach().item(), step=i)
             info.update(grad_norm=grad_norm.cpu().detach().item())
-            self.logger.write(info)
+            self.logger.write(info, i)
 
             loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
             # pbar.set_description(loss_str)
-            if i % 10 == 1:
+            if i % 10 == 0:
                 print(loss_str)
 
             if n_eval is not None:
@@ -185,9 +194,7 @@ class Trainer:
                 if i in checkpoint_iter:
                     self.save_checkpoint(i)
 
-            # print(f"  Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
-
             # End job if necessary
             if tlimit is not None:
                 time_past = (time() - start_time) / 3600
