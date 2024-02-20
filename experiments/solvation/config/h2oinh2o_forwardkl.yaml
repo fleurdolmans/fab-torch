@@ -1,7 +1,7 @@
 # Config file specifying the setup of a Boltzmann Generator
 hydra:
   run:
-    dir: /home/timsey/HDD/results/fab/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+    dir: /home/timsey/HDD/results/fab/H2OinH2O/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
 
 target:                               # Properties of molecular system
   solute: water
@@ -89,6 +89,5 @@ logger:
     name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
     project: H2O_in_H2O
     entity: timsey
-    tags: [kl_H2O]
 #  pandas_logger:
 #    save_period: 100                  # how often to save the pandas dataframe as a csv
