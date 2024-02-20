@@ -175,7 +175,13 @@ class Trainer:
 
             self.optimizer.zero_grad()
             info = self.model.get_iter_info()
-            info.update(loss=loss.cpu().detach().item(), grad_norm=grad_norm.cpu().detach().item(), iteration=i)
+            info.update(
+                {
+                    "loss": loss.cpu().detach().item(),
+                    "grad_norm": grad_norm.cpu().detach().item(),
+                    "iteration": i,
+                }
+            )
             self.logger.write(info)
 
             loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"

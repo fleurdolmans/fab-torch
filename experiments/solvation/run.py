@@ -207,13 +207,12 @@ def _run(cfg: DictConfig) -> None:
     np.random.seed(cfg.training.seed)
     torch.manual_seed(cfg.training.seed)  # seed of 0 for setup.
 
-    # Gets output dir that Hydra created. Typically of form: WORKING_DIR/outputs/YYYY-MM-DD/HH-MM-SS/
+    # Gets output dir that Hydra created.
     base_save_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     save_dir = os.path.join(base_save_dir, str(datetime.now().isoformat()))
     # Setup logger
     logger = setup_logger(cfg, save_dir)
-    # If using Wandb, use its save path.
-    # Typically of form: WORKING_DIR/outputs/YYYY-MM-DD/HH-MM-SS/wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/
+    # If using Wandb, use its save path. Typically of form: HYDRA_RUN_DIR/wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/
     # This is a result of Wandb working on top of the Hydra output directory.
     if hasattr(cfg.logger, "wandb"):
         import wandb
