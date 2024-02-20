@@ -32,15 +32,12 @@ constraints_dict = {
 
 
 class WaterInWaterBox(TestSystem):
-
     """Water box with water micro-solvation system.
 
     Parameters
     ----------
     dim: dimensionality of system (num_atoms x 3).
-
     """
-
     def __init__(
             self,
             solvent_pdb_path: str,
@@ -80,7 +77,6 @@ class WaterInWaterBox(TestSystem):
                 forcefield, model="tip3p", numAdded=self.num_solvent_molecules
             )
         # Create system
-        # TODO: This is enforcing OH bond and HH angle lengths, but we want to enforce this based on energy, not constraints...
         self.system = forcefield.createSystem(
             modeller.topology,
             nonbondedMethod=app.CutoffNonPeriodic,
@@ -95,7 +91,6 @@ class WaterInWaterBox(TestSystem):
             # constraints require dummy atoms
             # but topology doesn't play well. Will check tomorrow
             # This keeps the first atom around the origin.
-            # TODO: Is the sign of this force correct?
             center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
             center.addGlobalParameter("k", 100000.0)
             # center.addGlobalParameter("k", 1.0)
@@ -103,7 +98,6 @@ class WaterInWaterBox(TestSystem):
             center.addParticle(0, [])
 
             # add spherical restraint to hold the droplet
-            # TODO: Is the sign of this force correct?
             # TODO: Does this add energy in units of kBT? If so, we may need to scale the energy term (if we
             #  do manual energy computation) by kBT as well.
             force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
@@ -285,7 +279,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         elif data_path.suffix == ".pt":
             target_data = torch.load(str(data_path))
             assert len(target_data.shape) == 2, "Data must be of shape (num_frames, dim)."
-        elif data_path.suffix == ".pdb":  # TODO: This seems very slow for big files?
+        elif data_path.suffix == ".pdb":
             warnings.warn("Loading MD samples from .pdb file. This is very slow. Use .pt or .h5 instead.")
             pdb = app.PDBFile(str(data_path))
             target_data = []
@@ -337,11 +331,12 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 # log_q_fn is the log_prob function of the flow.
                 log_q_test = log_q_fn(target_data_i) + target_logdet_xi
                 # # logprob of MD data under target distribution: feed Cartesian data into openMM
-                # log_p_test = self.log_prob_x(target_data_x)  # TODO: This is an unnormalised logprob! So KL is off-by-constant.
+                # TODO: This is an unnormalised logprob! So KL is off-by-constant.
+                # log_p_test = self.log_prob_x(target_data_x)
                 # # Compute KL
                 # kl_forward = torch.mean(log_p_test - log_q_test)
                 # # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
-                # #  In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
+                # # In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
                 # ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
                 test_mean_log_prob = torch.mean(log_q_test)
                 # print("P log P", log_p_test.mean())
@@ -397,11 +392,11 @@ class H2OinH2O(nn.Module, TargetDistribution):
             pass  # There is no evaluation currently that only works for Flow+AIS samples.
 
         if summary_dict:
-            with open(self.metric_dir / f"metrics_{iteration}.json", "w") as f:
+            with open(os.path.join(self.metric_dir, f"metrics_{iteration}.json"), "w") as f:
                 json.dump(summary_dict, f)
         else:
             warnings.warn("No summary metrics were computed.")
-    
+
         return summary_dict
     #
     # def get_kld_info(

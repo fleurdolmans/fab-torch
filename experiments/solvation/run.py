@@ -3,6 +3,7 @@ import pathlib
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime
+from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -12,6 +13,7 @@ import matplotlib.pyplot as plt
 
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
+from fab import FABModel
 from fab.target_distributions.h2o_in_h2o import H2OinH2O
 
 # Removed params:
@@ -23,7 +25,7 @@ from fab.target_distributions.h2o_in_h2o import H2OinH2O
 
 
 def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter:
-    def plot(fab_model, plot_only_md_energies):
+    def plot(fab_model: FABModel, plot_only_md_energies: bool) -> List[plt.Figure]:
         figs = []
         # Plot energies of the MD data as a sanity check if desired.
         if plot_only_md_energies:
@@ -199,7 +201,7 @@ def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter
     return plot
 
 
-def _run(cfg: DictConfig):
+def _run(cfg: DictConfig) -> None:
     # Seeds
     random.seed(cfg.training.seed)
     np.random.seed(cfg.training.seed)
@@ -209,13 +211,25 @@ def _run(cfg: DictConfig):
     base_save_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     save_dir = os.path.join(base_save_dir, str(datetime.now().isoformat()))
     # Setup logger
-    logger = setup_logger(cfg, save_dir)  # Imports wandb if necessary
+    logger = setup_logger(cfg, save_dir)
     # If using Wandb, use its save path.
     # Typically of form: WORKING_DIR/outputs/YYYY-MM-DD/HH-MM-SS/wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/
     # This is a result of Wandb working on top of the Hydra output directory.
     if hasattr(cfg.logger, "wandb"):
+        import wandb
         save_dir = wandb.run.dir
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+    # Example of structure of wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/ dir:
+    # - config.yaml: Contains Hydra config.
+    # - config.txt: Contains Hydra config in plaintext.
+    # - output.log: Contains stdout of run.
+    # - wandb-summary.json: JSON file containing logged metrics.
+    # - wandb-metadata.json: JSON file containing metadata about the run.
+    # - requirements.txt: Plaintext file of pip packages used.
+    # - media: Directory containing any media files logged to Wandb, such as images.
+    # - plots: Directory containing any plots saved on disk (typically not used when already sending images to Wandb).
+    # - metrics: Directory containing any metrics saved on disk.
+    # - model_checkpoints: Directory containing any model checkpoints saved on disk.
 
     # Target distribution setup
     if cfg.target.solute == "water" and cfg.target.solvent == "water":
@@ -249,7 +263,7 @@ def _run(cfg: DictConfig):
 
 
 @hydra.main(config_path="./config/", config_name="h2oinh2o_fab_pbuff.yaml", version_base="1.1")
-def run(cfg: DictConfig):
+def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     _run(cfg)
 

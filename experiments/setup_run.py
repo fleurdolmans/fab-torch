@@ -370,6 +370,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             save_path=save_path,
             max_gradient_norm=cfg.training.max_grad_norm,
             lr_step=lr_step,
+            print_eval=cfg.evaluation.print_eval,
         )
     # elif cfg.training.prioritised_buffer is False:
     #     trainer = BufferTrainer(

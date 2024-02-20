@@ -1,16 +1,17 @@
+import pathlib
+import os
+import wandb
+import warnings
+from time import time
 from typing import Callable, Any, Optional, List
 
-import torch.optim.optimizer
-from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
+import torch.optim.optimizer
 
 from fab.utils.logging import Logger, ListLogger
 from fab.types_ import Model
 from fab.core import FABModel
-import pathlib
-import os
-from time import time
 
 lr_scheduler = Any  # a learning rate schedular from torch.optim.lr_scheduler
 Plotter = Callable[[Model], List[plt.Figure]]
@@ -20,13 +21,14 @@ class Trainer:
     def __init__(
         self,
         model: FABModel,
+        save_path: str,
         optimizer: torch.optim.Optimizer,
         optim_schedular: Optional[lr_scheduler] = None,
         logger: Logger = ListLogger(),
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
-        save_path: str = "",
         lr_step=1,
+        print_eval: bool = False,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -38,6 +40,7 @@ class Trainer:
         # if no gradient clipping set max_gradient_norm to inf
         self.max_gradient_norm = max_gradient_norm if max_gradient_norm else float("inf")
         self.save_dir = save_path
+        self.print_eval = print_eval
         self.plots_dir = os.path.join(self.save_dir, f"plots")
         self.checkpoints_dir = os.path.join(self.save_dir, f"model_checkpoints")
 
@@ -50,13 +53,14 @@ class Trainer:
             torch.save(self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
-        print("   Plotting...")
+        if self.print_eval:
+            print("   Plotting...")
         plot_only_md_energies = True if i == 0 else False  # Only plot pre-training.
         figures = self.plot(self.model, plot_only_md_energies)
         for j, figure in enumerate(figures):
             if save:
                 # figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
-                self.logger.write_fig(f"it{i}_fig{j}", figure, i)
+                self.logger.write({f"it{i}_fig{j}": wandb.Image(figure), "iteration": i})
             else:
                 plt.show()
             plt.close(figure)
@@ -67,12 +71,13 @@ class Trainer:
             inner_batch_size=batch_size,
             iteration=i,
         )
-        eval_info.update(step=i)
-        self.logger.write(eval_info, i)
-        print(
-            "   Eval metrics: " +
-            str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
-        )
+        eval_info.update(iteration=i)
+        self.logger.write(eval_info)
+        if self.print_eval:
+            print(
+                "   Eval metrics: " +
+                str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
+            )
 
     def run(
         self,
@@ -137,7 +142,7 @@ class Trainer:
                 train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
                 train_logdet_xi = target_dist.train_logdet_xi.clone()
-                # shuffle train data if first iteration
+                # Shuffle train data if first iteration
                 if k == 0:
                     permutation = torch.randperm(len(train_data))
                     train_data = train_data[permutation]
@@ -145,7 +150,6 @@ class Trainer:
                 i_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
                 flow_loss = self.model.loss(i_batch)
                 transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
-                # print("J_XI", transform_loss)
                 loss = flow_loss + transform_loss
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points
@@ -163,17 +167,16 @@ class Trainer:
                 if torch.isfinite(grad_norm):
                     self.optimizer.step()
                 else:
-                    print("encountered inf grad norm")
+                    warnings.warn("Encountered inf grad norm!")
                 if self.optim_schedular and (i + 1) % self.lr_step == 0:
                     self.optim_schedular.step()
             else:
-                print("nan loss encountered")
+                warnings.warn("NaN loss encountered!")
 
             self.optimizer.zero_grad()
             info = self.model.get_iter_info()
-            info.update(loss=loss.cpu().detach().item(), step=i)
-            info.update(grad_norm=grad_norm.cpu().detach().item())
-            self.logger.write(info, i)
+            info.update(loss=loss.cpu().detach().item(), grad_norm=grad_norm.cpu().detach().item(), iteration=i)
+            self.logger.write(info)
 
             loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
