@@ -174,13 +174,6 @@ def make_wrapped_normflow_solvent_flow(config, target):
     # radial distance of atom2 and atom3 (atom1 has all zeros for r, phi, theta).
     periodic_inds = np.array([2] + [i for i in range(3, dim) if i % 3 != 0])
 
-    # TODO: Check that base distribution is correct. Check scales of base distribution at initialisation. I think it
-    #  might be initialised at [-pi, pi], instead of [0, pi]? Or even [-pi/2, pi/2], as a symmetric interval that has
-    #  width pi = bound_circ. Compare the Circular Flow implementation here:
-    #   https://github.com/francois-rozet/zuko/blob/master/zuko/flows.py#L493
-    #  And the used CircularShiftTransform: https://github.com/francois-rozet/zuko/blob/master/zuko/transforms.py
-    #  Note: MonotonicRQSTransform is simply the monotonic Rational Quadratic Spline transform.
-    #  What is our PeriodicShift doing exactly?
     # Feature mixing happens through using different features as identity and transform features. This is controlled
     #  by the mask passed to the mask=True / permute_mask=True parameter. Tail bounds are shifting as well, so at
     #  every step the Spline still satisfies the conditions for periodicity. Note that the base distribution is not
@@ -195,7 +188,9 @@ def make_wrapped_normflow_solvent_flow(config, target):
     #  base dist N(0, 1), and the scale of the uniform base dist U(0, 2 * pi / std_of_angle).
     # Note that we have two different types of angles: phi and theta. But we can just use a pi range for both, and
     #  multiply the one for phi by 2 at Flow output (in principle the Flow can learn that phi angles have double
-    #  range, but we might as well put that in manually, so that on initialisation the relative scale matches.
+    #  range, but we might as well put that in manually, so that on initialisation the relative scale matches).
+    # TODO: It might be that values at the edges of the circular flow are harder to learn for some reason? We observe
+    #  that extremal theta values seem suppressed w.r.t. training data. Try with more bins maybe?
     bound_circ = np.pi
     # Bound of the Spline tails.
     tail_bound = 5.0 * torch.ones(dim)

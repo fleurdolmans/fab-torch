@@ -1,7 +1,13 @@
 # Config file specifying the setup of a Boltzmann Generator
+defaults:
+  - _self_
+  - node: desktop
+
 hydra:
   run:
-    dir: /home/timsey/HDD/results/fab/H2OinH2O/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+    dir: ${node.output_dir}/H2OinH2O/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+  job:
+    chdir: true
 
 target:                               # Properties of molecular system
   solute: water
@@ -10,10 +16,10 @@ target:                               # Properties of molecular system
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 1  #18                   # Int, number of threads to be used, number of cores if null
-  solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
-  train_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # _noextconstraints.h5
+  n_threads: 18  # 1                       # Int, number of threads to be used, number of cores if null
+  solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb    # Filepath to solvent pdb
+  train_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # Filepath to load samples from
+  val_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5  # _noextconstraints.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force contraints for keeping the system in place.
@@ -21,7 +27,7 @@ target:                               # Properties of molecular system
   rigidwater: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
 
 flow:                                  # Properties of the flow model
-  solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the paper
+  solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the fab paper
   use_snf: false                      # Bool, flag whether to use Stochastic Flow
   resampled_base: false               # Bool, flag whether to use resampled base distribution
   type: circ-coup-nsf  # circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"

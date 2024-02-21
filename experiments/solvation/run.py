@@ -234,7 +234,7 @@ def _run(cfg: DictConfig) -> None:
     if cfg.target.solute == "water" and cfg.target.solvent == "water":
         assert cfg.target.dim % 3 == 0, "Dimension must be divisible by 3 for water in water."
         target = H2OinH2O(
-            solvent_pdb_path=cfg.target.solvent_pdb_path,
+            solute_pdb_path=cfg.target.solute_pdb_path,
             dim=cfg.target.dim,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,

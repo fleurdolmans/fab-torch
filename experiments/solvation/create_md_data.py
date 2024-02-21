@@ -26,7 +26,7 @@ def run_md_sim(cfg: DictConfig):
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
     system = WaterInWaterBox(
-        cfg.solvent_pdb_path,
+        cfg.solute_pdb_path,
         dim,
         cfg.external_constraints,
         cfg.internal_constraints,

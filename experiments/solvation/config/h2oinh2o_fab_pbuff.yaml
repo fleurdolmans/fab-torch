@@ -8,7 +8,7 @@ target:                               # Properties of molecular system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
-  solvent_pdb_path: /home/timsey/HDD/data/molecules/solvents/water.pdb    # Filepath to solvent pdb
+  solute_pdb_path: /home/timsey/HDD/data/molecules/solutes/water.pdb    # Filepath to solvent pdb
   train_samples_path: null  # Filepath to load samples from
   val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
   test_samples_path: null

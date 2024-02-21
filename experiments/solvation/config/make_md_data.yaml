@@ -1,4 +1,4 @@
-solvent_pdb_path: "/home/timsey/HDD/data/molecules/solvents/water.pdb"
+solute_pdb_path: "/home/timsey/HDD/data/molecules/solutes/water.pdb"
 out_dir: "/home/timsey/HDD/data/molecules/md/"
 num_solvent_molecules: 2
 temperature: 300.0

@@ -40,7 +40,7 @@ class WaterInWaterBox(TestSystem):
     """
     def __init__(
             self,
-            solvent_pdb_path: str,
+            solute_pdb_path: str,
             dim: int,
             external_constraints: bool,
             internal_constraints: str,
@@ -65,7 +65,7 @@ class WaterInWaterBox(TestSystem):
         # 4. Add the implicit solvent force field / external potential term.
 
         # Initial solute molecule
-        pdb = app.PDBFile(solvent_pdb_path)
+        pdb = app.PDBFile(solute_pdb_path)
         # TODO: Add solute force field if not water!
         # Add solvent
         # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
@@ -115,7 +115,7 @@ class WaterInWaterBox(TestSystem):
 class H2OinH2O(nn.Module, TargetDistribution):
     def __init__(
         self,
-        solvent_pdb_path: str,
+        solute_pdb_path: str,
         dim: int = 3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -196,7 +196,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         # Initialise system
         self.system = WaterInWaterBox(
-            solvent_pdb_path,
+            solute_pdb_path,
             self.cartesian_dim,
             external_constraints,
             internal_constraints,
