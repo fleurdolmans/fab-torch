@@ -39,9 +39,19 @@ echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 #    echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
 #        /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/test_script.py
   echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
-    /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
-    --flow.blocks 12 --flow.hidden_units 256 --flow.num_bins 9 \
-    --training.n_iterations 500 --evaluation.n_eval 50 --evaluation.n_plots 10 --evaluation.n_checkpoints 1
+      /home/tbbakke/anaconda3/envs/fab/bin/python -m openmm.testInstallation
+#  echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
+#    /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
+#    --flow.blocks 12 --flow.hidden_units 256 --flow.num_bins 9 \
+#    --training.n_iterations 500 --evaluation.n_eval 50 --evaluation.n_plots 10 --evaluation.n_checkpoints 1
 } >> ${SLURM}
 
 sbatch ${SLURM}
+
+# TODO:
+#  1. Install OpenMM with conda: conda install -c conda-forge openmm cudatoolkit=10.1
+#  1b. If this does not work, rebuild the env, doing pip install after the openmm install.
+#  2. Test it with the opemm.testInstallation script.
+#  3. Try running the experiment test script again.
+#  3b. Debug packages as they come up.
+#  4. If it works, run the hyperparam experiment script.
