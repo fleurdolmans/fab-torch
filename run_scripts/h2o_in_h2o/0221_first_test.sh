@@ -36,8 +36,8 @@ echo "#SBATCH --time=0-2:00:00" >> ${SLURM}
 echo "#SBATCH --nodes=1" >> ${SLURM}
 echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 {
-    echo HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 /home/tbbakke/anaconda3/envs/fab/bin/python \
-        PYTHONPATH=${LOGS_DIR}/${PROJECT_NAME} ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
+    echo PYTHONPATH=${LOGS_DIR}/${PROJECT_NAME} HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
+        /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
         --flow.blocks 12 --flow.hidden_units 256 --flow.num_bins 9 \
         --training.n_iterations 500 --evaluation.n_eval 50 --evaluation.n_plots 10 --evaluation.n_checkpoints 1
 } >> ${SLURM}
