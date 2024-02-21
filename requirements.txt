@@ -2,7 +2,7 @@ numpy
 normflows==1.6.1
 boltzgen @ git+https://github.com/VincentStimper/boltzmann-generators.git
 larsflow @ git+https://github.com/VincentStimper/resampled-base-flows.git
-mdtraj==1.9.7
+mdtraj
 nflows==0.14
 pandas==1.3.5
 tqdm==4.64.1
