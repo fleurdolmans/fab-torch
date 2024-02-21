@@ -48,10 +48,10 @@ echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 
 sbatch ${SLURM}
 
+
 # TODO:
-#  1. Install OpenMM with conda: conda install -c conda-forge openmm cudatoolkit=10.1
+#  1. Install OpenMMtools with conda: conda config --add channels omnia --add channels conda-forge; conda install openmmtools
 #  1b. If this does not work, rebuild the env, doing pip install after the openmm install.
-#  2. Test it with the opemm.testInstallation script.
-#  3. Try running the experiment test script again.
-#  3b. Debug packages as they come up.
-#  4. If it works, run the hyperparam experiment script.
+#  2. Try running the experiment test script again.
+#  2b. Debug packages as they come up.
+#  3. If it works, run the hyperparam experiment script.
