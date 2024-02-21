@@ -41,7 +41,8 @@ for index in "${!BLOCKS[@]}"; do
   echo "#SBATCH --nodes=1" >> ${SLURM}
   echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
   {
-      echo CUDA_VISIBLE_DEVICES=0 /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/fab-torch/experiments/solvation/run.py \
+      echo PYTHONPATH=${LOGS_DIR}/${PROJECT_NAME} HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
+          /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
           --flow.blocks ${BLOCKS[index]} --flow.hidden_units ${HIDDEN_UNITS[index]} --flow.num_bins ${NUM_BINS[index]}
   } >> ${SLURM}
 
