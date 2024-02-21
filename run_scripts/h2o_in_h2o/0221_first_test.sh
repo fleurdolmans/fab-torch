@@ -1,9 +1,11 @@
 #!/bin/sh
 
+# Name of project folder
+PROJECT_NAME=fab-torch
 # Original code folder is here
-MAIN_DIR=/home/tbbakke/fab-torch
+MAIN_DIR=/home/tbbakke/${PROJECT_NAME}
 # Launch dir
-LAUNCH_DIR=/home/tbbakke/fab-torch/launch/
+LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
 
 
@@ -15,9 +17,11 @@ LOGS_DIR=${LAUNCH_DIR}/${dt}
 mkdir -p "${LOGS_DIR}"
 # Copy code to experiment folder
 rsync -arm ${MAIN_DIR} --stats --exclude-from=${MAIN_DIR}/"SYNC_EXCLUDE" ${LOGS_DIR};
+cd ${LOGS_DIR}/${PROJECT_NAME}
+
+# Make SLURM file
 JOB_NAME=${JOB_NAME}
 SLURM=${LOGS_DIR}/run.slrm
-# Make SLURM file
 echo "${SLURM}"
 echo "#!/bin/bash" > ${SLURM}
 echo "#SBATCH --job-name=$JOB_NAME" >> ${SLURM}
