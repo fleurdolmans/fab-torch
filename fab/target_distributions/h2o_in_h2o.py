@@ -208,7 +208,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         if not val_samples_path or not use_val_data_for_transform:
             traj_sim = app.Simulation(
                 self.system.topology,
-                self.system.system,
+               self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
                 platform=mm.Platform.getPlatformByName("Reference"),
             )

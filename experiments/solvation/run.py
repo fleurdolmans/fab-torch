@@ -1,8 +1,8 @@
 import os
+import json
 import pathlib
 import hydra
 from omegaconf import DictConfig, OmegaConf
-from datetime import datetime
 from typing import List
 
 import torch
@@ -207,18 +207,24 @@ def _run(cfg: DictConfig) -> None:
     np.random.seed(cfg.training.seed)
     torch.manual_seed(cfg.training.seed)  # seed of 0 for setup.
 
-    # Gets output dir that Hydra created.
-    base_save_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    save_dir = os.path.join(base_save_dir, str(datetime.now().isoformat()))
-    # Setup logger
-    logger = setup_logger(cfg, save_dir)
-    # If using Wandb, use its save path. Typically of form: HYDRA_RUN_DIR/wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/
-    # This is a result of Wandb working on top of the Hydra output directory.
-    if hasattr(cfg.logger, "wandb"):
-        import wandb
-        save_dir = wandb.run.dir
+    # Gets output dir that Hydra created: defined in hydra.run.dir in the config.
+    save_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
-    # Example of structure of wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/ dir:
+    # Save config dict to output dir as yaml and json.
+    with open(os.path.join(save_dir, "config.yaml"), "w") as f:
+        OmegaConf.save(cfg, f)
+    with open(os.path.join(save_dir, "config.json"), "w") as f:
+        json.dump(OmegaConf.to_container(cfg, resolve=True), f, indent=4)
+
+    # Example structure of hydra.run.dir:
+    # - plots: Directory containing any plots saved on disk (typically not used when already sending images to Wandb).
+    # - metrics: Directory containing any metrics saved on disk.
+    # - model_checkpoints: Directory containing any model checkpoints saved on disk.
+    # - wandb: Wandb logging files, see below.
+
+    # Setup logger: do that here, so the logger can be passed to the target distribution in case it needs to log stuff.
+    logger = setup_logger(cfg, save_dir)
+    # Example of structure of wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/ dir inside the hydra.run.dir.
     # - config.yaml: Contains Hydra config.
     # - config.txt: Contains Hydra config in plaintext.
     # - output.log: Contains stdout of run.
@@ -226,9 +232,6 @@ def _run(cfg: DictConfig) -> None:
     # - wandb-metadata.json: JSON file containing metadata about the run.
     # - requirements.txt: Plaintext file of pip packages used.
     # - media: Directory containing any media files logged to Wandb, such as images.
-    # - plots: Directory containing any plots saved on disk (typically not used when already sending images to Wandb).
-    # - metrics: Directory containing any metrics saved on disk.
-    # - model_checkpoints: Directory containing any model checkpoints saved on disk.
 
     # Target distribution setup
     if cfg.target.solute == "water" and cfg.target.solvent == "water":

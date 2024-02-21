@@ -6,6 +6,7 @@ MAIN_DIR=/home/tbbakke/fab-torch
 LAUNCH_DIR=/home/tbbakke/fab-torch/launch/
 mkdir -p "${LAUNCH_DIR}"
 
+JOB_NAME=0221_hyperparams
 
 # Create dir for specific experiment run
 dt=$(date '+%F_%T.%3N')
@@ -13,7 +14,7 @@ LOGS_DIR=${LAUNCH_DIR}/${dt}
 mkdir -p "${LOGS_DIR}"
 # Copy code to experiment folder
 rsync -arm ${MAIN_DIR} --stats --exclude-from=${MAIN_DIR}/"SYNC_EXCLUDE" ${LOGS_DIR};
-JOB_NAME=dc_weighted_mnist
+JOB_NAME=${JOB_NAME}
 SLURM=${LOGS_DIR}/run.slrm
 # Make SLURM file
 echo "${SLURM}"
@@ -25,7 +26,7 @@ echo "#SBATCH --gres=gpu:1" >> ${SLURM}
 echo "#SBATCH --cpus-per-task=12" >> ${SLURM}
 echo "#SBATCH --ntasks-per-node=1" >> ${SLURM}
 echo "#SBATCH --mem=8G" >> ${SLURM}
-echo "#SBATCH --time=7-0:00:00" >> ${SLURM}
+echo "#SBATCH --time=0-2:00:00" >> ${SLURM}
 echo "#SBATCH --nodes=1" >> ${SLURM}
 echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 {
