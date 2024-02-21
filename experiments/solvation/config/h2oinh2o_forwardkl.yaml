@@ -31,8 +31,8 @@ flow:                                  # Properties of the flow model
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
   blocks: 12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 256                   # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 9                        # Int, number of bins of the neural splines
+  hidden_units: 256  # 256                 # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 9                         # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -76,6 +76,7 @@ training:                             # Properties of the training procedure
 
 
 evaluation:
+  eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
   print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
   n_plots: 50                         # number of times we visualise the model throughout training.

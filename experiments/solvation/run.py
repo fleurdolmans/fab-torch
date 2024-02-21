@@ -244,6 +244,7 @@ def _run(cfg: DictConfig) -> None:
             train_samples_path=cfg.target.train_samples_path,
             val_samples_path=cfg.target.val_samples_path,
             test_samples_path=cfg.target.test_samples_path,
+            eval_mode=cfg.evaluation.eval_mode,
             logger=logger,
             save_dir=save_dir,
             plot_MD_energies=cfg.evaluation.plot_MD_energies,
