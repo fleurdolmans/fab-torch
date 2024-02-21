@@ -5,7 +5,7 @@ PROJECT_NAME=fab-torch
 # Original code folder is here
 MAIN_DIR=/home/tbbakke/${PROJECT_NAME}
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch/
+LAUNCH_DIR=${MAIN_DIR}/launch
 mkdir -p "${LAUNCH_DIR}"
 
 
@@ -18,6 +18,7 @@ mkdir -p "${LOGS_DIR}"
 # Copy code to experiment folder
 rsync -arm ${MAIN_DIR} --stats --exclude-from=${MAIN_DIR}/"SYNC_EXCLUDE" ${LOGS_DIR};
 cd ${LOGS_DIR}/${PROJECT_NAME}
+echo $PWD
 
 # Make SLURM file
 JOB_NAME=${JOB_NAME}
@@ -35,7 +36,8 @@ echo "#SBATCH --time=0-2:00:00" >> ${SLURM}
 echo "#SBATCH --nodes=1" >> ${SLURM}
 echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 {
-    echo CUDA_VISIBLE_DEVICES=0 /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/fab-torch/experiments/solvation/run.py \
+    echo HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 /home/tbbakke/anaconda3/envs/fab/bin/python -m \
+        ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
         --flow.blocks 12 --flow.hidden_units 256 --flow.num_bins 9 \
         --training.n_iterations 500 --evaluation.n_eval 50 --evaluation.n_plots 10 --evaluation.n_checkpoints 1
 } >> ${SLURM}

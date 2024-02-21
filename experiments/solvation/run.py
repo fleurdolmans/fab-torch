@@ -11,10 +11,10 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 
-from experiments.logger_setup import setup_logger
-from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 from fab import FABModel
 from fab.target_distributions.h2o_in_h2o import H2OinH2O
+from experiments.logger_setup import setup_logger
+from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 
 # Removed params:
 # dim = cfg.target.dim,
