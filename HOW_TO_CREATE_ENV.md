@@ -45,6 +45,7 @@ GitPython==3.1.42 \
 google-auth==2.28.0 \
 google-auth-oauthlib==0.4.6 \
 grpcio==1.60.1 \
+h5py==3.8.0 \
 hydra-core==1.3.2 \
 hydra-joblib-launcher==1.2.0 \
 idna==3.6 \
