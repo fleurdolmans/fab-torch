@@ -43,4 +43,4 @@ for index in "${!BLOCKS[@]}"; do
 
   sbatch ${SLURM}
   sleep .5
-
+done
