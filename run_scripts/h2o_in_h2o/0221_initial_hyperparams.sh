@@ -18,7 +18,7 @@ for index in "${!BLOCKS[@]}"; do
   JOB_NAME=0221_hyperparams
 
   # Create dir for specific experiment run
-  dt=$(date '+%F_%T.%3N')
+  dt=$(date '+%F_%H-%M-%S.%3N')
   LOGS_DIR=${LAUNCH_DIR}/${dt}
   mkdir -p "${LOGS_DIR}"
   # Copy code to experiment folder
