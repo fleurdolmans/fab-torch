@@ -39,7 +39,7 @@ echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 #  echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
 #      /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/test_script.py
   echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
-      /home/tbbakke/micromamba/envs/bgsol/bin/python -m openmm.testInstallation
+      /home/tbbakke/anaconda3/envs/bgsol/bin/python -m openmm.testInstallation
 #  echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
 #    /home/tbbakke/anaconda3/envs/fab/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
 #    --flow.blocks 12 --flow.hidden_units 256 --flow.num_bins 9 \
