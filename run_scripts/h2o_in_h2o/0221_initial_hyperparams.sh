@@ -8,6 +8,10 @@ MAIN_DIR=/home/tbbakke/${PROJECT_NAME}
 LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
 
+TRAIN_ITERS=5000
+NUM_EVAL=500
+NUM_PLOTS=50
+NUM_CKPTS=10
 
 BLOCKS=(12, 12, 12, 12, 16, 16, 16, 16)
 HIDDEN_UNITS=(256, 256, 512, 512, 256, 256, 512, 512)
@@ -37,7 +41,7 @@ for index in "${!BLOCKS[@]}"; do
   echo "#SBATCH --cpus-per-task=12" >> ${SLURM}
   echo "#SBATCH --ntasks-per-node=1" >> ${SLURM}
   echo "#SBATCH --mem=8G" >> ${SLURM}
-  echo "#SBATCH --time=0-2:00:00" >> ${SLURM}
+  echo "#SBATCH --time=1-0:00:00" >> ${SLURM}
   echo "#SBATCH --nodes=1" >> ${SLURM}
   echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
   {
@@ -45,7 +49,8 @@ for index in "${!BLOCKS[@]}"; do
     echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
       /home/tbbakke/anaconda3/envs/bgsol/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
       --config-name h2oinh2o_forwardkl.yaml node=ivicl \
-      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
+      training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
+      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
