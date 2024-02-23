@@ -42,6 +42,7 @@ echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
 #      /home/tbbakke/anaconda3/envs/bgsol/bin/python -m openmm.testInstallation
   echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
     /home/tbbakke/anaconda3/envs/bgsol/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
+    --config-name h2oinh2o_forwardkl.yaml node=ivicl \
     flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \
     training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
 } >> ${SLURM}

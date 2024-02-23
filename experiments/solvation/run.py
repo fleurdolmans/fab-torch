@@ -265,7 +265,7 @@ def _run(cfg: DictConfig) -> None:
     setup_trainer_and_run_flow(cfg, setup_h2o_plotter, target)
 
 
-@hydra.main(config_path="./config/", config_name="h2oinh2o_fab_pbuff.yaml", version_base="1.1")
+@hydra.main(config_path="./config/", config_name="h2oinh2o_forwardkl.yaml", version_base="1.1")
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     _run(cfg)
