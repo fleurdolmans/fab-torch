@@ -1,12 +1,26 @@
-# Steps for creating the conda environment
+# Steps for creating the environment
 
+## Using conda
 Have conda installed, clone this repository, and `cd` into it. Then run:
-> $ conda create --name ENV_NAME python=3.7.16 \
-$ conda activate ENV_NAME \
+> $ conda create --name bgsol python=3.7.16 \
+$ conda activate bgsol \
 $ conda install pytorch==1.8.1 torchvision==0.9.1 torchaudio==0.8.1 cudatoolkit=10.1 -c pytorch \
 $ conda install -c conda-forge openmm cudatoolkit=10.1 \
 $ conda config --add channels omnia --add channels conda-forge \
 $ conda install openmmtools \
+$ pip install -r requirements.txt
+
+
+## Using micromamba (faster than conda)
+Install micromamba using instructions here: https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html
+
+Have micromamba installed, clone this repository, and `cd` into it. Then run:
+> $ micromamba create --name bgsol python=3.7.16 \
+$ micromamba activate bgsol \
+$ micromamba install pytorch==1.8.1 torchvision==0.9.1 torchaudio==0.8.1 cudatoolkit=10.1 -c pytorch \
+$ micromamba install -c conda-forge openmm cudatoolkit=10.1 \
+$ micromamba config --add channels omnia --add channels conda-forge \
+$ micromamba install openmmtools \
 $ pip install -r requirements.txt
 
 
