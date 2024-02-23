@@ -8,15 +8,16 @@ MAIN_DIR=/home/tbbakke/${PROJECT_NAME}
 LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
 
-TRAIN_ITERS=5000
-NUM_EVAL=500
-NUM_PLOTS=50
+TRAIN_ITERS=10000
+NUM_EVAL=1000
+NUM_PLOTS=100
 NUM_CKPTS=10
 
-BLOCKS=(12 12 12 12 16 16 16 16)
+BLOCKS=(12 12 16 16 12 12 16 16)
 HIDDEN_UNITS=(256 256 512 512 256 256 512 512)
-NUM_BINS=(9 13 9 13 9 13 9 13)
-
+NUM_BINS=(9 9 13 13 9 9 13 13)
+LR=('5e-4' '5e-4' '5e-4' '5e-4' '1e-4' '1e-4' '1e-4' '1e-4')
+WD=(0 '1e-5' 0 '1e-5' 0 '1e-5' 0 '1e-5')
 
 for index in "${!BLOCKS[@]}"; do
   JOB_NAME=0221_hyperparams
@@ -50,7 +51,8 @@ for index in "${!BLOCKS[@]}"; do
       /home/tbbakke/anaconda3/envs/bgsol/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
       --config-name h2oinh2o_forwardkl.yaml node=ivicl \
       training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
-      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
+      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
+      training.lr=${LR[index]} training.wd=${WD[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
