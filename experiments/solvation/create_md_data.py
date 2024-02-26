@@ -1,7 +1,6 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-
 from simtk import openmm as mm
 from simtk import unit
 from simtk.openmm import app
@@ -35,7 +34,7 @@ def run_md_sim(cfg: DictConfig):
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
     integrator = mm.LangevinMiddleIntegrator(
-        cfg.temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond
+        cfg.temperature * unit.kelvin, 1.0 / unit.picosecond, cfg.timestep * unit.femtosecond
     )
     # integrator = mm.VerletIntegrator(0.001 * unit.picoseconds)
     sim = app.Simulation(
@@ -69,7 +68,7 @@ def run_md_sim(cfg: DictConfig):
     # first few steps to allow the system to reach equilibrium
     sim.step(cfg.burnin_steps)
 
-    # For MDTraj
+    # Saving data
     cnstrnts = f"_ec{cfg.external_constraints}_ic{cfg.internal_constraints}_rw{cfg.rigidwater}"
     filename = (
         f"output_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
@@ -92,25 +91,22 @@ def run_md_sim(cfg: DictConfig):
     # Run the production simulation: Finally, run the simulation for a desired number of steps:
     sim.step(cfg.num_steps)
 
-    # # Final state
-    # state = sim.context.getState(getPositions=True)
-    # positions = state.getPositions(True).value_in_unit(unit.nanometer)
-    # print(positions)
-    # app.PDBFile.writeFile(sim.topology, positions, open('output.pdb', 'w'))
-
-    import matplotlib.pyplot as plt
-    with open(out_dir / "last_md_run_data.txt", "r") as f:
-        report = f.read()
-        steps, energies, temps = [], [], []
-        for r, line in enumerate(report.split("\n")[1:]):
-            if len(line) == 0:
-                continue
-            step, energy, temp = line.split(",")
-            if r == 0:
-                initial_step = int(float(step))
-            steps.append(int(float(step)) - initial_step)
-            energies.append(float(energy))
-            temps.append(float(temp))
+    # Plot some diagnostics.
+    if cfg.plot_md_data:
+        import matplotlib.pyplot as plt
+        # Load data of this run from disk.
+        with open(out_dir / "last_md_run_data.txt", "r") as f:
+            report = f.read()
+            steps, energies, temps = [], [], []
+            for r, line in enumerate(report.split("\n")[1:]):
+                if len(line) == 0:
+                    continue
+                step, energy, temp = line.split(",")
+                if r == 0:
+                    initial_step = int(float(step))
+                steps.append(int(float(step)) - initial_step)
+                energies.append(float(energy))
+                temps.append(float(temp))
 
         fig, ax1 = plt.subplots()
         ax1.plot(steps, energies, label="Potential energy")

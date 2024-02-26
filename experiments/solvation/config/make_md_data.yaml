@@ -1,12 +1,14 @@
-solute_pdb_path: "/home/timsey/HDD/data/molecules/solutes/water.pdb"
-out_dir: "/home/timsey/HDD/data/molecules/md/"
-num_solvent_molecules: 2
-temperature: 300.0
-equi_steps: 1e3
-burnin_steps: 1e5
-num_steps: 1e4
-report_interval: 1e3
-save_interval: 10
-external_constraints: true
-internal_constraints: "hbonds"  # "hbonds" "none"
-rigidwater: true
+solute_pdb_path: "/home/timsey/HDD/data/molecules/solutes/water.pdb"    # Filepath to solvent pdb file.
+out_dir: "/home/timsey/HDD/data/molecules/md/"                          # Where to store resulting MD frames.
+num_solvent_molecules: 2                # Number of solvent molecules to simulate.
+temperature: 300.0                      # Temperature in Kelvin.
+timestep: 0.5                           # Timestep in femtoseconds.
+equi_steps: 1e3                         # Equilibration steps.
+burnin_steps: 1e5                       # Burn-in steps.
+num_steps: 1e7                          # Total number of steps to simulate after equilibration and burn-in.
+report_interval: 1e3                    # Reporting / printing (stdout).
+save_interval: 10                       # Save every this many steps. Total frames saved is num_steps / save_interval.
+external_constraints: true              # Use external constraints.
+internal_constraints: "none"            # "none" or "hbonds": "none" for non-rigid water molecules.
+rigidwater: false                       # Rigid water molecules true/false.
+plot_md_data: true                      # Plot some diagnostics after simulation yes/no.

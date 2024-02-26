@@ -52,8 +52,6 @@ class WaterInWaterBox(TestSystem):
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
         #  as in the openmmtools testsystems examples:
         #  https://openmmtools.readthedocs.io/en/stable/_modules/openmmtools/testsystems.html#AlanineDipeptideImplicit
-
-        # TODO: Other parameters? HydrogenMass, cutoffs, etc.?
         self.num_atoms_per_solute = 3  # Water
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
@@ -81,8 +79,8 @@ class WaterInWaterBox(TestSystem):
             modeller.topology,
             nonbondedMethod=app.CutoffNonPeriodic,
             nonbondedCutoff=1.0 * unit.nanometers,
-            constraints=constraints_dict[internal_constraints],
-            rigidWater=rigidwater,
+            constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
+            rigidWater=rigidwater,                               # `False` for flexible H2O
         )
 
         if external_constraints:
@@ -98,8 +96,6 @@ class WaterInWaterBox(TestSystem):
             center.addParticle(0, [])
 
             # add spherical restraint to hold the droplet
-            # TODO: Does this add energy in units of kBT? If so, we may need to scale the energy term (if we
-            #  do manual energy computation) by kBT as well.
             force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
             force.addGlobalParameter("w", 100.0)
             self.system.addForce(force)
@@ -208,7 +204,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
         if not val_samples_path or not use_val_data_for_transform:
             traj_sim = app.Simulation(
                 self.system.topology,
-               self.system.system,
+                self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
                 platform=mm.Platform.getPlatformByName("Reference"),
             )
