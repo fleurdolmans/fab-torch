@@ -312,84 +312,78 @@ class H2OinH2O(nn.Module, TargetDistribution):
             iteration: Optional[int] = None,
             flow: Optional[nn.Module] = None,
     ):
-        # This function is typically called both with Flow (likelihood available) and with Flow+AIS
-        # samples (no likelihood available).
-        summary_dict = {}
+        # TODO: batch_size here is currently equal to inner_batch_size in core.get_eval_info(), which
+        #  corresponds to the training batch size. This is because eval_batch size is used for determining
+        #  how many eval datapoints to use in total in the original code. This all works out when using this
+        #  batch_size for AIS evaluation, since AIS samples are generated outside of this function.
+        #  Actually, batch size is not used right now.
 
-        if log_q_fn:  # Evaluate base flow samples: likelihood available.
-            if self.eval_mode == "val":  # TODO: batch this?
-                target_data_x = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                target_data_i = self.val_data_i.reshape(-1, self.internal_dim).to(self.device)
-                target_logdet_xi = self.val_logdet_xi.to(self.device)
-            elif self.eval_mode == "test":
-                target_data_x = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                target_data_i = self.test_data_i.reshape(-1, self.internal_dim).to(self.device)
-                target_logdet_xi = self.test_logdet_xi.to(self.device)
-            else:
-                raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
+        # This function is typically called both with Flow (likelihood available for samples) and with Flow+AIS
+        # samples (no likelihood available for Flow+AIS samples).
+        summary_dict = {}
+        # Load MD data for evaluation
+        if self.eval_mode == "val":  # TODO: batch this?
+            target_data_x = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+            target_data_i = self.val_data_i.reshape(-1, self.internal_dim).to(self.device)
+            target_logdet_xi = self.val_logdet_xi.to(self.device)
+        elif self.eval_mode == "test":
+            target_data_x = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+            target_data_i = self.test_data_i.reshape(-1, self.internal_dim).to(self.device)
+            target_logdet_xi = self.test_logdet_xi.to(self.device)
+        else:
+            raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
+
+        # Log_prob of flow given, so use this for evaluating the log probability of MD data.
+        if log_q_fn:
+            # Log_prob of target data under flow
             with torch.no_grad():
                 # log_q_fn is the log_prob function of the flow.
                 log_q_test = log_q_fn(target_data_i) + target_logdet_xi
-                # # logprob of MD data under target distribution: feed Cartesian data into openMM
-                # TODO: This is an unnormalised logprob! So KL is off-by-constant.
-                # log_p_test = self.log_prob_x(target_data_x)
-                # # Compute KL
-                # kl_forward = torch.mean(log_p_test - log_q_test)
-                # # ESS normalised by true p samples: this presumably gives a metric of how well the flow is covering p.
-                # # In particular, this is the version of ESS that should be less spurious if the flow is missing modes.
-                # ess_over_p = effective_sample_size_over_p(log_p_test - log_q_test)
-                test_mean_log_prob = torch.mean(log_q_test)
-                # print("P log P", log_p_test.mean())
-                # print("P log Q", log_q_test.mean())
-                # print("P (log P - log Q)", kl_forward)
+            test_mean_log_prob = torch.mean(log_q_test)
+            summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
 
-                summary_dict.update({
-                    # "log_pZ_test": log_p_test.mean().cpu().item(),
-                    "flow_test_log_prob": test_mean_log_prob.cpu().item(),
-                    # "flow_ess_over_p": ess_over_p.cpu().item(),
-                    # "flow_unnorm_KL_forward": kl_forward.cpu().item(),
-                })
+        # Use flow samples for computing marginal KL estimates.
+        if not samples:  # No samples provided, so generate using flow.
+            assert flow, (
+                "Flow model must be provided for generating evaluation samples if none are provided."
+            )
+            num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
+            with torch.no_grad():
+                flow_samples, _ = flow.sample_and_log_prob((num_flow_samples,))
+        else:  # Samples provided (can be Flow or Flow+AIS samples).
+            flow_samples = samples
 
-                # Evaluate samples from flow
-                if flow is not None:
-                    num_flow_samples = 1000
-                    flow_samples, flow_logprob = flow.sample_and_log_prob((num_flow_samples,))
-                    # Alternative KL computation that gets around the off-by-constant issue: estimate the KL per
-                    # dimension using the given samples; we can normalise this using the samples themselves. Here
-                    # we're essentially estimating the KL as the average of marginal KLs (per dimension.
-                    nbins = 200
-                    hist_range = [-5, 5]
-                    target_data_kl = target_data_i.cpu().clone().numpy()
-                    flow_samples_kl = flow_samples.cpu().clone().numpy()
-                    hists_test = np.zeros((nbins, self.internal_dim))
-                    hists_flow = np.zeros((nbins, self.internal_dim))
-                    for dim in range(self.internal_dim):
-                        # TODO: KL in I space or in X space? Also, what to do with the Jacobian term then?
-                        #  Jacobian term is unnecessary in KL estimate, since we use samples + histograms, rather
-                        #  than the log probability density.
-                        hist_test, _ = np.histogram(target_data_kl[:, dim], bins=nbins, range=hist_range, density=True)
-                        hist_flow, _ = np.histogram(flow_samples_kl[:, dim], bins=nbins, range=hist_range, density=True)
-                        hists_test[:, dim] = hist_test
-                        hists_flow[:, dim] = hist_flow
-                    # KL of marginals
-                    eps = 1e-10
-                    forward_kl_marginals_unscaled = np.sum(
-                        hists_test * (np.log(hists_test + eps) - np.log(hists_flow + eps)), axis=0
-                    )
-                    forward_kl_marginals = forward_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
-                    # print(f" Forward KL est.: {forward_kl_marginals.mean():.3f}")
-                    reverse_kl_marginals_unscaled = np.sum(
-                        hists_flow * (np.log(hists_flow + eps) - np.log(hists_test + eps)), axis=0
-                    )
-                    reverse_kl_marginals = reverse_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
-                    # print(f" Reverse KL est.: {reverse_kl_marginals.mean():.3f}")
-                    summary_dict.update({
-                        # "log_pZ_test": log_p_test.mean().cpu().item(),
-                        "mean_forward_kl_marginals": forward_kl_marginals.mean(),
-                        "mean_reverse_kl_marginals": reverse_kl_marginals.mean(),
-                    })
-        else:  # Evaluate Flow+AIS samples: no likelihood available.
-            pass  # There is no evaluation currently that only works for Flow+AIS samples.
+        # Estimate the KL per dimension using the provided samples; we can normalise this using the samples
+        # themselves. Here we're essentially estimating the KL as the average of marginal KLs (per dimension).
+        # TODO: Possibly batch this if necessary?
+        nbins = 200
+        hist_range = [-5, 5]
+        target_data_kl = target_data_i.cpu().clone().numpy()
+        flow_samples_kl = flow_samples.cpu().clone().numpy()
+        hists_test = np.zeros((nbins, self.internal_dim))
+        hists_flow = np.zeros((nbins, self.internal_dim))
+        for dim in range(self.internal_dim):
+            # TODO: KL in I space or in X space? Also, what to do with the Jacobian term then?
+            #  Jacobian term is unnecessary in KL estimate, since we use samples + histograms, rather
+            #  than the log probability density.
+            hist_test, _ = np.histogram(target_data_kl[:, dim], bins=nbins, range=hist_range, density=True)
+            hist_flow, _ = np.histogram(flow_samples_kl[:, dim], bins=nbins, range=hist_range, density=True)
+            hists_test[:, dim] = hist_test
+            hists_flow[:, dim] = hist_flow
+        # KL of marginals
+        eps = 1e-10
+        forward_kl_marginals_unscaled = np.sum(
+            hists_test * (np.log(hists_test + eps) - np.log(hists_flow + eps)), axis=0
+        )
+        forward_kl_marginals = forward_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
+        reverse_kl_marginals_unscaled = np.sum(
+            hists_flow * (np.log(hists_flow + eps) - np.log(hists_test + eps)), axis=0
+        )
+        reverse_kl_marginals = reverse_kl_marginals_unscaled * (hist_range[1] - hist_range[0]) / nbins
+        summary_dict.update({
+            "mean_forward_kl_marginals": forward_kl_marginals.mean(),
+            "mean_reverse_kl_marginals": reverse_kl_marginals.mean(),
+        })
 
         if summary_dict:
             with open(os.path.join(self.metric_dir, f"metrics_{iteration}.json"), "w") as f:

@@ -214,35 +214,38 @@ class FABModel(Model):
             })
 
             if not ais_only:
+                # Evaluates using the flow logprob on the target data. Uses provided samples.
                 flow_info = self.target_distribution.performance_metrics(
-                    base_samples,
-                    base_log_w,
-                    self.flow.log_prob,
+                    samples=base_samples,
+                    log_w=base_log_w,
+                    log_q_fn=self.flow.log_prob,  # Evaluate samples using flow logprob.
                     batch_size=inner_batch_size,
                     iteration=iteration,
-                    flow=self.flow,
                 )
-                info.update({"flow_" + key: val for key, val in flow_info.items()})
+                # info.update({"flow_" + key: val for key, val in flow_info.items()})
+                info.update(flow_info)
 
             # TODO: Evaluating Flow+AIS samples is more difficult, because we don't have a likelihood. This requires
             #  problem-specific approaches (although ESS can always be done, but is spurious if the flow is
             #  missing modes: ESS already computed above).
+            # Evaluate using AIS samples and target data samples only.
             ais_info = self.target_distribution.performance_metrics(
-                ais_samples, ais_log_w, iteration=iteration, flow=self.flow
+                samples=ais_samples,
+                log_w=ais_log_w,
+                iteration=iteration,
             )
-            info.update(ais_info)
+            info.update({"ais_" + key: val for key, val in ais_info.items()})
 
             # Back to target = p^\alpha & q^(1-\alpha).
             self.set_ais_target(min_is_target=True)
         else:
-            # Evaluates using the flow logprob on the target data
+            # Evaluates using the flow logprob on the target data. Samples will be generated internally.
             flow_info = self.target_distribution.performance_metrics(
-                None,
-                None,
-                self.flow.log_prob,
-                batch_size=inner_batch_size,
+                samples=None,
+                log_w=None,
+                log_q_fn=self.flow.log_prob,
+                flow=self.flow,  # Used for generating data
                 iteration=iteration,
-                flow=self.flow,
             )
             info.update(flow_info)
 
