@@ -23,7 +23,7 @@ target:                               # Properties of molecular system
   val_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
-  external_constraints: true          # Whether to use external force contraints for keeping the system in place.
+  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
   internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
   rigidwater: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
 
@@ -39,7 +39,7 @@ flow:                                  # Properties of the flow model
   blocks: 12  #12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
   blocks_per_layer: 1                 # Int, number of blocks per layer
   hidden_units: 256  # 256                 # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 9 # 9                         # Int, number of bins of the neural splines
+  num_bins: 8 # 8, 9                         # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -78,6 +78,7 @@ training:                             # Properties of the training procedure
     type: cosine                      # String, kind of LR scheduler, can be exponential, cosine
   warmup_iter: null                   # Int, number of iterations used for warmup
   max_grad_norm: 1.e3                 # Double, limit for gradient clipping
+  # Buffer args
   use_buffer: false  # true                 # Buffer args follow below here
   prioritised_buffer: false  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
 
@@ -93,9 +94,9 @@ evaluation:
 
 
 logger:
-  wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
-    project: H2O_in_H2O
-    entity: timsey
-#  pandas_logger:
-#    save_period: 100                  # how often to save the pandas dataframe as a csv
+#  wandb:
+#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+#    project: H2O_in_H2O
+#    entity: timsey
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv

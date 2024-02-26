@@ -295,13 +295,13 @@ class H2OinH2O(nn.Module, TargetDistribution):
         return target_data
 
     def log_prob(self, i: Tensor):
-        return self.p.log_prob(i)
+        return self.p.log_prob(i)  # I --> X, then unnormalised logprob.
 
     def log_prob_and_jac(self, i: Tensor):
-        return self.p.log_prob_and_jac(i)
+        return self.p.log_prob_and_jac(i)  # I --> X, then unnormalised logprob and Jacobian.
 
     def log_prob_x(self, x: Tensor):
-        return self.p.log_prob_x(x)
+        return self.p.log_prob_x(x)  # Direct unnormalised logprob on Cartesian (X) data.
 
     def performance_metrics(
             self,

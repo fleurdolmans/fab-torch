@@ -92,7 +92,10 @@ def get_n_iterations(
 def setup_buffer(
     cfg: DictConfig, fab_model: FABModel, auto_fill_buffer: bool
 ) -> Union[ReplayBuffer, PrioritisedReplayBuffer]:
-    dim = cfg.target.dim  # applies to flow and target
+    if hasattr(fab_model.target_distribution, "internal_dim"):
+        dim = fab_model.target_distribution.internal_dim  # Use internal dimension if provided
+    else:
+        dim = cfg.target.dim  # applies to flow and target
     if cfg.training.prioritised_buffer is False:
 
         def initial_sampler():
@@ -148,12 +151,18 @@ def get_load_checkpoint_dir(outer_checkpoint_dir):
 
 
 def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
-    dim = cfg.target.dim  # applies to flow and target
+    if hasattr(target, "internal_dim"):
+        # Log probabilities are typically computed from representations in internal space (transforms are applied to
+        #  compute Boltzmann probabilities). So we should be using the internal dimension for computing importance
+        #  weights and the like in the AIS loss. Thus, we need the AIS samples to be in internal space.
+        dim = target.internal_dim  # Use internal dimension if provided
+    else:
+        dim = cfg.target.dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
     if cfg.flow.solvent_flow:
         flow = make_wrapped_normflow_solvent_flow(
             cfg,
-            target
+            target,
         )
     elif cfg.flow.resampled_base:
         flow = make_wrapped_normflow_resampled_flow(
@@ -188,8 +197,8 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         transition_operator = HamiltonianMonteCarlo(
             n_ais_intermediate_distributions=cfg.fab.n_intermediate_distributions,
             dim=dim,
-            base_log_prob=flow.log_prob,
-            target_log_prob=target.log_prob,
+            base_log_prob=flow.log_prob,  # Flow
+            target_log_prob=target.log_prob,  # Boltzmann: transforms I --> X, then gets unnormalised logprob.
             alpha=cfg.fab.alpha,
             p_target=p_target,
             target_p_accept=cfg.fab.transition_operator.target_p_accept,

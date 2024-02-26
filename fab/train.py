@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch.optim.optimizer
 
-from fab.utils.logging import Logger, ListLogger
+from fab.utils.logging import Logger, ListLogger, WandbLogger
 from fab.types_ import Model
 from fab.core import FABModel
 
@@ -59,8 +59,10 @@ class Trainer:
         figures = self.plot(self.model, plot_only_md_energies)
         for j, figure in enumerate(figures):
             if save:
-                # figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
-                self.logger.write({f"it{i}_fig{j}": wandb.Image(figure), "iteration": i})
+                if isinstance(self.logger, WandbLogger):
+                    self.logger.write({f"it{i}_fig{j}": wandb.Image(figure), "iteration": i})
+                else:
+                    figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
             else:
                 plt.show()
             plt.close(figure)

@@ -1,14 +1,14 @@
 from typing import Callable, Any, Optional, List
 
 import torch.optim.optimizer
-from tqdm import tqdm
+import wandb
 import numpy as np
 import matplotlib.pyplot as plt
 import pathlib
 from time import time
 import os
 
-from fab.utils.logging import Logger, ListLogger
+from fab.utils.logging import Logger, ListLogger, WandbLogger
 from fab.core import FABModel
 from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
@@ -36,6 +36,7 @@ class PrioritisedBufferTrainer:
         save_path: str = "",
         lr_step=1,
         warmup_scheduler: Optional[lr_scheduler] = None,
+        print_eval: bool = False,
     ):
         self.model = model
         self.alpha = alpha
@@ -52,6 +53,7 @@ class PrioritisedBufferTrainer:
         # if no gradient clipping set max_gradient_norm to inf
         self.max_gradient_norm = max_gradient_norm if max_gradient_norm else float("inf")
         self.save_dir = save_path
+        self.print_eval = print_eval
         self.plots_dir = os.path.join(self.save_dir, f"plots")
         self.checkpoints_dir = os.path.join(self.save_dir, f"model_checkpoints")
         self.buffer = buffer
@@ -73,10 +75,16 @@ class PrioritisedBufferTrainer:
             torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
-        figures = self.plot(self.model)
+        if self.print_eval:
+            print("   Plotting...")
+        plot_only_md_energies = True if i == 0 else False  # Only plot pre-training.
+        figures = self.plot(self.model, plot_only_md_energies)
         for j, figure in enumerate(figures):
             if save:
-                figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
+                if isinstance(self.logger, WandbLogger):
+                    self.logger.write({f"it{i}_fig{j}": wandb.Image(figure), "iteration": i})
+                else:
+                    figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
             else:
                 plt.show()
             plt.close(figure)
@@ -106,9 +114,13 @@ class PrioritisedBufferTrainer:
         eval_info = {}
         eval_info.update({key + "_p_target": val for key, val in eval_info_true_target.items()})
         eval_info.update({key + "_min_var_target": val for key, val in eval_info_practical_target.items()})
-
-        eval_info.update(step=i)
+        eval_info.update(iteration=i)
         self.logger.write(eval_info)
+        if self.print_eval:
+            print(
+                "   Eval metrics: " +
+                str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
+            )
 
     def run(
         self,
@@ -127,13 +139,17 @@ class PrioritisedBufferTrainer:
         if save:
             pathlib.Path(self.plots_dir).mkdir(exist_ok=True)
             pathlib.Path(self.checkpoints_dir).mkdir(exist_ok=True)
+        # Linspace (0, 100, 11) = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        #  We can remove the first entry, since we want special behaviour before training anyway.
+        #  Our primary loop uses a 0-indexed `t` variable, but the `iteration` or `i` count used for evaluation is
+        #   1-indexed, so n_iteration=100 will give `t`=99 for the final iteration, but `i`=100 so it will be evaluated.
         if n_checkpoints:
-            checkpoint_iter = list(np.linspace(1, n_iterations, n_checkpoints, dtype="int"))
+            checkpoint_iter = list(np.linspace(0, n_iterations, n_checkpoints + 1, dtype="int")[1:])
         if n_eval is not None:
-            eval_iter = list(np.linspace(1, n_iterations, n_eval, dtype="int"))
+            eval_iter = list(np.linspace(0, n_iterations, n_eval + 1, dtype="int")[1:])
             assert eval_batch_size is not None
         if n_plot is not None:
-            plot_iter = list(np.linspace(1, n_iterations, n_plot, dtype="int"))
+            plot_iter = list(np.linspace(0, n_iterations, n_plot + 1, dtype="int")[1:])
         if tlimit is not None:
             assert n_checkpoints is not None, "Time limited specified but no checkpoints are " "being saved."
         if start_time is not None:
@@ -239,12 +255,13 @@ class PrioritisedBufferTrainer:
 
             self.logger.write(info)
             loss_str = (
-                f" Loss: {loss.cpu().detach().item():.4f}, "
+                f" Train loss: {loss.cpu().detach().item():.4f}, "
                 f"ess base: {info['ess_base']:.4f}, "
                 f"ess ais: {info['ess_ais']:.4f}"
             )
             # pbar.set_description(loss_str)
-            print(loss_str)
+            if i % 10 == 0:
+                print(loss_str)
 
             if n_eval is not None:
                 if i in eval_iter:

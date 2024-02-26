@@ -1,17 +1,31 @@
 # Config file specifying the setup of a Boltzmann Generator
+defaults:
+  - _self_
+  - node: desktop
+
+hydra:
+  run:
+    dir: ${node.output_dir}/H2OinH2O/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+  job:
+    chdir: true
 
 target:                               # Properties of molecular system
   solute: water
   solvent: water
-  dim: 45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 27  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 18  #18                   # Int, number of threads to be used, number of cores if null
-  solute_pdb_path: /home/timsey/HDD/data/molecules/solutes/water.pdb    # Filepath to solvent pdb
-  train_samples_path: null  # Filepath to load samples from
-  val_samples_path: /home/timsey/HDD/data/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_every10.h5
+  n_threads: 18  # 1                       # Int, number of threads to be used, number of cores if null
+  solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb    # Filepath to solvent pdb
+  # Filepaths to load samples from
+  train_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
+  val_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
   test_samples_path: null
+  # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
+  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
+  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
+  rigidwater: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
 
 
 flow:                                  # Properties of the flow model
@@ -54,7 +68,7 @@ training:                             # Properties of the training procedure
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
   n_iterations: 1000 #50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null
-  batch_size: 4 # 1024               # Int, batch size used during training
+  batch_size: 1024                    # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
@@ -65,6 +79,7 @@ training:                             # Properties of the training procedure
     type: cosine                      # String, kind of LR scheduler, can be exponential, cosine
   warmup_iter: null                   # Int, number of iterations used for warmup
   max_grad_norm: 1.e3                 # Double, limit for gradient clipping
+  # Buffer args
   use_buffer: true  # true                 # Buffer args follow below here
   prioritised_buffer: true  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
   maximum_buffer_length: 524288       # ALDP used 512 * 1024 (batch_size)
@@ -76,19 +91,18 @@ training:                             # Properties of the training procedure
 
 
 evaluation:
-  plot_per_dim: true
+  eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
+  print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
+  plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
   n_plots: 50                         # number of times we visualise the model throughout training.
-  n_eval: null  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
-  eval_batch_size: 512  #512            # must be a multiple of inner batch size (`batch_size`)
+  n_eval: 500  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
+  eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
   n_checkpoints: 10                   # number of model checkpoints saved
-  save_path:  ./results/h2o_in_h2o/seed${training.seed}/  # Relative to /DEPLOYMENT_DIR/outputs/yyyy-mm-dd/HH-MM-SS/LOGGER_DIR_TREE/
-
 
 logger:
-  pandas_logger:
-    save_period: 100                  # how often to save the pandas dataframe as a csv
 #  wandb:
-#    name: ${fab.loss_type}_pr${training.prioritised_buffer}_alpha${fab.alpha}
+#    name: ${fab.loss_type}_alpha${fab.alpha}_dim${target.dim}_iter${training.n_iterations}_pr${training.prioritised_buffer}
 #    project: H2O_in_H2O
 #    entity: timsey
-#    tags: [fab_explore]
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv
