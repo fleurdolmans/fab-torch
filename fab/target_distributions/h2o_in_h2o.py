@@ -343,7 +343,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
             summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
 
         # Use flow samples for computing marginal KL estimates.
-        if not samples:  # No samples provided, so generate using flow.
+        if samples is None:  # No samples provided, so generate using flow.
             assert flow, (
                 "Flow model must be provided for generating evaluation samples if none are provided."
             )

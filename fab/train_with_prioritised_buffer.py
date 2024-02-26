@@ -75,8 +75,6 @@ class PrioritisedBufferTrainer:
             torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
-        if self.print_eval:
-            print("   Plotting...")
         plot_only_md_energies = True if i == 0 else False  # Only plot pre-training.
         figures = self.plot(self.model, plot_only_md_energies)
         for j, figure in enumerate(figures):
@@ -173,12 +171,14 @@ class PrioritisedBufferTrainer:
             point_ais, log_w_ais = self.model.annealed_importance_sampler.sample_and_log_weights(
                 batch_size, purpose="fill buffer"
             )
-            print(f" AIS time: {time() - ais_time:.2f}s.")
+            if i % 10 == 0:
+                print(f" AIS time: {time() - ais_time:.2f}s.")
             x_ais = point_ais.x.detach()
             log_w_ais = log_w_ais.detach()
             log_q_x_ais = point_ais.log_q.detach()
             self.buffer.add(x_ais.detach(), log_w_ais.detach(), log_q_x_ais.detach())
-            print(f" Buffer now contains {self.buffer.get_buffer_size()} points.")
+            if i % 10 == 0:
+                print(f" Buffer contains {self.buffer.get_buffer_size()} points.")
 
             # we log info from the step of the recently generated ais points.
             info = self.model.get_iter_info()
@@ -186,7 +186,8 @@ class PrioritisedBufferTrainer:
             # We now take self.n_batches_buffer_sampling gradient steps using
             # data from the replay buffer.
             mini_dataset = self.buffer.sample_n_batches(batch_size=batch_size, n_batches=self.n_batches_buffer_sampling)
-            print(f" Sampled {self.n_batches_buffer_sampling} batches of size {batch_size}.")
+            if i % 10 == 0:
+                print(f" Sampled {self.n_batches_buffer_sampling} batches of size {batch_size}.")
             for (x, log_w, log_q_old, indices) in mini_dataset:
                 x, log_w, log_q_old, indices = (
                     x.to(self.flow_device),
@@ -265,20 +266,18 @@ class PrioritisedBufferTrainer:
 
             if n_eval is not None:
                 if i in eval_iter:
-                    print(" Evaluating...")
                     self.perform_eval(i, eval_batch_size, batch_size)
 
             if n_plot is not None:
                 if i in plot_iter:
-                    print(" Making plots...")
                     self.make_and_save_plots(i, save)
 
             if n_checkpoints is not None:
                 if i in checkpoint_iter:
-                    print(" Saving checkpoint...")
                     self.save_checkpoint(i)
 
-            print(f" Iteration time: {time() - iter_start:.2f}s.")
+            if i % 10 == 0:
+                print(f" Iteration time: {time() - iter_start:.2f}s.")
             max_it_time = max(max_it_time, time() - it_start_time)
 
             # End job if necessary
