@@ -1,14 +1,16 @@
-solute_pdb_path: "/home/timsey/HDD/data/molecules/solutes/water.pdb"    # Filepath to solvent pdb file.
-out_dir: "/home/timsey/HDD/data/molecules/md/"                          # Where to store resulting MD frames.
+solute_pdb_path: null  # ${node.data_dir}/molecules/solutes/water.pdb           # Filepath to solvent pdb file.
+solute_inpcrd_path: ${node.data_dir}/molecules/solutes/so2.inpcrd   # Filepath to solvent inpcrd file.
+solute_prmtop_path: ${node.data_dir}/molecules/solutes/so2.prmtop   # Filepath to solvent prmtop file.
+out_dir: ${node.data_dir}/molecules/md/                               # Where to store resulting MD frames.
 num_solvent_molecules: 2                # Number of solvent molecules to simulate.
 temperature: 300.0                      # Temperature in Kelvin.
-timestep: 0.5                           # Timestep in femtoseconds.
+femtoseconds_per_timestep: 0.5          # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
 equi_steps: 1e3                         # Equilibration steps.
 burnin_steps: 1e5                       # Burn-in steps.
-num_steps: 1e7                          # Total number of steps to simulate after equilibration and burn-in.
+num_steps: 1e3                          # Total number of steps to simulate after equilibration and burn-in.
 report_interval: 1e3                    # Reporting / printing (stdout).
 save_interval: 10                       # Save every this many steps. Total frames saved is num_steps / save_interval.
 external_constraints: true              # Use external constraints.
 internal_constraints: "none"            # "none" or "hbonds": "none" for non-rigid water molecules.
 rigidwater: false                       # Rigid water molecules true/false.
-plot_md_data: true                      # Plot some diagnostics after simulation yes/no.
+plot_md_data: false                      # Plot some diagnostics after simulation yes/no.

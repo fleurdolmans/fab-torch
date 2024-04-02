@@ -12,7 +12,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from fab import FABModel
-from fab.target_distributions.h2o_in_h2o import H2OinH2O
+from fab.target_distributions.solute_in_water import SoluteInWater
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 
@@ -24,7 +24,7 @@ from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 # use_gpu = cfg.training.use_gpu,
 
 
-def setup_h2o_plotter(cfg: DictConfig, target: H2OinH2O, buffer=None) -> Plotter:
+def setup_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
     def plot(fab_model: FABModel, plot_only_md_energies: bool) -> List[plt.Figure]:
         figs = []
         # Plot energies of the MD data as a sanity check if desired.
@@ -234,10 +234,11 @@ def _run(cfg: DictConfig) -> None:
     # - media: Directory containing any media files logged to Wandb, such as images.
 
     # Target distribution setup
-    if cfg.target.solute == "water" and cfg.target.solvent == "water":
-        assert cfg.target.dim % 3 == 0, "Dimension must be divisible by 3 for water in water."
-        target = H2OinH2O(
+    if cfg.target.solvent == "water":
+        target = SoluteInWater(
             solute_pdb_path=cfg.target.solute_pdb_path,
+            solute_inpcrd_path=cfg.target.solute_inpcrd_path,
+            solute_prmtop_path=cfg.target.solute_prmtop_path,
             dim=cfg.target.dim,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,

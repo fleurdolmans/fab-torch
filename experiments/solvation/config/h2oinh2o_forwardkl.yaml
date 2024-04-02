@@ -5,22 +5,23 @@ defaults:
 
 hydra:
   run:
-    dir: ${node.output_dir}/H2OinH2O/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+    dir: ${node.output_dir}/SoluteInWater/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
   job:
     chdir: true
 
 target:                               # Properties of molecular system
-  solute: water
   solvent: water
   dim: 27  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18  # 1                       # Int, number of threads to be used, number of cores if null
-  solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb    # Filepath to solvent pdb
+  solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb       # Filepath to solvent pdb
+  solute_inpcrd_path: null                                            # Filepath to solvent inpcrd
+  solute_prmtop_path: null                                            # Filepath to solvent prmtop
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
-  val_samples_path: ${node.data_dir}/molecules/md/output_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
+  train_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
+  val_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force constraints for keeping the system in place.

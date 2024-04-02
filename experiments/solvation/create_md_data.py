@@ -9,12 +9,12 @@ from sys import stdout
 import json
 import pathlib
 
-from fab.target_distributions.h2o_in_h2o import WaterInWaterBox
+from fab.target_distributions.solute_in_water import TriatomicInWaterSys
 
 
 def run_md_sim(cfg: DictConfig):
     """
-    Running a simulation using the WaterInWaterBox class from fab.target_distributions.h2o_in_h2o.
+    Running a simulation using the TriatomicInWaterSys class from fab.target_distributions.h2o_in_h2o.
     
     See also:
     http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#saving-the-results
@@ -24,8 +24,10 @@ def run_md_sim(cfg: DictConfig):
 
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
-    system = WaterInWaterBox(
+    system = TriatomicInWaterSys(
         cfg.solute_pdb_path,
+        cfg.solute_inpcrd_path,
+        cfg.solute_prmtop_path,
         dim,
         cfg.external_constraints,
         cfg.internal_constraints,
@@ -34,7 +36,7 @@ def run_md_sim(cfg: DictConfig):
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
     integrator = mm.LangevinMiddleIntegrator(
-        cfg.temperature * unit.kelvin, 1.0 / unit.picosecond, cfg.timestep * unit.femtosecond
+        cfg.temperature * unit.kelvin, 1.0 / unit.picosecond, cfg.femtoseconds_per_timestep * unit.femtosecond
     )
     # integrator = mm.VerletIntegrator(0.001 * unit.picoseconds)
     sim = app.Simulation(
@@ -70,9 +72,10 @@ def run_md_sim(cfg: DictConfig):
 
     # Saving data
     cnstrnts = f"_ec{cfg.external_constraints}_ic{cfg.internal_constraints}_rw{cfg.rigidwater}"
+    solute = pathlib.Path(cfg.solute_pdb_path).stem
     filename = (
-        f"output_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
-        f"_steps{int(cfg.num_steps)}_every{int(cfg.save_interval)}{cnstrnts}.h5"
+        f"{solute}InWater_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
+        f"_steps{int(cfg.num_steps)}_fpt{cfg.femtoseconds_per_timestep}_every{int(cfg.save_interval)}{cnstrnts}.h5"
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict["cartesian_dim"] = dim

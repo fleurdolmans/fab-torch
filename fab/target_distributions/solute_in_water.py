@@ -19,7 +19,6 @@ from simtk.openmm import app
 from openmmtools.testsystems import TestSystem
 
 from fab.utils.logging import Logger
-from fab.utils.numerical import effective_sample_size_over_p
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
@@ -31,7 +30,7 @@ constraints_dict = {
 }
 
 
-class WaterInWaterBox(TestSystem):
+class TriatomicInWaterSys(TestSystem):
     """Water box with water micro-solvation system.
 
     Parameters
@@ -41,6 +40,8 @@ class WaterInWaterBox(TestSystem):
     def __init__(
             self,
             solute_pdb_path: str,
+            solute_inpcrd_path: str,
+            solute_prmtop_path: str,
             dim: int,
             external_constraints: bool,
             internal_constraints: str,
@@ -52,7 +53,7 @@ class WaterInWaterBox(TestSystem):
         # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
         #  as in the openmmtools testsystems examples:
         #  https://openmmtools.readthedocs.io/en/stable/_modules/openmmtools/testsystems.html#AlanineDipeptideImplicit
-        self.num_atoms_per_solute = 3  # Water
+        self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
 
@@ -62,26 +63,45 @@ class WaterInWaterBox(TestSystem):
         # 3. Add the solute and solvent force fields.
         # 4. Add the implicit solvent force field / external potential term.
 
+        if solute_pdb_path is not None and solute_inpcrd_path is not None and solute_prmtop_path is not None:
+            warnings.warn("Found path to .pdb, .inpcrd and .prmtop files. Will use .pdb file.")
         # Initial solute molecule
-        pdb = app.PDBFile(solute_pdb_path)
-        # TODO: Add solute force field if not water!
-        # Add solvent
-        # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
-        modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
-        forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
-        # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
-        if self.num_solvent_molecules > 0:
-            modeller.addSolvent(
-                forcefield, model="tip3p", numAdded=self.num_solvent_molecules
+        if solute_pdb_path is not None:
+            pdb = app.PDBFile(solute_pdb_path)  # This can be any triatomic solute
+            # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
+            modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
+            forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb # TODO: Add solute force field if not water!
+            # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
+            # Add solvent
+            if self.num_solvent_molecules > 0:  # TODO: padding=1.0 * unit.nanometers ?
+                modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
+            # Create system
+            self.system = forcefield.createSystem(  # Create system from forcefield
+                modeller.topology,
+                nonbondedMethod=app.CutoffNonPeriodic,
+                nonbondedCutoff=1.0 * unit.nanometers,
+                constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
+                rigidWater=rigidwater,  # `False` for flexible H2O
             )
-        # Create system
-        self.system = forcefield.createSystem(
-            modeller.topology,
-            nonbondedMethod=app.CutoffNonPeriodic,
-            nonbondedCutoff=1.0 * unit.nanometers,
-            constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
-            rigidWater=rigidwater,                               # `False` for flexible H2O
-        )
+        elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
+            # Input coordinates
+            inpcrd = app.AmberInpcrdFile(solute_inpcrd_path)
+            # Parameters/topology
+            prmtop = app.AmberPrmtopFile(solute_prmtop_path, periodicBoxVectors=inpcrd.boxVectors)
+            # Create modeller
+            modeller = app.Modeller(prmtop.topology, inpcrd.positions)
+            # Add solvent
+            if self.num_solvent_molecules > 0:  # TODO: padding=1.0 * unit.nanometers ?
+                modeller.addSolvent(model='tip3p', numAdded=self.num_solvent_molecules)  # TODO: This correct?
+            self.system = prmtop.createSystem(  # Create system from prmtop
+                modeller.topology,
+                nonbondedMethod=app.CutoffNonPeriodic,  # TODO: Correct? PME?
+                nonbondedCutoff=1.0 * unit.nanometers,
+                constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
+                rigidWater=rigidwater,  # `False` for flexible H2O
+            )
+        else:
+            raise ValueError("Must provide either a .pdb file or .inpcrd and .prmtop files.")
 
         if external_constraints:
             # add origin restraint for the central water (156)
@@ -108,10 +128,12 @@ class WaterInWaterBox(TestSystem):
         self.atoms = [atom.name for atom in self.topology.atoms()]
 
 
-class H2OinH2O(nn.Module, TargetDistribution):
+class SoluteInWater(nn.Module, TargetDistribution):
     def __init__(
         self,
         solute_pdb_path: str,
+        solute_inpcrd_path: str,
+        solute_prmtop_path: str,
         dim: int = 3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -145,7 +167,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
 
         :param save_dir: Directory being used for saving models, metric, etc.
         """
-        super(H2OinH2O, self).__init__()
+        super(SoluteInWater, self).__init__()
 
         self.cartesian_dim = dim
         self.internal_dim = dim - 6
@@ -191,8 +213,10 @@ class H2OinH2O(nn.Module, TargetDistribution):
                 self.test_data_config = json.load(f)
 
         # Initialise system
-        self.system = WaterInWaterBox(
+        self.system = TriatomicInWaterSys(
             solute_pdb_path,
+            solute_inpcrd_path,
+            solute_prmtop_path,
             self.cartesian_dim,
             external_constraints,
             internal_constraints,
@@ -401,7 +425,7 @@ class H2OinH2O(nn.Module, TargetDistribution):
     #     disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
     #     need the likelihood, so we can actually evaluate Flow+AIS samples as well.
     #     """
-    #     raise NotImplementedError("This function is not yet correctly implemented for H2OinH2O.")
+    #     raise NotImplementedError("This function is not yet correctly implemented for .")
     #
     #     # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
     #     #  transforms have the opposite forward/inverse convention to ours.
