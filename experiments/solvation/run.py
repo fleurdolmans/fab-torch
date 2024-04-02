@@ -265,7 +265,7 @@ def _run(cfg: DictConfig) -> None:
     # Will grab logger and save_dir from target, if target has those defined.
     setup_trainer_and_run_flow(cfg, setup_h2o_plotter, target)
 
-
+# Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="h2oinh2o_forwardkl.yaml", version_base="1.1")
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))

@@ -44,10 +44,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             self._setup_scale_theta(z)
 
     def forward(self, z):
-        # TODO: For water in water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
+        # For water-in-water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms after transforming to Cartesian.
-        # Transform Z --> X. Return x and log det Jacobian.
+        # TODO: Check this for SO2. S should be the first atom.
+        # Transform I --> X. Return x and log det Jacobian.
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(z.device)
         self.scale_phi = self.scale_phi.to(z.device)
@@ -57,10 +58,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         return x, log_det_jac
 
     def inverse(self, x):
-        # TODO: For water in water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
+        # For water-in-water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
-        #  If this is not the order OpenMM expects, then we should reorder the atoms before transforming to Z.
-        # Transform X --> Z. Return z and log det Jacobian.
+        #  If this is not the order OpenMM expects, then we should reorder the atoms before transforming to I.
+        # TODO: Check this for SO2. S should be the first atom.
+        # Transform X --> I. Return z and log det Jacobian.
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(x.device)
         self.scale_phi = self.scale_phi.to(x.device)
@@ -283,7 +285,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         return z, log_det_jac, x_coord, unnorm_z
 
     def z_to_cartesian(self, z):
-        """  # TODO: internal coordinates have 6 fewer dofs than Cartesian.
+        """
         Transform Spherical coordinates to Cartesian coordinates.
         :param z: Spherical coordinates: n_batch x (n_atoms . 3 - 6).
         :return: Cartesian coordinates: n_batch x n_atoms . 3, and log det Jacobian
@@ -311,17 +313,8 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         x = z.new_zeros(z.shape)
         log_det_jac = z.new_zeros(z.shape[0])  # n_batch
 
-        # # Flow output should have 6 degrees of freedom masked out: these correspond to the orientation we choose
-        # # for the first three atoms.
-        # mask = z.new_ones(z.shape)
-        # mask[:, 0, :] = 0
-        # mask[:, 1, 1:] = 0
-        # mask[:, 2, 2] = 0
-        # z = mask * z
-
         for atom_num in range(z.shape[1]):
             atom_coords = z[:, atom_num, :]
-
             if atom_num == 0:  # solute_atom0 reference: [0, 0, 0] in x
                 if not torch.isclose(z.new_zeros(z.shape[0], 3), atom_coords).all():
                     raise ValueError(
@@ -360,7 +353,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 phi = fphi * self.scale_phi + self.offset_phi  # This is phi = f_phi * s_phi
                 # Fix phi to lie in [0, 2pi]. We assume the flow output maps to this range. This does not
                 #  affect the Jacobian.
-                # TODO: This should in principle do nothing if we're using the Circular Flow.
+                # This should in principle do nothing if we're using the Circular Flow.
                 phi = torch.where(phi < 0, phi + 2 * math.pi, phi)
                 phi = torch.where(phi > 2 * math.pi, phi - 2 * math.pi, phi)
                 # Define normal for rotation: for X --> Z direction, we took the x > 0 normal when rotating towards the
@@ -394,12 +387,12 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 phi = fphi * self.scale_phi + self.offset_phi  # This is phi = f_phi * s_phi
                 theta = ftheta * self.scale_theta  # This is theta = f_theta * s_theta
                 # Fix phi to lie in [0, 2pi]. This does not affect the Jacobian.
-                # TODO: This should in principle do nothing if we're using the Circular Flow. E.g., we should see no
+                # This should in principle do nothing if we're using the Circular Flow. E.g., we should see no
                 #  phi values < 0 or > pi here.
                 phi = torch.where(phi < 0, phi + 2 * math.pi, phi)
                 phi = torch.where(phi > 2 * math.pi, phi - 2 * math.pi, phi)
                 # Fix theta to lie in [-pi/2, pi/2]. This does not affect the Jacobian.
-                # TODO: This should in principle only shift from [0, pi] to [-pi/2, pi/2] if we're using the
+                # This should in principle only shift from [0, pi] to [-pi/2, pi/2] if we're using the
                 #  Circular Flow. It should not create folds. E.g., we should see no theta values < 0 or > pi here.
                 theta = torch.where(theta < -math.pi / 2, theta + math.pi, theta)
                 theta = torch.where(theta > math.pi / 2, theta - math.pi, theta)
@@ -449,7 +442,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # First define phi w.r.t. the z-axis. This means we rotate solute_atom1 to align with the z-axis.
         # E.g. we want to align the first H atom with the z-axis.
         # The rotation should happen along the normal given by the z-O-H plane (for water).
-        # TODO: This is the culprit for the error when the first solute hydrogen has y==0 exactly.
+        # This is the culprit for the error when the first solute hydrogen has y==0 exactly.
         phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1, align_first_solute_h=True)
         phi_rotation = rotation_matrix(phi_axis, phi_rad)
         x_phi = torch.einsum("bij,bnj -> bni", phi_rotation, x_centered)
@@ -502,7 +495,7 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     rads = torch.arccos(torch.clip(dot, -1.0, 1.0))
 
     # We need to fix the rotation axis orientation, so that we know how to reconstruct X from the angle
-    #  information in Z. So we pick the convention that the rotation is the normal with x > 0.
+    #  information in I. So we pick the convention that the rotation is the normal with x > 0.
     # This means that we sometimes flip the convention, so we need to adjust the angle appropriately.
     #  That is, when we find a normal with x < 0, we negate it, and adjust the angle as: rad = 2pi - rad.
 
@@ -513,18 +506,18 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
             raise ValueError("Convention is to rotate normal with x!=0 if possible, but `to_yz_plane` was True.")
         sign = torch.sign(cross[:, 2])  # Flip direction if z < 0
     else:
-        # TODO: What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
+        # What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
         #  this is consistent? See the below check. This situation occurs when the first solute hydrogen has
         #  y == 0, which can happen, although it should be rare. Seems to happen when setting up the coordinate system
         #  sometimes.
-        # TODO: Can't we just remove the check? It's actually fine if x=0 for the rotation axis, since this is a valid
+        # Can't we just remove the check? It's actually fine if x=0 for the rotation axis, since this is a valid
         #  axis to rotate around for aligning the first solute hydrogen with the z-axis. The only problem may be with
         #  the reverse transformation, where we would need to know how exactly to invert this (set a convention).
         #  Here we are in a situation where the rotation axis has z=0 and x=0, so we can use y>0 as our convention.
         if torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
             # Exception: both x and z are 0, so use y-axis as rotation axis. Convention is to use the y>0 axis.
             sign = torch.sign(cross[:, 1])  # Flip direction if y < 0
-            # TODO: Actually, this signing is unnecessary, since this exception should only happen when aligning the
+            # Actually, this signing is unnecessary, since this exception should only happen when aligning the
             #  first solute hydrogen during coordinate setup. We can just rotate however we want, since we never have
             #  to reverse this rotation (this atom is always set to align to the z-axis in the reverse transform).
             if not align_first_solute_h:
@@ -579,7 +572,7 @@ def get_theta(atom1, atom2, atom3, atom4, phi):
 
     # NOTE: we define the rotation axis as (atom2 - atom1), which is orthogonal to the plane in which
     #  in_both_planes and in_rot_plane live. The computed angle corresponds to a rotation around either this
-    #  axis, or its negation, depending the relative orientation of in_both_planes and in_rot_plane. This
+    #  axis, or its negation, depending on the relative orientation of in_both_planes and in_rot_plane. This
     #  orientation can be determined with their cross-product, which is the actual axis of rotation!
     # Since we want the axis of rotation to be (atom2 - atom1), we need to check whether the actual axis
     #  aligns with this, and if not, change the rotation angle accordingly.
@@ -628,6 +621,7 @@ def rotation_matrix(rotation_axis, rotation_rad):
 
 
 if __name__ == "__main__":
+    # Testing the transforms
     n_batch = 1024
     n_atoms = 27
     t_x = torch.randn(1, n_atoms * 3)

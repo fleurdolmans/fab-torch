@@ -189,8 +189,6 @@ def make_wrapped_normflow_solvent_flow(config, target):
     # Note that we have two different types of angles: phi and theta. But we can just use a pi range for both, and
     #  multiply the one for phi by 2 at Flow output (in principle the Flow can learn that phi angles have double
     #  range, but we might as well put that in manually, so that on initialisation the relative scale matches).
-    # TODO: It might be that values at the edges of the circular flow are harder to learn for some reason? We observe
-    #  that extremal theta values seem suppressed w.r.t. training data. Try with more bins maybe?
     bound_circ = np.pi
     # Bound of the Spline tails.
     tail_bound = 5.0 * torch.ones(dim)

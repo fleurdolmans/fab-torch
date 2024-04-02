@@ -21,8 +21,7 @@ R = 8.314e-3
 
 class TransformedBoltzmann(nn.Module):
     """
-    Boltzmann distribution with respect to transformed variables,
-    uses OpenMM to get energy and forces
+    Boltzmann distribution with respect to transformed variables, uses OpenMM to get energy and forces.
     """
 
     def __init__(self, sim_context, temperature, energy_cut, energy_max, transform):
@@ -53,6 +52,9 @@ class TransformedBoltzmann(nn.Module):
         self.transform = transform
 
     def log_prob(self, z):
+        """
+        Log prob of system given in internal coordinates (e.g., Normalising Flow output).
+        """
         z, log_det = self.transform(z)  # I --> X
         energy_term = -self.norm_energy(z)
         #  UNITS: We add logdetjac to energy, because energy is essentially log probability.
@@ -63,10 +65,17 @@ class TransformedBoltzmann(nn.Module):
         return energy_term + log_det
 
     def log_prob_and_jac(self, z):
+        """
+        Log prob of system given in internal coordinates (e.g., Normalising Flow output) and the associated
+        log determinant of the Jacobian of the transformation from internal to Cartesian coordinates.
+        """
         z, log_det = self.transform(z)  # I --> X
         return -self.norm_energy(z) + log_det, log_det
 
     def log_prob_x(self, x):
+        """
+        Log prob of system given in Cartesian coordinates.
+        """
         return -self.norm_energy(x)
 
 
@@ -85,8 +94,7 @@ class TransformedBoltzmannParallel(nn.Module):
         :param energy_cut: Energy at which logarithm is applied
         :param energy_max: Maximum energy
         :param transform: Coordinate transformation
-        :param n_threads: Number of threads to use to process batches, set
-        to the number of cpus if None
+        :param n_threads: Number of threads to use to process batches, set to the number of cpus if None
         """
         super().__init__()
         # Save input parameters
@@ -143,20 +151,10 @@ class OpenMMEnergyInterface(torch.autograd.Function):
             else:
                 openmm_context.setPositions(x)
                 state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
-
                 # get energy
                 energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
-                # positions = np.array(state.getPositions().value_in_unit(unit.nanometer))
-                # r = np.sqrt(np.sum(positions**2, axis=1))
-                # try:  # Add constraint potential manually
-                #     # k = openmm_context.getParameters()["k"]
-                #     # TODO: Do we need to scale by kBT here? Depends on units of force in system construction.
-                #     w = openmm_context.getParameter("w") / kBT  # Get constraint force constant
-                #     constraint_potential = w * np.sum((r[np.where(r > 1)] - 1)**3 / 3)
-                #     energies[i, 0] = energies[i, 0] + constraint_potential
-                # except ValueError:  # raised if np.where(r>1) is empty
-                #     pass
 
+                # Printing energy components for debugging:
                 # for j, frc in enumerate(openmm_context.getSystem().getForces()):
                 #     stt = openmm_context.getState(getEnergy=True, groups={j})
                 #     poten = stt.getPotentialEnergy()._value  # kJ/mol
@@ -214,10 +212,8 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
         else:
             openmm_context.setPositions(input)
             state = openmm_context.getState(getForces=True, getEnergy=True)
-
             # get energy
             energy = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
-
             # get forces
             force = -state.getForces(asNumpy=True).value_in_unit(unit.kilojoule / unit.mole / unit.nanometer) / kBT
         force = force.reshape(n_dim * 3)

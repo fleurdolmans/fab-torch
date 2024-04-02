@@ -1,3 +1,8 @@
+# Config file specifying the setup of a Boltzmann Generator
+defaults:
+  - _self_
+  - node: desktop
+
 solute_pdb_path: null  # ${node.data_dir}/molecules/solutes/water.pdb           # Filepath to solvent pdb file.
 solute_inpcrd_path: ${node.data_dir}/molecules/solutes/so2.inpcrd   # Filepath to solvent inpcrd file.
 solute_prmtop_path: ${node.data_dir}/molecules/solutes/so2.prmtop   # Filepath to solvent prmtop file.

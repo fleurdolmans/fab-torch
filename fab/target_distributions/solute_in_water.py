@@ -31,11 +31,21 @@ constraints_dict = {
 
 
 class TriatomicInWaterSys(TestSystem):
-    """Water box with water micro-solvation system.
+    """
+    Triatomic molecule in water OpenMM system setup.
 
     Parameters
     ----------
-    dim: dimensionality of system (num_atoms x 3).
+    solute_pdb_path: str, path to solute pdb file. If provided, incprd and prmtop files will be ignored.
+    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided.
+    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided.
+    dim: int, dimensionality of system (num_atoms x 3).
+    external_constraints: bool, whether to use external force constraints for keeping the system in place.
+    internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
+        or "none". Should be "none" during training, since otherwise the energy of flow samples cannot be properly
+        computed (will only be able to compute a projection of these samples onto 'valid' configurations).
+    rigidwater: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
+        False during training, for reasons mentioned in `internal_constraints` docstring.
     """
     def __init__(
             self,
@@ -70,7 +80,7 @@ class TriatomicInWaterSys(TestSystem):
             pdb = app.PDBFile(solute_pdb_path)  # This can be any triatomic solute
             # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
             modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
-            forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb # TODO: Add solute force field if not water!
+            forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
             # Add solvent
             if self.num_solvent_molecules > 0:  # TODO: padding=1.0 * unit.nanometers ?
@@ -87,15 +97,25 @@ class TriatomicInWaterSys(TestSystem):
             # Input coordinates
             inpcrd = app.AmberInpcrdFile(solute_inpcrd_path)
             # Parameters/topology
-            prmtop = app.AmberPrmtopFile(solute_prmtop_path, periodicBoxVectors=inpcrd.boxVectors)
+            prmtop = app.AmberPrmtopFile(solute_prmtop_path)
             # Create modeller
             modeller = app.Modeller(prmtop.topology, inpcrd.positions)
             # Add solvent
-            if self.num_solvent_molecules > 0:  # TODO: padding=1.0 * unit.nanometers ?
-                modeller.addSolvent(model='tip3p', numAdded=self.num_solvent_molecules)  # TODO: This correct?
-            self.system = prmtop.createSystem(  # Create system from prmtop
+            solvent_forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
+            if self.num_solvent_molecules > 0:
+                modeller.addSolvent(solvent_forcefield, model='tip3p', numAdded=self.num_solvent_molecules)
+            # TODO:
+            #  After adding solvent, the system can be created in two ways:
+            #  1) Using the solventForceField.createSystem() method to ensure that the force field parameters are
+            #     applied not only to the solute but also to the solvent.
+            #  2) Using the .prmtop.createSystem() to ensure consistency with AMBER parameters.
+            #  Neither works, because neither method uses a forcefield that contains parameters for both SO2 and H2O.
+            #  Potential solution: create xml file that contains both forcefields. Or create AMBER system with solvent
+            #  molecules already present (latter is easier, but less flexible, because we have to predetermine the 
+            #  number of solvent molecules).
+            self.system = prmtop.createSystem(  # Create system from prmtop/forcefield?
                 modeller.topology,
-                nonbondedMethod=app.CutoffNonPeriodic,  # TODO: Correct? PME?
+                nonbondedMethod=app.CutoffNonPeriodic,
                 nonbondedCutoff=1.0 * unit.nanometers,
                 constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
                 rigidWater=rigidwater,  # `False` for flexible H2O
@@ -129,12 +149,41 @@ class TriatomicInWaterSys(TestSystem):
 
 
 class SoluteInWater(nn.Module, TargetDistribution):
+    """
+    Boltzmann distribution of a solute in water.
+
+    Parameters
+    ----------
+    solute_pdb_path: str, path to solute pdb file. If provided, incprd and prmtop files will be ignored.
+    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided.
+    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided.
+    dim: int, dimensionality of system (num_atoms x 3).
+    temperature: float, temperature of system in Kelvin.
+    energy_cut: float, energy cut-off for Boltzmann distribution (logarithmic above this value).
+    energy_max: float, maximum energy for Boltzmann distribution (capped at this value).
+    n_threads: int, number of threads to use for parallel Boltzmann evaluation.
+    train_samples_path: str, path to MD training samples file.
+    val_samples_path: str, path to MD validation samples file.
+    test_samples_path: str, path to MD test samples file.
+    eval_mode: Literal["val", "test"], evaluation mode for performance metrics.
+    use_val_data_for_transform: bool, whether to use validation data to set scale for coordinate transform.
+    device: str, device to use for computation.
+    logger: Logger, logger object for logging.
+    save_dir: str, directory to save metrics and plots.
+    plot_MD_energies: bool, whether to plot the energies of the MD data as a sanity check. Used for debugging.
+    external_constraints: bool, whether to use external force constraints for keeping the system in place.
+    internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
+        or "none". Should be "none" during training, since otherwise the energy of flow samples cannot be properly
+        computed (will only be able to compute a projection of these samples onto 'valid' configurations).
+    rigidwater: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
+        False during training, for reasons mentioned in `internal_constraints` docstring.
+    """
     def __init__(
         self,
         solute_pdb_path: str,
         solute_inpcrd_path: str,
         solute_prmtop_path: str,
-        dim: int = 3 * (3 + 3 * 8),  # 3 atoms in solute, 3 atoms in solvent, 8 solvent molecules. 3 dimensions per atom (xyz)
+        dim: int = 3 * (3 + 3 * 8),
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
         energy_max: float = 1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -147,26 +196,11 @@ class SoluteInWater(nn.Module, TargetDistribution):
         device: str = "cpu",
         logger: Logger = None,
         save_dir: Optional[str] = None,
-        plot_MD_energies: bool = False,  # Whether to plot the energies of the MD data as a sanity check.
-        external_constraints: bool = True,  # Whether to use external force constraints for keeping the system in place.
-        internal_constraints: str = "none",  # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-        rigidwater: bool = False,  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+        plot_MD_energies: bool = False,
+        external_constraints: bool = True,
+        internal_constraints: str = "none",
+        rigidwater: bool = False,
     ):
-        """
-        Boltzmann distribution of H2O in H2O.
-        :param temperature: Temperature of the system
-        :param energy_cut: Value after which the energy is logarithmically scaled
-        :param energy_max: Maximum energy allowed, higher energies are cut
-        :param n_threads: Number of threads used to evaluate the log
-            probability for batches
-        :param train_samples_path: Path to the target samples for training (e.g., MD samples).
-        :param val_samples_path: Path to the target samples for evaluation (e.g., MD samples).
-        :param test_samples_path: Path to the target samples for testing (e.g., MD samples).
-        :param eval_mode: Whether to use the validation or test set for evaluation.
-        :param device: Device on which the model is run
-
-        :param save_dir: Directory being used for saving models, metric, etc.
-        """
         super(SoluteInWater, self).__init__()
 
         self.cartesian_dim = dim
@@ -293,6 +327,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):
+        """
+        Load MD samples from file.
+        """
         if data_path.suffix == ".h5":
             with h5py.File(str(data_path), "r") as f:
                 target_data = torch.from_numpy(f["coordinates"][()])
@@ -332,6 +369,23 @@ class SoluteInWater(nn.Module, TargetDistribution):
             iteration: Optional[int] = None,
             flow: Optional[nn.Module] = None,
     ):
+        """
+        Compute performance metrics for the target distribution. Used by the main training loop for evaluation.
+
+        Parameters
+        ----------
+        NOTE: Some parameters are not used in this function, but are still passed for compatibility with the original
+        codebase.
+
+        samples: Optional[Tensor], samples from the target distribution. If None, samples are generated using the flow.
+        log_w: Optional[Tensor], log weights for AIS samples. If None, AIS samples are not used. Currently, this
+            function is not used for AIS evaluation.
+        log_q_fn: Callable, log probability function of the flow. Used for computing log probability of MD data under
+            the current flow. Split off from the `flow` argument for backwards compatibility.
+        batch_size: int, batch size for evaluation. Currently unused.
+        iteration: Optional[int], iteration number. Used for logging metrics.
+        flow: Optional[nn.Module], flow model. Used for generating samples if none are provided.
+        """
         # TODO: batch_size here is currently equal to inner_batch_size in core.get_eval_info(), which
         #  corresponds to the training batch size. This is because eval_batch size is used for determining
         #  how many eval datapoints to use in total in the original code. This all works out when using this
@@ -412,143 +466,3 @@ class SoluteInWater(nn.Module, TargetDistribution):
             warnings.warn("No summary metrics were computed.")
 
         return summary_dict
-    #
-    # def get_kld_info(
-    #         self,
-    #         samples: Optional[Tensor] = None,
-    #         log_w: Optional[Tensor] = None,
-    #         batch_size: int = 1000,
-    #         iteration: Optional[int] = None,
-    # ):
-    #     """
-    #     Computes the KLD between the target distribution and the flow distribution, and saves the KLD histogram to
-    #     disk. Uses sample histograms to estimate the KLD, as in the original ALDP code. Using samples means we don't
-    #     need the likelihood, so we can actually evaluate Flow+AIS samples as well.
-    #     """
-    #     raise NotImplementedError("This function is not yet correctly implemented for .")
-    #
-    #     # NOTE: These are x, but they call it z. Note when comparing the original code in utils/aldp.py that their
-    #     #  transforms have the opposite forward/inverse convention to ours.
-    #     assert iteration, "Must pass iteration number for doing KLD histogram."
-    #
-    #     z_test = self.target_data
-    #     z_sample = samples  # TODO: might need to fix PeriodicWrap for this (see last layer in Flow and Vincent email).
-    #
-    #     # Determine likelihood of test data and transform it (mostly taken from aldp.py)
-    #     z_d_np = z_test
-    #     x_d_np = torch.zeros(0, self.dim)
-    #     log_p_sum = 0
-    #     n_batches = int(np.ceil(len(z_test) / batch_size))
-    #     for i in range(n_batches):
-    #         if i == n_batches - 1:
-    #             end = len(z_test)
-    #         else:
-    #             end = (i + 1) * batch_size
-    #         z = z_test[(i * batch_size): end, :]
-    #         # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
-    #         # TODO: This gives an error in get_angle_and_normal() that finds a rotation around and axis with x=0. This
-    #         #  presumably happens because one of the test data points has a non-solute atom with y=0. This can indeed
-    #         #  happen (although exactly 0 is kind of strange), so we should figure out how to deal with it. What would
-    #         #  work, is to pick a convention for the case where x=0 (i.e., pick a rotation direction,
-    #         #  such as the x>0 direction), and make sure that this convention is used when the code rotates our
-    #         #  molecule (otherwise we rotate wrong!).
-    #         # TODO: Error in batch i=190?
-    #         x, log_det = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
-    #         x_d_np = torch.cat((x_d_np, x), dim=0)
-    #         log_p = self.log_prob(z)  # TODO: This is the logprob under the target, of the z-space samples?! Weird.
-    #         log_p_sum = log_p_sum + torch.sum(log_p).detach() - torch.sum(log_det).detach().float()
-    #     log_p_avg = log_p_sum / len(z_test)
-    #
-    #     # Transform samples
-    #     z_np = torch.zeros(0, self.dim)
-    #     x_np = torch.zeros(0, self.dim)
-    #     n_batches = int(np.ceil(len(samples) / batch_size))
-    #     for i in range(n_batches):
-    #         if i == n_batches - 1:
-    #             end = len(z_sample)
-    #         else:
-    #             end = (i + 1) * batch_size
-    #         z = z_sample[(i * batch_size): end, :]
-    #         # TODO: I think this fixes the PeriodicWrap issue (see email Vincent).
-    #         x, _ = self.coordinate_transform.inverse(z.double())  # Actually: X --> Z  # TODO: Check phi/theta.
-    #         x_np = torch.cat((x_np, x), dim=0)
-    #         z, _ = self.coordinate_transform.forward(x)  # Actually: Z --> X
-    #         z_np = torch.cat((z_np, z), dim=0)
-    #
-    #     # To numpy
-    #     z_np = z_np.cpu().data.numpy()
-    #     z_d_np = z_d_np.cpu().data.numpy()
-    #
-    #     # Estimate density of marginals
-    #     nbins = 200
-    #     hist_range = [-5, 5]
-    #     ndims = z_np.shape[1]
-    #
-    #     hists_test = np.zeros((nbins, ndims))
-    #     hists_gen = np.zeros((nbins, ndims))
-    #
-    #     for i in range(ndims):
-    #         htest, _ = np.histogram(z_d_np[:, i], nbins, range=hist_range, density=True)
-    #         hgen, _ = np.histogram(z_np[:, i], nbins, range=hist_range, density=True)
-    #         hists_test[:, i] = htest
-    #         hists_gen[:, i] = hgen
-    #
-    #     # Compute KLD of marginals
-    #     eps = 1e-10
-    #     kld_unscaled = np.sum(hists_test * np.log((hists_test + eps) / (hists_gen + eps)), axis=0)
-    #     kld = kld_unscaled * (hist_range[1] - hist_range[0]) / nbins
-    #
-    #     # Split KLD into groups
-    #     r_ind = np.arange(0, self.dim, 3)
-    #     phi_ind = np.arange(1, self.dim, 3)
-    #     theta_ind = np.arange(2, self.dim, 3)
-    #
-    #     kld_r = kld[r_ind]
-    #     kld_phi = kld[phi_ind]
-    #     kld_theta = kld[theta_ind]
-    #
-    #     # Calculate and save KLD stats of marginals
-    #     kld = (kld_r, kld_phi, kld_theta)
-    #     kld_labels = ["bond", "angle", "dih"]
-    #     kld_ = np.concatenate(kld)
-    #     kld_append = np.array([[iteration + 1, np.median(kld_), np.mean(kld_)]])
-    #     kld_path = os.path.join(self.metric_dir, "kld.csv")
-    #     if os.path.exists(kld_path):
-    #         kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
-    #         if len(kld_hist.shape) == 1:
-    #             kld_hist = kld_hist[None, :]
-    #         kld_hist = np.concatenate([kld_hist, kld_append])
-    #     else:
-    #         kld_hist = kld_append
-    #     np.savetxt(kld_path, kld_hist, delimiter=",", header="it,kld_median,kld_mean", comments="")
-    #
-    #     # Save KLD per coordinate (r, phi, theta)
-    #     for kld_label, kld_ in zip(kld_labels, kld):
-    #         kld_append = np.concatenate([np.array([iteration + 1, np.median(kld_), np.mean(kld_)]), kld_])
-    #         kld_append = kld_append[None, :]
-    #         kld_path = os.path.join(self.metric_dir, "kld_" + kld_label + ".csv")
-    #         if os.path.exists(kld_path):
-    #             kld_hist = np.loadtxt(kld_path, skiprows=1, delimiter=",")
-    #             if len(kld_hist.shape) == 1:
-    #                 kld_hist = kld_hist[None, :]
-    #             kld_hist = np.concatenate([kld_hist, kld_append])
-    #         else:
-    #             kld_hist = kld_append
-    #         header = "it,kld_median,kld_mean"
-    #         for kld_ind in range(len(kld_)):
-    #             header += ",kld" + str(kld_ind)
-    #         np.savetxt(kld_path, kld_hist, delimiter=",", header=header, comments="")
-    #
-    #     # Save log probability
-    #     log_p_append = np.array([[iteration + 1, log_p_avg]])
-    #     log_p_path = os.path.join(self.metric_dir, "log_p_test.csv")
-    #     if os.path.exists(log_p_path):
-    #         log_p_hist = np.loadtxt(log_p_path, skiprows=1, delimiter=",")
-    #         if len(log_p_hist.shape) == 1:
-    #             log_p_hist = log_p_hist[None, :]
-    #         log_p_hist = np.concatenate([log_p_hist, log_p_append])
-    #     else:
-    #         log_p_hist = log_p_append
-    #     np.savetxt(log_p_path, log_p_hist, delimiter=",", header="it,log_p", comments="")
-    #
-    #     return  # TODO: Return anything to save in the dict or just save to disk?
