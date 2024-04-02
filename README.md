@@ -27,6 +27,7 @@ MD data can be created using `experiments/solvation/create_md_data.py`. This scr
 This is research code that is not fully documented. Many comments are interspersed throughout the code. Some things that are good to know when going through it:
 
 - You will often see comments like "I --> X". Here I means internal coordinates, and X means Cartesian coordinates. The arrow denotes a transformation from one to the other. The transform is a 3D Spherical Coordinate transform, implemented in `fab/transforms/global_2point_spherical_transform.py`. The chemical system definition for the solute-in-water system is in `fab/target_distributions/solute_in_water.py`. Similar systems can be created for non-water solvents.
+- log_p refers to the log of the distribution p, which often refers to the Boltzmann distribution. log_q refers to the log of q, which is often the Normalising Flow / Boltzmann Generator. This may not always be consistent however, since the original codebase does not always use this convention.
 - We use a Circular Coupled Rational Quadratic Spline flow which uses circular coupling for bond angle dimensions. The model is constructed in `make_wrapped_normflow_solvent_flow` in `experiments/make_flow/make_normflow_model.py`.
 - Trainer objects we use are in `fab/trainer.py` and `fab/train_with_prioritised_buffer.py`. We use the first for likelihood training and the second for FAB (or AIS: Annealed Importance Sampling) training.
 

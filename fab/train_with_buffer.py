@@ -13,7 +13,7 @@ from fab.core import FABModel
 from fab.utils.replay_buffer import ReplayBuffer
 
 
-lr_scheduler = Any  # a learning rate schedular from torch.optim.lr_scheduler
+lr_scheduler = Any  # a learning rate scheduler from torch.optim.lr_scheduler
 Plotter = Callable[[FABModel], List[plt.Figure]]
 
 
@@ -26,7 +26,7 @@ class BufferTrainer:
         optimizer: torch.optim.Optimizer,
         buffer: ReplayBuffer,
         n_batches_buffer_sampling: int = 2,
-        optim_schedular: Optional[lr_scheduler] = None,
+        optim_scheduler: Optional[lr_scheduler] = None,
         logger: Logger = ListLogger(),
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
@@ -36,7 +36,7 @@ class BufferTrainer:
         raise Exception("This code is experimental and has not been updated in a while")
         self.model = model
         self.optimizer = optimizer
-        self.optim_schedular = optim_schedular
+        self.optim_scheduler = optim_scheduler
         self.logger = logger
         self.plot = plot
         # if no gradient clipping set max_gradient_norm to inf
@@ -91,8 +91,8 @@ class BufferTrainer:
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
                 self.optimizer.step()
-                if self.optim_schedular:
-                    self.optim_schedular.step()
+                if self.optim_scheduler:
+                    self.optim_scheduler.step()
             else:
                 print("nan loss in non-replay step")
 
@@ -148,9 +148,9 @@ class BufferTrainer:
                     pathlib.Path(checkpoint_path).mkdir(exist_ok=False)
                     self.model.save(os.path.join(checkpoint_path, "model.pt"))
                     torch.save(self.optimizer.state_dict(), os.path.join(checkpoint_path, "optimizer.pt"))
-                    if self.optim_schedular:
+                    if self.optim_scheduler:
                         torch.save(
-                            self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt")
+                            self.optim_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt")
                         )
 
         print(f"\n Run completed in {(time() - start_time) / 3600:.2f} hours \n")

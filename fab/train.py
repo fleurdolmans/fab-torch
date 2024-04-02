@@ -13,7 +13,7 @@ from fab.utils.logging import Logger, ListLogger, WandbLogger
 from fab.types_ import Model
 from fab.core import FABModel
 
-lr_scheduler = Any  # a learning rate schedular from torch.optim.lr_scheduler
+lr_scheduler = Any  # a learning rate scheduler from torch.optim.lr_scheduler
 Plotter = Callable[[Model], List[plt.Figure]]
 
 
@@ -23,7 +23,7 @@ class Trainer:
         model: FABModel,
         save_path: str,
         optimizer: torch.optim.Optimizer,
-        optim_schedular: Optional[lr_scheduler] = None,
+        optim_scheduler: Optional[lr_scheduler] = None,
         logger: Logger = ListLogger(),
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
@@ -32,7 +32,7 @@ class Trainer:
     ):
         self.model = model
         self.optimizer = optimizer
-        self.optim_schedular = optim_schedular
+        self.optim_scheduler = optim_scheduler
         self.lr_step = lr_step
         self.logger = logger
         self.plot = plot
@@ -49,8 +49,8 @@ class Trainer:
         pathlib.Path(checkpoint_path).mkdir(exist_ok=False)
         self.model.save(os.path.join(checkpoint_path, "model.pt"))
         torch.save(self.optimizer.state_dict(), os.path.join(checkpoint_path, "optimizer.pt"))
-        if self.optim_schedular:
-            torch.save(self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
+        if self.optim_scheduler:
+            torch.save(self.optim_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
         if self.print_eval:
@@ -117,9 +117,6 @@ class Trainer:
             raise Exception("Not running training as start_iter >= total training iterations")
 
         max_it_time = 0.0
-        # pbar = tqdm(range(n_iterations - start_iter))
-        # for pbar_iter in pbar:
-        #     i = pbar_iter + start_iter + 1
         k, epoch, next_epoch = 0, 0, True  # Used for Maximum Likelihood (forward KL) training.
         target_dist = self.model.target_distribution
 
@@ -138,8 +135,10 @@ class Trainer:
             it_start_time = time()
             self.optimizer.zero_grad()
 
+
             if self.model.loss_type == "forward_kl":
-                # 'z' here represents that the data has already been transformed to internal coordinates, rather than
+                # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
+                # 'i' here represents that the data has already been transformed to internal coordinates, rather than
                 #  Cartesian. This is what we feed into the flow.
                 train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
@@ -150,6 +149,7 @@ class Trainer:
                     train_data = train_data[permutation]
                     train_logdet_xi = train_logdet_xi[permutation]
                 i_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
+                # Loss (log likelihood slash forward KL divergence) on this batch
                 flow_loss = self.model.loss(i_batch)
                 transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
                 loss = flow_loss + transform_loss
@@ -161,8 +161,11 @@ class Trainer:
                     k += 1
                     next_epoch = False
             else:
+                # Not doing MD training here.
+                # Loss function generates samples from the Flow and computes the loss value internally.
                 loss = self.model.loss(batch_size)
 
+            # Update parameters
             if not torch.isnan(loss) and not torch.isinf(loss):
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
@@ -170,8 +173,8 @@ class Trainer:
                     self.optimizer.step()
                 else:
                     warnings.warn("Encountered inf grad norm!")
-                if self.optim_schedular and (i + 1) % self.lr_step == 0:
-                    self.optim_schedular.step()
+                if self.optim_scheduler and (i + 1) % self.lr_step == 0:
+                    self.optim_scheduler.step()
             else:
                 warnings.warn("NaN loss encountered!")
 
@@ -189,7 +192,6 @@ class Trainer:
             loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"
             if "ess_ais" in info.keys():
                 loss_str += f" ess base: {info['ess_base']:.4f}, ess ais: {info['ess_ais']:.4f}"
-            # pbar.set_description(loss_str)
             if i % 10 == 0:
                 print(loss_str)
 
@@ -210,8 +212,6 @@ class Trainer:
             if tlimit is not None:
                 time_past = (time() - start_time) / 3600
                 if (time_past + max_it_time / 3600) > tlimit:
-                    # self.perform_eval(i, eval_batch_size, batch_size)
-                    # self.make_and_save_plots(i, save)
                     if i not in checkpoint_iter:
                         self.save_checkpoint(i)
                     self.logger.close()

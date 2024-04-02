@@ -13,7 +13,7 @@ from fab.core import FABModel
 from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
 
-lr_scheduler = Any  # a learning rate schedular from torch.optim.lr_scheduler
+lr_scheduler = Any  # a learning rate scheduler from torch.optim.lr_scheduler
 Plotter = Callable[[FABModel], List[plt.Figure]]
 
 
@@ -27,7 +27,7 @@ class PrioritisedBufferTrainer:
         buffer: PrioritisedReplayBuffer,
         alpha: float,
         n_batches_buffer_sampling: int = 2,
-        optim_schedular: Optional[lr_scheduler] = None,
+        optim_scheduler: Optional[lr_scheduler] = None,
         logger: Logger = ListLogger(),
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
@@ -46,7 +46,7 @@ class PrioritisedBufferTrainer:
         self.model.annealed_importance_sampler.p_target = False
 
         self.optimizer = optimizer
-        self.optim_schedular = optim_schedular
+        self.optim_scheduler = optim_scheduler
         self.lr_step = lr_step
         self.logger = logger
         self.plot = plot
@@ -69,8 +69,8 @@ class PrioritisedBufferTrainer:
         self.model.save(os.path.join(checkpoint_path, "model.pt"))
         torch.save(self.optimizer.state_dict(), os.path.join(checkpoint_path, "optimizer.pt"))
         self.buffer.save(os.path.join(checkpoint_path, "buffer.pt"))
-        if self.optim_schedular:
-            torch.save(self.optim_schedular.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
+        if self.optim_scheduler:
+            torch.save(self.optim_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
         if self.warmup_scheduler:
             torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
 
@@ -213,8 +213,8 @@ class PrioritisedBufferTrainer:
                         self.optimizer.step()
                     else:
                         print(f"nan grad norm in replay step (batch size: {batch_size}")
-                    if self.optim_schedular and (i + 1) % self.lr_step == 0:
-                        self.optim_schedular.step()
+                    if self.optim_scheduler and (i + 1) % self.lr_step == 0:
+                        self.optim_scheduler.step()
                 else:
                     print(f"nan loss in replay step (batch size: {batch_size}")
 
