@@ -75,8 +75,15 @@ class PrioritisedBufferTrainer:
             torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
 
     def make_and_save_plots(self, i, save):
-        plot_only_md_energies = True if i == 0 else False  # Only plot pre-training.
-        figures = self.plot(self.model, plot_only_md_energies)
+        if hasattr(self.model.target_distribution, "plot_marginal_hists"):
+            plot_dict = {
+                "plot_md_energies": (i == 0 and self.model.target_distribution.plot_MD_energies),
+                "plot_marginal_hists": self.model.target_distribution.plot_marginal_hists,
+            }
+            figures = self.plot(self.model, plot_dict)
+        else:
+            figures = self.plot(self.model)
+
         for j, figure in enumerate(figures):
             if save:
                 if isinstance(self.logger, WandbLogger):

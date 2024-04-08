@@ -166,7 +166,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
     device: str, device to use for computation.
     logger: Logger, logger object for logging.
     save_dir: str, directory to save metrics and plots.
-    plot_MD_energies: bool, whether to plot the energies of the MD data as a sanity check. Used for debugging.
+    plot_MD_energies: bool, whether to plot the energies of the MD data as a sanity check. Mostly used for debugging.
+    plot_marginal_hists: bool, whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for
+        debugging.
     external_constraints: bool, whether to use external force constraints for keeping the system in place.
     internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
         or "none". Should be "none" during training, since otherwise the energy of flow samples cannot be properly
@@ -193,6 +195,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         logger: Logger = None,
         save_dir: Optional[str] = None,
         plot_MD_energies: bool = False,
+        plot_marginal_hists: bool = False,
         external_constraints: bool = True,
         internal_constraints: str = "none",
         rigidwater: bool = False,
@@ -208,6 +211,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.device = device
 
         self.plot_MD_energies = plot_MD_energies
+        self.plot_marginal_hists = plot_marginal_hists
 
         self.logger = logger
         self.save_dir = save_dir

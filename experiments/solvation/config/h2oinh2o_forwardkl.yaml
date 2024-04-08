@@ -11,7 +11,7 @@ hydra:
 
 target:                               # Properties of molecular system
   solvent: water
-  dim: 27  # 18  45                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 81  # 18 27  45 81                            # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
@@ -88,6 +88,7 @@ evaluation:
   eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
   print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
+  plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging.
   n_plots: 50                         # number of times we visualise the model throughout training.
   n_eval: 500  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)

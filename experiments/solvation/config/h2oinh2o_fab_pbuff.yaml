@@ -95,6 +95,7 @@ evaluation:
   eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
   print_eval: false                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
+  plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging. Expensive to compute.
   n_plots: 50                         # number of times we visualise the model throughout training.
   n_eval: 500  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
