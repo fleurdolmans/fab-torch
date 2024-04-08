@@ -27,16 +27,18 @@ from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
     def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
         figs = []
+        R, T = 8.314e-3, target.temperature
+
+        if target.eval_mode == "val":
+            target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
+        elif target.eval_mode == "test":
+            target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
+
         # Plot energies of the MD data as a sanity check if desired.
         if plot_dict["plot_md_energies"]:
-            if target.eval_mode == "val":
-                target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
-            elif target.eval_mode == "test":
-                target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
-
             prob, jac = target.log_prob_and_jac(target_data_i)
             energy = -1 * (prob - jac).cpu()
-            energy_in_kJ_per_mol = energy * 0.008314 * target.temperature  # R = 8.314 J/(mol K)
+            energy_in_kJ_per_mol = energy * R * target.temperature  # R = 8.314 J/(mol K)
             fig = plt.figure(figsize=(8, 5))
             plt.plot(list(range(len(target_data_i))), energy_in_kJ_per_mol)
             plt.xlabel("MD sample index")
@@ -109,25 +111,29 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             figs.append(fig)
 
         # RDF of flow samples vs MD samples
-        # num_flow_samples = 1000
-        # with torch.no_grad():
-        #     flow_samples = fab_model.flow.sample((num_flow_samples,))
+        num_flow_samples = 1000
+        with torch.no_grad():
+            flow_samples = fab_model.flow.sample((num_flow_samples,))
         # Distance between primary solute atom and solvent water oxygens.
         # Assumes triatomic solute and water solvent.
         flow_samples_r_oxygen = F.softplus(flow_samples[:, 3::9]).flatten().cpu().numpy()
         md_samples_r_oxygen = F.softplus(target_data_i[:, 3::9]).flatten().cpu().numpy()
         # Potential energy evaluation of flow samples vs MD samples.
         # To obtain energy of Cartesian system: subtract log det jacobian from logprob.
-        R, T = 8.314e-3, target.temperature
         flow_samples_boltz_logprob, jac = target.p.log_prob_and_jac(flow_samples)
         flow_samples_energy = -1 * (flow_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
         md_samples_boltz_logprob, jac = target.p.log_prob_and_jac(target_data_i)
         md_samples_energy = -1 * (md_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
 
+        # TODO: For the 8 solvent molecules system, there seems to be one sample in every flow generation that has
+        #  2.5e8 kJ/mol energy and 1.8nm RDF distance. This is likely a numerical issue? Fix this.
         fig = plt.figure(figsize=(12, 5))
         plt.subplot(1, 2, 1)
-        hist_range = (0, 1.1)
-        nbins = int((hist_range[1] - hist_range[0]) * 100 + 1)
+        hist_range = (
+            min(min(flow_samples_r_oxygen), min(md_samples_r_oxygen)),
+            max(max(flow_samples_r_oxygen), max(md_samples_r_oxygen))
+        )  # nm
+        nbins = 101
         plt.hist(flow_samples_r_oxygen, bins=nbins, range=hist_range, density=True, label="Flow RDF", alpha=0.4)
         plt.hist(md_samples_r_oxygen, bins=nbins, range=hist_range, density=True, label="MD RDF", alpha=0.4)
         plt.ylabel("density")
@@ -139,7 +145,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             min(min(flow_samples_energy), min(md_samples_energy)),
             max(max(flow_samples_energy), max(md_samples_energy))
         )  # kJ / mol
-        nbins = int((hist_range[1] - hist_range[0]) + 1)
+        nbins = 101
         plt.hist(flow_samples_energy, bins=nbins, range=hist_range, density=True, label="Flow energy", alpha=0.4)
         plt.hist(md_samples_energy, bins=nbins, range=hist_range, density=True, label="MD energy", alpha=0.4)
         plt.ylabel("density")
