@@ -124,10 +124,6 @@ class TriatomicInWaterSys(TestSystem):
             raise ValueError("Must provide either a .pdb file or .inpcrd and .prmtop files.")
 
         if external_constraints:
-            # add origin restraint for the central water (156)
-            # this should actually be a rigid constraint!
-            # constraints require dummy atoms
-            # but topology doesn't play well. Will check tomorrow
             # This keeps the first atom around the origin.
             center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
             center.addGlobalParameter("k", 100000.0)
@@ -135,7 +131,7 @@ class TriatomicInWaterSys(TestSystem):
             self.system.addForce(center)
             center.addParticle(0, [])
 
-            # add spherical restraint to hold the droplet
+            # Add spherical restraint to hold the droplet
             force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
             force.addGlobalParameter("w", 100.0)
             self.system.addForce(force)
@@ -283,8 +279,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
 
-        # Transform MD data to internal coordinates (X --> Z): these are the coordinates that we feed into the flow on
-        #  the output end.
+        # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
+        #  its output end.
         if self.train_data_x is not None:
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(

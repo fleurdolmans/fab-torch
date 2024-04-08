@@ -24,7 +24,7 @@ from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 # use_gpu = cfg.training.use_gpu,
 
 
-def setup_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
+def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
     def plot(fab_model: FABModel, plot_only_md_energies: bool) -> List[plt.Figure]:
         figs = []
         # Plot energies of the MD data as a sanity check if desired.
@@ -176,7 +176,7 @@ def setup_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Pl
                 )
                 plt.hist(
                     flow_samples_kl[:, dim], bins=nbins, range=hist_range, density=True, label="Flow samples", alpha=0.4
-                         )
+                )
                 if dim in r_dims:
                     label, unit = "r", "in flow units"
                     plt.title(f"r({dim_labels[dim]})")
@@ -197,6 +197,48 @@ def setup_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Pl
 
             plt.tight_layout()
             figs.append(fig)
+
+            # RDF of flow samples vs MD samples
+            num_flow_samples = 10000
+            flow_samples = fab_model.flow.sample((num_flow_samples,))
+            # Distance between primary solute atom and solvent water oxygens.
+            # Assumes triatomic solute and water solvent.
+            flow_samples_r_oxygen = F.softplus(flow_samples[:, 3::9]).flatten().cpu().numpy()
+            md_samples_r_oxygen = F.softplus(target_data_i[:, 3::9]).flatten().cpu().numpy()
+            # Potential energy evaluation of flow samples vs MD samples.
+            # To obtain energy of Cartesian system: subtract log det jacobian from logprob.
+            R, T = 8.314e-3, target.temperature
+            flow_samples_boltz_logprob, jac = target.p.log_prob_and_jac(flow_samples)
+            flow_samples_energy = -1 * (flow_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
+            md_samples_boltz_logprob, jac = target.p.log_prob_and_jac(target_data_i)
+            md_samples_energy = -1 * (md_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
+
+            fig = plt.figure(figsize=(12, 5))
+            plt.subplot(1, 2, 1)
+            hist_range = (0, 1.1)
+            nbins = int((hist_range[1] - hist_range[0]) * 100 + 1)
+            plt.hist(flow_samples_r_oxygen, bins=nbins, range=hist_range, density=True, label="Flow RDF", alpha=0.4)
+            plt.hist(md_samples_r_oxygen, bins=nbins, range=hist_range, density=True, label="MD RDF", alpha=0.4)
+            plt.ylabel("density")
+            plt.xlabel("r (nm)")
+            plt.title("RDF of flow samples vs MD samples")
+            plt.legend()
+            plt.subplot(1, 2, 2)
+            hist_range = (
+                min(min(flow_samples_energy), min(md_samples_energy)),
+                max(max(flow_samples_energy), max(md_samples_energy))
+            )  # kJ / mol
+            nbins = int((hist_range[1] - hist_range[0]) + 1)
+            plt.hist(flow_samples_energy, bins=nbins, range=hist_range, density=True, label="Flow energy", alpha=0.4)
+            plt.hist(md_samples_energy, bins=nbins, range=hist_range, density=True, label="MD energy", alpha=0.4)
+            plt.ylabel("density")
+            plt.xlabel("energy (kJ/mol)")
+            plt.title("Potential energy of flow samples vs MD samples")
+            plt.legend()
+
+            plt.tight_layout()
+            figs.append(fig)
+
         return figs
     return plot
 
@@ -263,7 +305,9 @@ def _run(cfg: DictConfig) -> None:
         target = target.double()
     # Setup model and start training
     # Will grab logger and save_dir from target, if target has those defined.
-    setup_trainer_and_run_flow(cfg, setup_h2o_plotter, target)
+    # TODO: Plotter assumes a triatomic solute in water solvent. Also that the transformation from flow output coords to
+    #  internal coordinates is the same as in the target distribution (e.g., for r it's just a softplus).
+    setup_trainer_and_run_flow(cfg, setup_triatomic_in_h2o_plotter, target)
 
 # Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="h2oinh2o_forwardkl.yaml", version_base="1.1")

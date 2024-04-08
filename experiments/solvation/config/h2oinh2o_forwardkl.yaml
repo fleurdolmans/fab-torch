@@ -20,8 +20,8 @@ target:                               # Properties of molecular system
   solute_inpcrd_path: null                                            # Filepath to solvent inpcrd
   solute_prmtop_path: null                                            # Filepath to solvent prmtop
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
-  val_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_every10_ecTrue_ichbonds_rwTrue.h5
+  train_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
+  val_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force constraints for keeping the system in place.
@@ -95,9 +95,9 @@ evaluation:
 
 
 logger:
-#  wandb:
-#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
-#    project: H2O_in_H2O
-#    entity: timsey
-  pandas_logger:
-    save_period: 100                  # how often to save the pandas dataframe as a csv
+  wandb:
+    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+    project: H2O_in_H2O
+    entity: timsey
+#  pandas_logger:
+#    save_period: 100                  # how often to save the pandas dataframe as a csv
