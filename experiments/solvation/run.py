@@ -120,15 +120,18 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         md_samples_r_oxygen = F.softplus(target_data_i[:, 3::9]).flatten().cpu().numpy()
         # Potential energy evaluation of flow samples vs MD samples.
         # To obtain energy of Cartesian system: subtract log det jacobian from logprob.
-        flow_samples_boltz_logprob, jac = target.p.log_prob_and_jac(flow_samples)
-        flow_samples_energy = -1 * (flow_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
-        md_samples_boltz_logprob, jac = target.p.log_prob_and_jac(target_data_i)
-        md_samples_energy = -1 * (md_samples_boltz_logprob - jac).detach().cpu().numpy() * R * T
+        flow_samples_boltz_logprob, flow_jac = target.p.log_prob_and_jac(flow_samples)
+        flow_samples_energy = -1 * (flow_samples_boltz_logprob - flow_jac).detach().cpu().numpy() * R * T
+        md_samples_boltz_logprob, md_jac = target.p.log_prob_and_jac(target_data_i)
+        md_samples_energy = -1 * (md_samples_boltz_logprob - md_jac).detach().cpu().numpy() * R * T
 
-        # TODO: For the 8 solvent molecules system, there seems to be one sample in every flow generation that has
-        #  2.5e8 kJ/mol energy and 1.8nm RDF distance. This is likely a numerical issue? Fix this.
-        fig = plt.figure(figsize=(12, 5))
-        plt.subplot(1, 2, 1)
+        # TODO: There seems to be one sample in every flow generation that has 2.5e8 kJ/mol energy.
+        #  Both for 8mol water and 3mol so2.
+        #  This is likely a numerical issue? Fix this.
+        #  Actually, for 3mol so2 this crazy peak moves towards 1e8 and then 3-8e6 after about 800-1000 iterations.
+        # md_samples_boltz_logprob[:3], md_jac[:3], md_samples_energy[:3], R*T, flow_samples_boltz_logprob[:3], flow_jac[:3], flow_samples_energy[:3]
+        fig = plt.figure(figsize=(17, 5))
+        plt.subplot(1, 3, 1)
         hist_range = (
             min(min(flow_samples_r_oxygen), min(md_samples_r_oxygen)),
             max(max(flow_samples_r_oxygen), max(md_samples_r_oxygen))
@@ -140,7 +143,17 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.xlabel("r (nm)")
         plt.title("RDF of flow samples vs MD samples")
         plt.legend()
-        plt.subplot(1, 2, 2)
+
+        plt.subplot(1, 3, 2)
+        hist_range = (min(md_samples_energy) - 1, max(md_samples_energy) + 1)  # kJ / mol
+        plt.hist(flow_samples_energy, bins=nbins, range=hist_range, density=True, label="Flow energy", alpha=0.4)
+        plt.hist(md_samples_energy, bins=nbins, range=hist_range, density=True, label="MD energy", alpha=0.4)
+        plt.ylabel("density")
+        plt.xlabel("energy (kJ/mol)")
+        plt.title("Potential energy of flow samples vs MD samples (truncated)")
+        plt.legend()
+
+        plt.subplot(1, 3, 3)
         hist_range = (
             min(min(flow_samples_energy), min(md_samples_energy)),
             max(max(flow_samples_energy), max(md_samples_energy))
@@ -150,7 +163,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.hist(md_samples_energy, bins=nbins, range=hist_range, density=True, label="MD energy", alpha=0.4)
         plt.ylabel("density")
         plt.xlabel("energy (kJ/mol)")
-        plt.title("Potential energy of flow samples vs MD samples")
+        plt.title("Potential energy of flow samples vs MD samples (full)")
         plt.legend()
 
         plt.tight_layout()

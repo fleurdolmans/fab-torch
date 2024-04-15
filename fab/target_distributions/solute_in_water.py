@@ -408,6 +408,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
         summary_dict = {}
         # Load MD data for evaluation
         if self.eval_mode == "val":  # TODO: batch this?
+            # Note that x (Cartesian) data is NOT centered!
+            #  To center X data, run self.coordinate_transform.setup_coordinate_system(X_DATA)[0], or run the inverse
+            #   coordinate transform on the I (internal coordinate) data.
             target_data_x = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
             target_data_i = self.val_data_i.reshape(-1, self.internal_dim).to(self.device)
             target_logdet_xi = self.val_logdet_xi.to(self.device)

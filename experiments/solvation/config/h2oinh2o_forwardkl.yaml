@@ -11,7 +11,7 @@ hydra:
 
 target:                               # Properties of molecular system
   solvent: water
-  dim: 81  # 18 27  45 81                            # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 27  # 18 27  45 81                            # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
@@ -97,9 +97,9 @@ evaluation:
 
 
 logger:
-  wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
-    project: H2O_in_H2O
-    entity: timsey
-#  pandas_logger:
-#    save_period: 100                  # how often to save the pandas dataframe as a csv
+#  wandb:
+#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+#    project: H2O_in_H2O
+#    entity: timsey
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv

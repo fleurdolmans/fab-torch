@@ -97,9 +97,9 @@ evaluation:
 
 
 logger:
-  wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
-    project: SO2_in_H2O
-    entity: timsey
-#  pandas_logger:
-#    save_period: 100                  # how often to save the pandas dataframe as a csv
+#  wandb:
+#    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+#    project: SO2_in_H2O
+#    entity: timsey
+  pandas_logger:
+    save_period: 100                  # how often to save the pandas dataframe as a csv
