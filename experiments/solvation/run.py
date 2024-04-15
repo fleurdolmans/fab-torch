@@ -196,6 +196,7 @@ def _run(cfg: DictConfig) -> None:
     if cfg.target.solvent == "water":
         target = SoluteInWater(
             solute_pdb_path=cfg.target.solute_pdb_path,
+            solute_xml_path=cfg.target.solute_xml_path,
             solute_inpcrd_path=cfg.target.solute_inpcrd_path,
             solute_prmtop_path=cfg.target.solute_prmtop_path,
             dim=cfg.target.dim,

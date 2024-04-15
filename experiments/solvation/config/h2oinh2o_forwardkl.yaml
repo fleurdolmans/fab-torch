@@ -17,6 +17,7 @@ target:                               # Properties of molecular system
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18  # 1                       # Int, number of threads to be used, number of cores if null
   solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb       # Filepath to solvent pdb
+  solute_xml_path: null                                               # Filepath to solvent xml
   solute_inpcrd_path: null                                            # Filepath to solvent inpcrd
   solute_prmtop_path: null                                            # Filepath to solvent prmtop
   # Filepaths to load samples from

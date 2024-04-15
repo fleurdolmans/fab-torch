@@ -37,8 +37,12 @@ class TriatomicInWaterSys(TestSystem):
     Parameters
     ----------
     solute_pdb_path: str, path to solute pdb file. If provided, incprd and prmtop files will be ignored.
-    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided.
-    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided.
+    solute_xml_path: str, path to solute xml file. If provided, this forcefield will be used in addition to the
+        base forcefield (tip3p).
+    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided. Usage is currently not
+        fully implemented.
+    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided. Usage is currently not
+        fully implemented.
     dim: int, dimensionality of system (num_atoms x 3).
     external_constraints: bool, whether to use external force constraints for keeping the system in place.
     internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
@@ -50,6 +54,7 @@ class TriatomicInWaterSys(TestSystem):
     def __init__(
             self,
             solute_pdb_path: str,
+            solute_xml_path: str,
             solute_inpcrd_path: str,
             solute_prmtop_path: str,
             dim: int,
@@ -60,9 +65,15 @@ class TriatomicInWaterSys(TestSystem):
     ):
         TestSystem.__init__(self, **kwargs)
         # http://docs.openmm.org/latest/userguide/application/02_running_sims.html
-        # Two methods: either create system from pdb and FF with forcefield.createSystems() or use prmtop and crd files,
-        #  as in the openmmtools testsystems examples:
-        #  https://openmmtools.readthedocs.io/en/stable/_modules/openmmtools/testsystems.html#AlanineDipeptideImplicit
+        self.solute_pdb_path = solute_pdb_path
+        self.solute_xml_path = solute_xml_path
+        self.solute_inpcrd_path = solute_inpcrd_path
+        self.solute_prmtop_path = solute_prmtop_path
+        self.dim = dim
+        self.external_constraints = external_constraints
+        self.internal_constraints = internal_constraints
+        self.rigidwater = rigidwater
+
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
@@ -82,8 +93,12 @@ class TriatomicInWaterSys(TestSystem):
             modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
             forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
+            if solute_xml_path is not None:
+                forcefield.loadFile(solute_xml_path)
             # Add solvent
-            if self.num_solvent_molecules > 0:  # TODO: padding=1.0 * unit.nanometers ?
+            if self.num_solvent_molecules > 0:
+                # TODO: set padding=1.0 * unit.nanometers ?
+                # TODO: set boxSize=mm.Vec3(3.105, 3.105, 3.105) * unit.nanometers ?
                 modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
             # Create system
             self.system = forcefield.createSystem(  # Create system from forcefield
@@ -94,34 +109,24 @@ class TriatomicInWaterSys(TestSystem):
                 rigidWater=rigidwater,  # `False` for flexible H2O
             )
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
-            # Input coordinates
-            inpcrd = app.AmberInpcrdFile(solute_inpcrd_path)
-            # Parameters/topology
-            prmtop = app.AmberPrmtopFile(solute_prmtop_path)
-            # Create modeller
-            modeller = app.Modeller(prmtop.topology, inpcrd.positions)
-            # Add solvent
-            solvent_forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
-            if self.num_solvent_molecules > 0:
-                modeller.addSolvent(solvent_forcefield, model='tip3p', numAdded=self.num_solvent_molecules)
-            # TODO:
+            # TODO: Not fully implemented!
             #  After adding solvent, the system can be created in two ways:
             #  1) Using the solventForceField.createSystem() method to ensure that the force field parameters are
             #     applied not only to the solute but also to the solvent.
             #  2) Using the .prmtop.createSystem() to ensure consistency with AMBER parameters.
             #  Neither works, because neither method uses a forcefield that contains parameters for both SO2 and H2O.
             #  Potential solution: create xml file that contains both forcefields. Or create AMBER system with solvent
-            #  molecules already present (latter is easier, but less flexible, because we have to predetermine the 
+            #  molecules already present (latter is easier, but less flexible, because we have to predetermine the
             #  number of solvent molecules).
-            self.system = prmtop.createSystem(  # Create system from prmtop/forcefield?
-                modeller.topology,
-                nonbondedMethod=app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometers,
-                constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
-                rigidWater=rigidwater,  # `False` for flexible H2O
-            )
+            # Input coordinates
+            inpcrd = app.AmberInpcrdFile(solute_inpcrd_path)
+            # Parameters/topology
+            prmtop = app.AmberPrmtopFile(solute_prmtop_path)
+            # Create modeller
+            modeller = app.Modeller(prmtop.topology, inpcrd.positions)
+            raise NotImplementedError("Using inpcrd+prmtop file is not fully implemented.")
         else:
-            raise ValueError("Must provide either a .pdb file or .inpcrd and .prmtop files.")
+            raise ValueError("Must provide either a .pdb file with optional .xml file, or .inpcrd and .prmtop files.")
 
         if external_constraints:
             # This keeps the first atom around the origin.
@@ -151,8 +156,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
     Parameters
     ----------
     solute_pdb_path: str, path to solute pdb file. If provided, incprd and prmtop files will be ignored.
-    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided.
-    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided.
+    solute_xml_path: str, path to solute xml file. If provided, this forcefield will be used in addition to the
+        base forcefield (tip3p).
+    solute_inpcrd_path: str, path to solute inpcrd file. Only used if pdb file is not provided. Usage is currently not
+        fully implemented.
+    solute_prmtop_path: str, path to solute prmtop file. Only used if pdb file is not provided. Usage is currently not
+        fully implemented.
     dim: int, dimensionality of system (num_atoms x 3).
     temperature: float, temperature of system in Kelvin.
     energy_cut: float, energy cut-off for Boltzmann distribution (logarithmic above this value).
@@ -179,6 +188,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
     def __init__(
         self,
         solute_pdb_path: str,
+        solute_xml_path: str,
         solute_inpcrd_path: str,
         solute_prmtop_path: str,
         dim: int = 3 * (3 + 3 * 8),
@@ -249,6 +259,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # Initialise system
         self.system = TriatomicInWaterSys(
             solute_pdb_path,
+            solute_xml_path,
             solute_inpcrd_path,
             solute_prmtop_path,
             self.cartesian_dim,

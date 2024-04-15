@@ -26,6 +26,7 @@ def run_md_sim(cfg: DictConfig):
     dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
     system = TriatomicInWaterSys(
         cfg.solute_pdb_path,
+        cfg.solute_xml_path,
         cfg.solute_inpcrd_path,
         cfg.solute_prmtop_path,
         dim,
