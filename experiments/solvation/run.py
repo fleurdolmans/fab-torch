@@ -208,16 +208,12 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         atom_types = [a[:1] for a in target.system.atoms]  # Take indices off the atom names
         color_list = [colours[atype] for atype in atom_types]
 
+        # Get plot limits from MD data
         dim = md_cartesian.shape[-1]
         md_reshaped = md_cartesian.reshape(-1, dim // 3, 3)
-
-        x_lim = (md_reshaped[:, :, 0].min(), md_reshaped[:, :, 0].max())
-        y_lim = (md_reshaped[:, :, 1].min(), md_reshaped[:, :, 1].max())
-        z_lim = (md_reshaped[:, :, 2].min(), md_reshaped[:, :, 2].max())
-        lim = (
-            np.floor(min(x_lim[0], y_lim[0], z_lim[0]) * 10) / 10.0,
-            np.ceil(max(x_lim[1], y_lim[1], z_lim[1]) * 10) / 10.0
-        )
+        x_lim = (np.floor(md_reshaped[:, :, 0].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 0].max() * 10) / 10.0)
+        y_lim = (np.floor(md_reshaped[:, :, 1].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 1].max() * 10) / 10.0)
+        z_lim = (np.floor(md_reshaped[:, :, 2].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 2].max() * 10) / 10.0)
 
         def subplot_molecular_system(ax, pos, energy, title_str):
             # print("H2 coords:", pos[2, :])
@@ -243,9 +239,9 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             ax.set_xlabel('x (nm)')
             ax.set_ylabel('y (nm)')
             ax.set_zlabel('z (nm)')
-            ax.set_xlim(lim)
-            ax.set_ylim(lim)
-            ax.set_zlim(lim)
+            ax.set_xlim(x_lim)
+            ax.set_ylim(y_lim)
+            ax.set_zlim(z_lim)
             ax.set_title(f"{title_str}: {energy:.3g} kJ/mol")
             ax.view_init(elev=30, azim=45)  # Rotate 90 degrees around the z-axis
             legend_elements = [
