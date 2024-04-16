@@ -15,7 +15,7 @@ target:                               # Properties of molecular system
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 1  # 1, 18                      # Int, number of threads to be used, number of cores if null
+  n_threads: 18  # 1, 18                      # Int, number of threads to be used, number of cores if null
   solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb       # Filepath to solvent pdb
   solute_xml_path: null                                               # Filepath to solvent xml
   solute_inpcrd_path: null                                            # Filepath to solvent inpcrd
@@ -50,7 +50,7 @@ flow:                                  # Properties of the flow model
   mixing: null                        # String, how features are mixed
 
 
-fab:
+fab:  # Just using loss_type and use_ais from this when doing forward KL training.
   loss_type: forward_kl               # Whether to use AIS, and type of loss for AIS. If not AIS, rest of args are only used for potential eval.
   use_ais: false                      # Whether to use AIS for evaluation still
   n_intermediate_distributions: 8     # Int, number of intermediate distributions
@@ -74,7 +74,7 @@ training:                             # Properties of the training procedure
   use_gpu: true
   use_64_bit: true
   lr: 5.e-4                           # Double, learning rate
-  wd: 0  #1.e-5                           # Double, regularization parameter
+  wd: 0.0  #1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
     type: cosine                      # String, kind of LR scheduler, can be exponential, cosine

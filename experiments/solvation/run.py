@@ -107,7 +107,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             figs.append(fig)
 
         # RDF of flow samples vs MD samples
-        num_flow_samples = 1000
+        num_flow_samples = 10000
+        # num_flow_samples = 1000
         # num_flow_samples = 100
         with torch.no_grad():
             flow_samples = fab_model.flow.sample((num_flow_samples,))
@@ -222,11 +223,11 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
                             [pos[i][2], pos[i + 2][2]], color='grey')
 
             # Draw the coordinate planes for debugging
-            plane_edges = [-1, 1]  # Just needs to be bigger than the xyz plot limits.
-            grid, grid = np.meshgrid(plane_edges, plane_edges)
-            ax.plot_surface(grid * 0, grid, grid, alpha=0.2, color="blue")
-            ax.plot_surface(grid, grid * 0, grid, alpha=0.2, color="blue")
-            ax.plot_surface(grid, grid, grid * 0, alpha=0.2, color="blue")
+            # plane_edges = [-0.4, 0.4]  # Just needs to be bigger than the xyz plot limits.
+            # xx, yy = np.meshgrid(plane_edges, plane_edges)
+            # ax.plot_surface(xx * 0, yy, yy, alpha=0.2, color="blue")
+            # ax.plot_surface(xx, yy * 0, yy, alpha=0.2, color="blue")
+            # ax.plot_surface(xx, yy, yy * 0, alpha=0.2, color="blue")
             # Adding labels
             ax.set_xlabel('x (nm)')
             ax.set_ylabel('y (nm)')
@@ -235,7 +236,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             ax.set_xlim(lim)
             ax.set_ylim(lim)
             ax.set_zlim(lim)
-            ax.set_title(f"{title_str}: {energy:.3g} KJ/mol")
+            ax.set_title(f"{title_str}: {energy:.3g} kJ/mol")
             ax.view_init(elev=30, azim=45)  # Rotate 90 degrees around the z-axis
             legend_elements = [
                 Patch(facecolor=colours[atype], edgecolor=colours[atype], label=atype)
@@ -248,13 +249,13 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         ax = fig.add_subplot(2, 3, 2, projection='3d')
         subplot_molecular_system(ax, low_positions[0].reshape(-1, 3), low_energies[0], "Lowest energy")
         ax = fig.add_subplot(2, 3, 3, projection='3d')
-        subplot_molecular_system(ax, high_positions[0].reshape(-1, 3), high_energies[0], "Highest energy")
+        subplot_molecular_system(ax, high_positions[0].reshape(-1, 3), high_energies[-1], "Highest energy")
         ax = fig.add_subplot(2, 3, 4, projection='3d')
         subplot_molecular_system(ax, md_positions[1].reshape(-1, 3), md_energies[1], "Last MD frame")
         ax = fig.add_subplot(2, 3, 5, projection='3d')
         subplot_molecular_system(ax, low_positions[1].reshape(-1, 3), low_energies[1], "Second lowest energy")
         ax = fig.add_subplot(2, 3, 6, projection='3d')
-        subplot_molecular_system(ax, high_positions[1].reshape(-1, 3), high_energies[1], "Second highest energy")
+        subplot_molecular_system(ax, high_positions[1].reshape(-1, 3), high_energies[0], "Second highest energy")
         plt.tight_layout()
         figs.append(fig)
 
