@@ -208,8 +208,19 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         atom_types = [a[:1] for a in target.system.atoms]  # Take indices off the atom names
         color_list = [colours[atype] for atype in atom_types]
 
+        dim = md_cartesian.shape[-1]
+        md_reshaped = md_cartesian.reshape(-1, dim // 3, 3)
+
+        x_lim = (md_reshaped[:, :, 0].min(), md_reshaped[:, :, 0].max())
+        y_lim = (md_reshaped[:, :, 1].min(), md_reshaped[:, :, 1].max())
+        z_lim = (md_reshaped[:, :, 2].min(), md_reshaped[:, :, 2].max())
+        lim = (
+            np.floor(min(x_lim[0], y_lim[0], z_lim[0]) * 10) / 10.0,
+            np.ceil(max(x_lim[1], y_lim[1], z_lim[1]) * 10) / 10.0
+        )
+
         def subplot_molecular_system(ax, pos, energy, title_str):
-            print("H2 coords:", pos[2, :])
+            # print("H2 coords:", pos[2, :])
             ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=color_list, label=atom_types)
             for i in range(0, len(pos) - 2, 3):  # Draw bond lines
                 if i + 2 < len(pos):  # Ensure we don't go out of bounds
@@ -232,7 +243,6 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             ax.set_xlabel('x (nm)')
             ax.set_ylabel('y (nm)')
             ax.set_zlabel('z (nm)')
-            lim = [-0.3, 0.3]
             ax.set_xlim(lim)
             ax.set_ylim(lim)
             ax.set_zlim(lim)
