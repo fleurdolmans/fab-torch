@@ -136,10 +136,8 @@ class Trainer:
                 print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
             if i % 100 == 1:
                 print(f"  Iteration: {i}/{n_iterations}")
-            iter_start = time()
             it_start_time = time()
             self.optimizer.zero_grad()
-
 
             if self.model.loss_type == "forward_kl":
                 # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
@@ -157,6 +155,8 @@ class Trainer:
                 # Loss (log likelihood slash forward KL divergence) on this batch
                 flow_loss = self.model.loss(i_batch)
                 transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
+                # TODO: Maybe add a term for OH bond lengths and angles? Bit strange, because we will no longer be
+                #  doing likelihood minimisation exactly, but the optimum does not change, so it might be okay.
                 loss = flow_loss + transform_loss
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points

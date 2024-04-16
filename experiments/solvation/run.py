@@ -2,6 +2,7 @@ import os
 import json
 import pathlib
 import hydra
+import warnings
 from omegaconf import DictConfig, OmegaConf
 from typing import List
 
@@ -10,19 +11,14 @@ import torch.nn.functional as F
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 from fab import FABModel
 from fab.target_distributions.solute_in_water import SoluteInWater
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 
-# Removed params:
-# dim = cfg.target.dim,
-# n_mixes = cfg.target.n_mixes,
-# loc_scaling = cfg.target.loc_scaling,
-# log_var_scaling = cfg.target.log_var_scaling,
-# use_gpu = cfg.training.use_gpu,
-
+SAVE_DIR = None
 
 def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
     def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
@@ -112,6 +108,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
 
         # RDF of flow samples vs MD samples
         num_flow_samples = 1000
+        # num_flow_samples = 100
         with torch.no_grad():
             flow_samples = fab_model.flow.sample((num_flow_samples,))
         # Distance between primary solute atom and solvent water oxygens.
@@ -169,6 +166,98 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.tight_layout()
         figs.append(fig)
 
+        # Potential alternatives: plot with MDtraj+NGLView or RDKit.
+        # from simtk.openmm import app
+        # from rdkit import Chem
+        # from rdkit.Chem import Draw
+        # import nglview
+        # import mdtraj
+        # Setup tmp folder for saving temporary pdb files.
+        # tmp_folder = pathlib.Path(SAVE_DIR) / "tmp"
+        # tmp_folder.mkdir(parents=True, exist_ok=True)
+        # tmp_file = tmp_folder / f"tmp{i}.pdb"
+        # app.PDBFile.writeFile(target.system.topology, pos.reshape(-1, 3), open(tmp_file, 'w'))
+        # Using MDtraj + NGLView to visualise the high energy states.
+        # traj = mdtraj.load(str(tmp_file))
+        # view = nglview.show_mdtraj(traj)
+        # view.add_representation("ball+stick")
+        # figs.append(view)
+        # Using RDKit
+        # molecule = Chem.MolFromPDBFile(tmp_file, removeHs=False)
+        # img = Draw.MolToImage(molecule)
+        # figs.append(img)
+        sorted_energy = flow_samples_energy.argsort()
+        high_energy_inds = sorted_energy[-2:]
+        low_energy_inds = sorted_energy[:2]
+        with torch.no_grad():
+            flow_samples_cartesian = target.coordinate_transform.forward(flow_samples)[0].cpu().numpy()
+        high_positions = flow_samples_cartesian[high_energy_inds, ...]
+        low_positions = flow_samples_cartesian[low_energy_inds, ...]
+        high_energies = flow_samples_energy[high_energy_inds]
+        low_energies = flow_samples_energy[low_energy_inds]
+        md_inds = [0, -1]
+        with torch.no_grad():
+            md_cartesian = target.coordinate_transform.forward(target_data_i)[0].cpu().numpy()
+        md_positions = md_cartesian[md_inds]
+        md_energies = md_samples_energy[md_inds]
+
+        fig = plt.figure(figsize=(12, 10))
+        # Setting up the color map based on atom type
+        colours = {'S': 'blue', 'O': 'red', 'H': 'black'}  # Define more colors if you have more atom types
+        atom_types = [a[:1] for a in target.system.atoms]  # Take indices off the atom names
+        color_list = [colours[atype] for atype in atom_types]
+
+        def subplot_molecular_system(ax, pos, energy, title_str):
+            print("H2 coords:", pos[2, :])
+            ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=color_list, label=atom_types)
+            for i in range(0, len(pos) - 2, 3):  # Draw bond lines
+                if i + 2 < len(pos):  # Ensure we don't go out of bounds
+                    # Draw line from atom i to i+1
+                    ax.plot([pos[i][0], pos[i + 1][0]],
+                            [pos[i][1], pos[i + 1][1]],
+                            [pos[i][2], pos[i + 1][2]], color='grey')
+                    # Draw line from atom i to i+2
+                    ax.plot([pos[i][0], pos[i + 2][0]],
+                            [pos[i][1], pos[i + 2][1]],
+                            [pos[i][2], pos[i + 2][2]], color='grey')
+
+            # Draw the coordinate planes for debugging
+            plane_edges = [-1, 1]  # Just needs to be bigger than the xyz plot limits.
+            grid, grid = np.meshgrid(plane_edges, plane_edges)
+            ax.plot_surface(grid * 0, grid, grid, alpha=0.2, color="blue")
+            ax.plot_surface(grid, grid * 0, grid, alpha=0.2, color="blue")
+            ax.plot_surface(grid, grid, grid * 0, alpha=0.2, color="blue")
+            # Adding labels
+            ax.set_xlabel('x (nm)')
+            ax.set_ylabel('y (nm)')
+            ax.set_zlabel('z (nm)')
+            lim = [-0.3, 0.3]
+            ax.set_xlim(lim)
+            ax.set_ylim(lim)
+            ax.set_zlim(lim)
+            ax.set_title(f"{title_str}: {energy:.3g} KJ/mol")
+            ax.view_init(elev=30, azim=45)  # Rotate 90 degrees around the z-axis
+            legend_elements = [
+                Patch(facecolor=colours[atype], edgecolor=colours[atype], label=atype)
+                for atype in colours if atype in atom_types
+            ]
+            ax.legend(handles=legend_elements, loc='upper right')
+
+        ax = fig.add_subplot(2, 3, 1, projection='3d')
+        subplot_molecular_system(ax, md_positions[0].reshape(-1, 3), md_energies[0], "First MD frame")
+        ax = fig.add_subplot(2, 3, 2, projection='3d')
+        subplot_molecular_system(ax, low_positions[0].reshape(-1, 3), low_energies[0], "Lowest energy")
+        ax = fig.add_subplot(2, 3, 3, projection='3d')
+        subplot_molecular_system(ax, high_positions[0].reshape(-1, 3), high_energies[0], "Highest energy")
+        ax = fig.add_subplot(2, 3, 4, projection='3d')
+        subplot_molecular_system(ax, md_positions[1].reshape(-1, 3), md_energies[1], "Last MD frame")
+        ax = fig.add_subplot(2, 3, 5, projection='3d')
+        subplot_molecular_system(ax, low_positions[1].reshape(-1, 3), low_energies[1], "Second lowest energy")
+        ax = fig.add_subplot(2, 3, 6, projection='3d')
+        subplot_molecular_system(ax, high_positions[1].reshape(-1, 3), high_energies[1], "Second highest energy")
+        plt.tight_layout()
+        figs.append(fig)
+
         return figs
     return plot
 
@@ -180,12 +269,14 @@ def _run(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.training.seed)  # seed of 0 for setup.
 
     # Gets output dir that Hydra created: defined in hydra.run.dir in the config.
-    save_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)
+    global SAVE_DIR  # Necessary for plotting functions to save to the correct directory.
+    SAVE_DIR = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+
+    pathlib.Path(SAVE_DIR).mkdir(parents=True, exist_ok=True)
     # Save config dict to output dir as yaml and json.
-    with open(os.path.join(save_dir, "config.yaml"), "w") as f:
+    with open(os.path.join(SAVE_DIR, "config.yaml"), "w") as f:
         OmegaConf.save(cfg, f)
-    with open(os.path.join(save_dir, "config.json"), "w") as f:
+    with open(os.path.join(SAVE_DIR, "config.json"), "w") as f:
         json.dump(OmegaConf.to_container(cfg, resolve=True), f, indent=4)
 
     # Example structure of hydra.run.dir:
@@ -195,7 +286,7 @@ def _run(cfg: DictConfig) -> None:
     # - wandb: Wandb logging files, see below.
 
     # Setup logger: do that here, so the logger can be passed to the target distribution in case it needs to log stuff.
-    logger = setup_logger(cfg, save_dir)
+    logger = setup_logger(cfg, SAVE_DIR)
     # Example of structure of wandb/run-YYYMMDD_HHMMSS-RUN_ID/files/ dir inside the hydra.run.dir.
     # - config.yaml: Contains Hydra config.
     # - config.txt: Contains Hydra config in plaintext.
@@ -223,7 +314,7 @@ def _run(cfg: DictConfig) -> None:
             test_samples_path=cfg.target.test_samples_path,
             eval_mode=cfg.evaluation.eval_mode,
             logger=logger,
-            save_dir=save_dir,
+            save_dir=SAVE_DIR,
             plot_MD_energies=cfg.evaluation.plot_MD_energies,
             plot_marginal_hists=cfg.evaluation.plot_marginal_hists,
             external_constraints=cfg.target.external_constraints,
