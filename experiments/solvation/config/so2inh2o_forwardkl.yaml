@@ -21,8 +21,8 @@ target:                               # Properties of molecular system
   solute_inpcrd_path: null                                              # Filepath to solvent inpcrd
   solute_prmtop_path: null                                              # Filepath to solvent prmtop
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
-  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
+  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
+  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force constraints for keeping the system in place.
@@ -74,7 +74,7 @@ training:                             # Properties of the training procedure
   use_gpu: true
   use_64_bit: true
   lr: 5.e-4                           # Double, learning rate
-  wd: 0.0  #1.e-5                           # Double, regularization parameter
+  wd: 1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
     type: cosine                      # String, kind of LR scheduler, can be exponential, cosine
