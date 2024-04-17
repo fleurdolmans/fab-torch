@@ -173,6 +173,9 @@ class Trainer:
             # Update parameters
             if not torch.isnan(loss) and not torch.isinf(loss):
                 loss.backward()
+                grads = [param.grad.detach().flatten() for param in self.model.parameters() if param.grad is not None]
+                old_grad_norm = torch.cat(grads).norm()
+                # Clip grad norm
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
                 if torch.isfinite(grad_norm):
                     self.optimizer.step()
@@ -181,14 +184,18 @@ class Trainer:
                 if self.optim_scheduler and (i + 1) % self.lr_step == 0:
                     self.optim_scheduler.step()
             else:
-                warnings.warn("NaN loss encountered!")
+                warnings.warn("NaN loss encountered! No update performed.")
+                old_grad_norm = torch.zeros_like(loss)
+                grad_norm = torch.zeros_like(loss)
 
             self.optimizer.zero_grad()
             info = self.model.get_iter_info()
             info.update(
                 {
                     "loss": loss.cpu().detach().item(),
+                    "old_grad_norm": old_grad_norm.cpu().detach().item(),
                     "grad_norm": grad_norm.cpu().detach().item(),
+                    "lr": self.optimizer.param_groups[0]["lr"],
                     "iteration": i,
                 }
             )

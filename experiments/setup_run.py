@@ -311,9 +311,10 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         if cfg.training.lr_scheduler.type == "exponential":
             scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer=optimizer,
-                gamma=cfg.training.scheduler.rate_decay,
+                gamma=cfg.training.lr_scheduler.rate_decay,
             )
-            lr_step = cfg.training.scheduler.decay_iter
+            # scheduler.step() is run every lr_step iterations. Thus every lr_step iterations we decay the lr by gamma.
+            lr_step = cfg.training.lr_scheduler.decay_iter
         elif cfg.training.lr_scheduler.type == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer=optimizer,
@@ -323,8 +324,17 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         elif cfg.training.lr_scheduler.type == "cosine_restart":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 optimizer=optimizer,
-                T_0=cfg.training.scheduler.restart_iter,
+                T_0=cfg.training.lr_scheduler.decay_iter,
             )
+            lr_step = 1
+        elif cfg.training.lr_scheduler.type == "step":
+            scheduler = torch.optim.lr_scheduler.StepLR(
+                optimizer=optimizer,
+                step_size=cfg.training.lr_scheduler.decay_iter,
+                gamma=cfg.training.lr_scheduler.rate_decay,
+            )
+            # scheduler.step() is run every lr_step iterations. step_size in StepLR says how many iterations before
+            #  a decay step of gamma.
             lr_step = 1
         else:
             raise NotImplementedError("The scheduler " + cfg.training.lr_scheduler.type + " is not implemented.")

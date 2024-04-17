@@ -21,8 +21,8 @@ target:                               # Properties of molecular system
   solute_inpcrd_path: null                                              # Filepath to solvent inpcrd
   solute_prmtop_path: null                                              # Filepath to solvent prmtop
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps1000000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
-  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
+  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
+  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps10000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
   test_samples_path: null
   # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force constraints for keeping the system in place.
@@ -73,13 +73,15 @@ training:                             # Properties of the training procedure
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
-  lr: 5.e-4                           # Double, learning rate
-  wd: 1.e-5                           # Double, regularization parameter
+  lr: 5.e-4  # 5.e-4                           # Double, learning rate
+  wd: 0  #1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
-    type: cosine                      # String, kind of LR scheduler, can be exponential, cosine
+    type: exponential                      # String, kind of LR scheduler, can be exponential, cosine
+    rate_decay: 0.99                  # Double, rate of decay for exponential scheduler or LRStep.
+    decay_iter: 10                    # Int, number of iterations before decay for exponential scheduler or LRStep.
   warmup_iter: null                   # Int, number of iterations used for warmup
-  max_grad_norm: 1.e3                 # Double, limit for gradient clipping
+  max_grad_norm: 10 # 1.e3                 # Double, limit for gradient clipping
   # Buffer args
   use_buffer: false  # true                 # Buffer args follow below here
   prioritised_buffer: false  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
@@ -98,7 +100,7 @@ evaluation:
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+    name: ${fab.loss_type}_dim${target.dim}_gn${training.max_grad_norm}_lrsch${training.lr_scheduler.type}_gamma${training.lr_scheduler.decay_iter}_step${training.lr_scheduler.rate_decay}
     project: SO2_in_H2O
     entity: timsey
 #  pandas_logger:
