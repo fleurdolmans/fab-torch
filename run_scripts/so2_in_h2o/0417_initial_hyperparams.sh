@@ -42,7 +42,7 @@ JOB_NAME=0417_hyperparams
 #### --------------- ####
 
 
-for index in "${!BLOCKS[@]}"; do
+for index in "${!SCHEDULER[@]}"; do
   # Create dir for specific experiment run
   dt=$(date '+%F_%H-%M-%S.%3N')
   LOGS_DIR=${LAUNCH_DIR}/${dt}
