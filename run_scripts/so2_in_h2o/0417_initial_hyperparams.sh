@@ -5,7 +5,7 @@ PROJECT_NAME=fab-torch
 # Original code folder is here
 HOME_DIR=/home/tbbakke
 MAIN_DIR=${HOME_DIR}/${PROJECT_NAME}
-CONDA_ENV_DIR=/ivi/zfs/s0/original_homes/anaconda3/envs/bgsol
+CONDA_ENV_DIR=/ivi/zfs/s0/original_homes/tbbakke/anaconda3/envs/bgsol
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
