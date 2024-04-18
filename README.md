@@ -3,7 +3,7 @@
 Code is based on Flow Annealed Importance Sampling Bootstrap for PyTorch [Git repo](https://github.com/lollcat/fab-torch). See their README for useful tips and more information.
 
 ## Steps for creating the environment
-Have conda installed, clone this repository, and `cd` into it. Then run:
+Have conda installed, clone this repository, and `cd` into it. Then run the following to create a conda environment named `bgsol` with all the necessary packages:
 > $ conda create --name bgsol python=3.7.16 \
 $ conda activate bgsol \
 $ conda install pytorch==1.8.1 torchvision==0.9.1 torchaudio==0.8.1 cudatoolkit=10.1 -c pytorch \

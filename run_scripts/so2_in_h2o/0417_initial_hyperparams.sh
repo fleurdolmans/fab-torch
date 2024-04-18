@@ -15,25 +15,25 @@ mkdir -p "${LAUNCH_DIR}"
 #### HYPERPARAMETERS ####
 #### --------------- ####
 
-TRAIN_ITERS=500
-NUM_EVAL=50
-NUM_PLOTS=5
-NUM_CKPTS=1
+#TRAIN_ITERS=500
+#NUM_EVAL=50
+#NUM_PLOTS=5
+#NUM_CKPTS=1
+#
+#SCHEDULER=("exponential")
+#RATE_DECAY=(1)
+#DECAY_ITER=(1)
+#GRAD_NORM=(1)
 
-SCHEDULER=("exponential")
-RATE_DECAY=(1)
-DECAY_ITER=(1)
-GRAD_NORM=(1)
+TRAIN_ITERS=5000
+NUM_EVAL=500
+NUM_PLOTS=50
+NUM_CKPTS=5
 
-#TRAIN_ITERS=5000
-#NUM_EVAL=500
-#NUM_PLOTS=50
-#NUM_CKPTS=5
-
-#SCHEDULER=("exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart")
-#RATE_DECAY=(0.99 0.1 1 1 0.99 0.1 1 1 0.99 0.1 1 1 0.99 0.1 1 1)
-#DECAY_ITER=(10 2500 1 1000 10 2500 1 1000 10 2500 1 1000 10 2500 1 1000)
-#GRAD_NORM=(0.1 0.1 0.1 0.1 1 1 1 1 10 10 10 10 1000 1000 1000 1000)
+SCHEDULER=("exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart")
+RATE_DECAY=(0.99 0.1 1 1 0.99 0.1 1 1 0.99 0.1 1 1 0.99 0.1 1 1)
+DECAY_ITER=(10 2500 1 1000 10 2500 1 1000 10 2500 1 1000 10 2500 1 1000)
+GRAD_NORM=(0.1 0.1 0.1 0.1 1 1 1 1 10 10 10 10 1000 1000 1000 1000)
 
 JOB_NAME=0417_hyperparams
 

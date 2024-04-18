@@ -174,7 +174,7 @@ class Trainer:
             if not torch.isnan(loss) and not torch.isinf(loss):
                 loss.backward()
                 grads = [param.grad.detach().flatten() for param in self.model.parameters() if param.grad is not None]
-                old_grad_norm = torch.cat(grads).norm()
+                old_grad_norm = torch.cat(grads).norm().clone()
                 # Clip grad norm
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
                 if torch.isfinite(grad_norm):
