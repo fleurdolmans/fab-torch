@@ -28,7 +28,7 @@ mkdir -p "${LAUNCH_DIR}"
 TRAIN_ITERS=5000
 NUM_EVAL=500
 NUM_PLOTS=50
-NUM_CKPTS=5
+NUM_CKPTS=1
 
 SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
 RATE_DECAY=(0.1 1 0.1 1 0.1 1 0.1 1)
@@ -83,7 +83,7 @@ for index in "${!SCHEDULER[@]}"; do
       training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
       training.max_grad_norm=${GRAD_NORM[$index]} training.lr_scheduler.type=${SCHEDULER[$index]} \
       training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
-      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
+      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}

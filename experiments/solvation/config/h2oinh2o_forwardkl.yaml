@@ -5,7 +5,7 @@ defaults:
 
 hydra:
   run:
-    dir: ${node.output_dir}/SoluteInWater/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+    dir: ${node.output_dir}/SoluteInWater/h2o_in_water/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
   job:
     chdir: true
 
