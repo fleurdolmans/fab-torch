@@ -30,10 +30,14 @@ NUM_EVAL=500
 NUM_PLOTS=50
 NUM_CKPTS=5
 
-SCHEDULER=("exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart")
-RATE_DECAY=(0.99 0.1 1 1 0.99 0.1 1 1)
-DECAY_ITER=(10 2500 1 1000 10 2500 1 1000)
-GRAD_NORM=(0.1 0.1 0.1 0.1 1 1 1 1)
+SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
+RATE_DECAY=(0.1 1 0.1 1 0.1 1 0.1 1)
+DECAY_ITER=(2500 1 2500 1 2500 1 2500 1)
+GRAD_NORM=(1 1 1 1 0.1 0.1 0.1 0.1)
+
+BLOCKS=(16 16 24 24 16 16 24 24)
+HIDDEN_UNITS=(512 512 1024 1024 512 512 1024 1024)
+NUM_BINS=(11 11 15 15 11 11 15 15)
 
 #SCHEDULER=("exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart")
 #RATE_DECAY=(0.99 0.1 1 1 0.99 0.1 1 1)
@@ -78,7 +82,8 @@ for index in "${!SCHEDULER[@]}"; do
       --config-name so2inh2o_forwardkl.yaml node=ivicl \
       training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
       training.max_grad_norm=${GRAD_NORM[$index]} training.lr_scheduler.type=${SCHEDULER[$index]} \
-      training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]}
+      training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
+      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
   } >> ${SLURM}
 
   sbatch ${SLURM}

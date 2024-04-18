@@ -100,7 +100,7 @@ evaluation:
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_gn${training.max_grad_norm}_${training.lr_scheduler.type}_gamma${training.lr_scheduler.decay_iter}_step${training.lr_scheduler.rate_decay}
+    name: ${fab.loss_type}_dim${target.dim}_bl${flow.blocks}_hd${flow.hidden_units}_bi${flow.num_bins}_gn${training.max_grad_norm}_${training.lr_scheduler.type}_gamma${training.lr_scheduler.rate_decay}_step${training.lr_scheduler.decay_iter}
     project: SO2_in_H2O
     entity: timsey
 #  pandas_logger:
