@@ -23,14 +23,25 @@ NUM_EVAL=500
 NUM_PLOTS=20
 NUM_CKPTS=1
 
-SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
-RATE_DECAY=(0.1 1 0.1 1 0.1 1 0.1 1)
-DECAY_ITER=(2000 1 2000 1 2000 1 2000 1)
-GRAD_NORM=(1 1 1 1 1 1 1 1)
+#SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
+#RATE_DECAY=(0.3 1 0.3 1 0.3 1 0.3 1)
+#DECAY_ITER=(2500 1 2500 1 2500 1 2500 1)
+#GRAD_NORM=(1 1 1 1 1 1 1 1)
+#
+#BLOCKS=(36 36 36 36 36 36 36 36)
+#HIDDEN_UNITS=(512 512 512 512 1024 1024 1024 1024)
+#NUM_BINS=(8 8 15 15 8 8 15 15)
+#BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
-BLOCKS=(16 16 16 16 24 24 16 16)
-HIDDEN_UNITS=(512 512 1024 1024 512 512 512 512)
-NUM_BINS=(11 11 11 11 11 11 15 15)
+SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
+RATE_DECAY=(0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1)
+DECAY_ITER=( 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1)
+GRAD_NORM=(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1)
+
+BLOCKS=(36 36 36 36 36 36 36 36 36 36 36 36 36 36 36 36)
+HIDDEN_UNITS=(512 512 512 512 1024 1024 1024 1024 512 512 512 512 1024 1024 1024 1024)
+NUM_BINS=(8 8 15 15 8 8 15 15 8 8 15 15 8 8 15 15)
+BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2)
 
 JOB_NAME=0417_hyperparams
 
@@ -58,8 +69,8 @@ for index in "${!SCHEDULER[@]}"; do
   echo "#SBATCH --gres=gpu:1" >> ${SLURM}
   echo "#SBATCH --cpus-per-task=12" >> ${SLURM}
   echo "#SBATCH --ntasks-per-node=1" >> ${SLURM}
-  echo "#SBATCH --mem=8G" >> ${SLURM}
-  echo "#SBATCH --time=0-8:00:00" >> ${SLURM}
+  echo "#SBATCH --mem=11G" >> ${SLURM}
+  echo "#SBATCH --time=1-12:00:00" >> ${SLURM}
   echo "#SBATCH --nodes=1" >> ${SLURM}
   echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
   {
@@ -71,7 +82,8 @@ for index in "${!SCHEDULER[@]}"; do
       training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
       training.max_grad_norm=${GRAD_NORM[$index]} training.lr_scheduler.type=${SCHEDULER[$index]} \
       training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
-      flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
+      flow.blocks=${BLOCKS[index]} flow.blocks_per_layer=${BLOCKS_PER_LAYER[index]} \
+      flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
@@ -83,3 +95,8 @@ done
 #  samples with 2 molecules than 16,512,11, which works much better than the default of 12,256,8.
 # Cosine ends up better than step scheduler, but only because it ends up with a lower learning rate at the right moment.
 # Grad norm seems to not matter much. Just set to 1?
+# 24-1024-15: ~4.7GB
+# 36-1024-15: ~6.7GB
+# 36-1024-8: ~7GB (weird but true, actually more than with 15 bins)
+# 36-1536-15: ~10.6GB
+# 36-1024-15-2blocksperlayer: ~10.2GB

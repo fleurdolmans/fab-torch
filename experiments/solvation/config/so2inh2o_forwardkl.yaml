@@ -38,10 +38,10 @@ flow:                                  # Properties of the flow model
     type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 12  #12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
-  blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 256  # 256                 # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 8 # 8, 9                         # Int, number of bins of the neural splines
+  blocks: 36  #12                          # Int, number of Real NVP blocks, consisting of an ActNorm layer
+  blocks_per_layer: 2                 # Int, number of blocks per layer
+  hidden_units: 1024  # 256                 # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 15 # 8                        # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -77,11 +77,11 @@ training:                             # Properties of the training procedure
   wd: 0  #1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
-    type: exponential                      # String, kind of LR scheduler, can be exponential, cosine
-    rate_decay: 0.99                  # Double, rate of decay for exponential scheduler or LRStep.
-    decay_iter: 10                    # Int, number of iterations before decay for exponential scheduler or LRStep.
+    type: step                      # String, kind of LR scheduler, can be exponential, cosine
+    rate_decay: 0.3                  # Double, rate of decay for exponential scheduler or LRStep.
+    decay_iter: 2000                    # Int, number of iterations before decay for exponential scheduler or LRStep.
   warmup_iter: null                   # Int, number of iterations used for warmup
-  max_grad_norm: 10 # 1.e3                 # Double, limit for gradient clipping
+  max_grad_norm: 1 # 1.e3                 # Double, limit for gradient clipping
   # Buffer args
   use_buffer: false  # true                 # Buffer args follow below here
   prioritised_buffer: false  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
@@ -95,12 +95,12 @@ evaluation:
   n_plots: 50                         # number of times we visualise the model throughout training.
   n_eval: 500  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
-  n_checkpoints: 10                   # number of model checkpoints saved
+  n_checkpoints: 1                   # number of model checkpoints saved
 
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_bl${flow.blocks}_hd${flow.hidden_units}_bi${flow.num_bins}_gn${training.max_grad_norm}_${training.lr_scheduler.type}_gamma${training.lr_scheduler.rate_decay}_step${training.lr_scheduler.decay_iter}
+    name: ${fab.loss_type}_dim${target.dim}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}_${training.lr_scheduler.type}_gamma${training.lr_scheduler.rate_decay}_step${training.lr_scheduler.decay_iter}
     project: SO2_in_H2O
     entity: timsey
 #  pandas_logger:
