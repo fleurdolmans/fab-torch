@@ -38,11 +38,11 @@ flow:                                  # Properties of the flow model
     type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 36  #12                          # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
-                                      # If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
+  blocks: 36  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+                                      #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 1024  # 256                 # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 15 # 8                        # Int, number of bins of the neural splines
+  hidden_units: 1024  # 256           # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 15 # 8                    # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -68,21 +68,21 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4  # 4                 # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 5000  #50000                 # Int, maximum number of iteration
-  n_flow_forward_pass: null
-  batch_size: 1024               # Int, batch size used during training
+  n_iterations: 5000  #50000          # Int, maximum number of iteration
+  n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
+  batch_size: 1024                    # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
-  lr: 5.e-4  # 5.e-4                           # Double, learning rate
-  wd: 0  #1.e-5                           # Double, regularization parameter
+  lr: 5.e-4  # 5.e-4                  # Double, learning rate
+  wd: 0  #1.e-5                       # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
-    type: step                      # String, kind of LR scheduler, can be exponential, cosine
-    rate_decay: 0.3                  # Double, rate of decay for exponential scheduler or LRStep.
-    decay_iter: 2000                    # Int, number of iterations before decay for exponential scheduler or LRStep.
+    type: step                        # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
+    rate_decay: 0.3                   # Double, rate of decay for exponential scheduler or LRStep.
+    decay_iter: 2000                  # Int, number of iterations before decay for exponential scheduler or LRStep.
   warmup_iter: null                   # Int, number of iterations used for warmup
-  max_grad_norm: 1 # 1.e3                 # Double, limit for gradient clipping
+  max_grad_norm: 1 # 1.e3             # Double, limit for gradient clipping
   # Buffer args
   use_buffer: false  # true                 # Buffer args follow below here
   prioritised_buffer: false  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
