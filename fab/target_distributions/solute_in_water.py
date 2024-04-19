@@ -132,7 +132,6 @@ class TriatomicInWaterSys(TestSystem):
             # This keeps the first atom around the origin.
             center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
             center.addGlobalParameter("k", 100000.0)
-            # center.addGlobalParameter("k", 1.0)
             self.system.addForce(center)
             center.addParticle(0, [])
 

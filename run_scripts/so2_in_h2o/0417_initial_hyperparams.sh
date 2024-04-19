@@ -18,34 +18,19 @@ mkdir -p "${LAUNCH_DIR}"
 #### HYPERPARAMETERS ####
 #### --------------- ####
 
-#TRAIN_ITERS=500
-#NUM_EVAL=50
-#NUM_PLOTS=5
-#NUM_CKPTS=1
-#
-#SCHEDULER=("exponential")
-#RATE_DECAY=(1)
-#DECAY_ITER=(1)
-#GRAD_NORM=(1)
-
-TRAIN_ITERS=5000
+TRAIN_ITERS=10000
 NUM_EVAL=500
-NUM_PLOTS=50
+NUM_PLOTS=20
 NUM_CKPTS=1
 
 SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
 RATE_DECAY=(0.1 1 0.1 1 0.1 1 0.1 1)
-DECAY_ITER=(2500 1 2500 1 2500 1 2500 1)
-GRAD_NORM=(1 1 1 1 0.1 0.1 0.1 0.1)
+DECAY_ITER=(2000 1 2000 1 2000 1 2000 1)
+GRAD_NORM=(1 1 1 1 1 1 1 1)
 
-BLOCKS=(16 16 24 24 16 16 24 24)
-HIDDEN_UNITS=(512 512 1024 1024 512 512 1024 1024)
-NUM_BINS=(11 11 15 15 11 11 15 15)
-
-#SCHEDULER=("exponential" "step" "cosine" "cosine_restart" "exponential" "step" "cosine" "cosine_restart")
-#RATE_DECAY=(0.99 0.1 1 1 0.99 0.1 1 1)
-#DECAY_ITER=(10 2500 1 1000 10 2500 1 1000)
-#GRAD_NORM=(10 10 10 10 1000 1000 1000 1000)
+BLOCKS=(16 16 16 16 24 24 16 16)
+HIDDEN_UNITS=(512 512 1024 1024 512 512 512 512)
+NUM_BINS=(11 11 11 11 11 11 15 15)
 
 JOB_NAME=0417_hyperparams
 
@@ -92,3 +77,9 @@ for index in "${!SCHEDULER[@]}"; do
   sbatch ${SLURM}
   sleep .1
 done
+
+# TODO:
+# Looks like we need bigger models! 24 blocks, 1024 hidden units, 15 bins works much better for overfitting on 1000 MD
+#  samples with 2 molecules than 16,512,11, which works much better than the default of 12,256,8.
+# Cosine ends up better than step scheduler, but only because it ends up with a lower learning rate at the right moment.
+# Grad norm seems to not matter much. Just set to 1?
