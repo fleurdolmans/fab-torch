@@ -90,13 +90,25 @@ for index in "${!SCHEDULER[@]}"; do
   sleep .1
 done
 
-# TODO:
 # Looks like we need bigger models! 24 blocks, 1024 hidden units, 15 bins works much better for overfitting on 1000 MD
-#  samples with 2 molecules than 16,512,11, which works much better than the default of 12,256,8.
+#  samples with 2 molecules than 16-512-11, which works much better than the default of 12-256-8.
 # Cosine ends up better than step scheduler, but only because it ends up with a lower learning rate at the right moment.
 # Grad norm seems to not matter much. Just set to 1?
+
+# Memory usage (blocks, hidden units, bins): 1blockperlayer unless otherwise specified.
 # 24-1024-15: ~4.7GB
 # 36-1024-15: ~6.7GB
 # 36-1024-8: ~7GB (weird but true, actually more than with 15 bins)
 # 36-1536-15: ~10.6GB
 # 36-1024-15-2blocksperlayer: ~10.2GB
+
+# 24-1024-15 for 5K iters performs very similarly in loss to 24-512-11 and 16-1024-11 for 10K iter (cosine)!
+#  So assuming bins is not too important, we see than 2x iters = 2x hidden units = 1.5x blocks.
+#  Pretty stark difference in KLs though.
+
+# TODO: Current runs check (2^4=16):
+# How much does hidden dim (512 vs 1024) matter with 36 layers?
+# Does using 2 blocks per layer improve performance?
+# How much do spline bins matter (8 vs 15)?
+# Cosine vs designed step scheduler: prefer the former (fewer hyperparams), but latter may be better?
+# Extra: compare run 55 with almost equivalent one on IvI: 36p2-1024-15 with step decay of 0.3 after 2K iters (vs 2.5K).
