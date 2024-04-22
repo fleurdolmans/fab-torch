@@ -18,30 +18,39 @@ mkdir -p "${LAUNCH_DIR}"
 #### HYPERPARAMETERS ####
 #### --------------- ####
 
-TRAIN_ITERS=10000
+TRAIN_ITERS=50000
 NUM_EVAL=500
-NUM_PLOTS=20
+NUM_PLOTS=50
 NUM_CKPTS=1
 
-#SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
-#RATE_DECAY=(0.3 1 0.3 1 0.3 1 0.3 1)
-#DECAY_ITER=(2500 1 2500 1 2500 1 2500 1)
+# Schedular args
+#SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine")
+#RATE_DECAY=(1 1 1 1 1 1 1 1)
+#DECAY_ITER=(1 1 1 1 1 1 1 1)
+#
+## Stability args
 #GRAD_NORM=(1 1 1 1 1 1 1 1)
 #
-#BLOCKS=(36 36 36 36 36 36 36 36)
-#HIDDEN_UNITS=(512 512 512 512 1024 1024 1024 1024)
-#NUM_BINS=(8 8 15 15 8 8 15 15)
+## Architecture args
+#BLOCKS=(36 48 60 72 84 96 108 120)
+#HIDDEN_UNITS=(512 512 512 512 512 512 512 512)
+#NUM_BINS=(8 8 8 8 8 8 8 8)
 #BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
-SCHEDULER=("step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine" "step" "cosine")
-RATE_DECAY=(0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1 0.3 1)
-DECAY_ITER=( 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1 2500 1)
-GRAD_NORM=(1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1)
 
-BLOCKS=(36 36 36 36 36 36 36 36 36 36 36 36 36 36 36 36)
-HIDDEN_UNITS=(512 512 512 512 1024 1024 1024 1024 512 512 512 512 1024 1024 1024 1024)
-NUM_BINS=(8 8 15 15 8 8 15 15 8 8 15 15 8 8 15 15)
-BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2)
+# Schedular args
+SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine")
+RATE_DECAY=(1 1 1 1 1)
+DECAY_ITER=(1 1 1 1 1)
+
+# Stability args
+GRAD_NORM=(1 1 1 1 1)
+
+# Architecture args
+BLOCKS=(36 36 48 60 72)
+HIDDEN_UNITS=(512 1024 512 512 512)
+NUM_BINS=(8 8 8 8 8)
+BLOCKS_PER_LAYER=(1 1 1 1 1)
 
 JOB_NAME=0417_hyperparams
 
@@ -90,25 +99,41 @@ for index in "${!SCHEDULER[@]}"; do
   sleep .1
 done
 
-# Looks like we need bigger models! 24 blocks, 1024 hidden units, 15 bins works much better for overfitting on 1000 MD
-#  samples with 2 molecules than 16-512-11, which works much better than the default of 12-256-8.
-# Cosine ends up better than step scheduler, but only because it ends up with a lower learning rate at the right moment.
-# Grad norm seems to not matter much. Just set to 1?
-
 # Memory usage (blocks, hidden units, bins): 1blockperlayer unless otherwise specified.
 # 24-1024-15: ~4.7GB
 # 36-1024-15: ~6.7GB
 # 36-1024-8: ~7GB (weird but true, actually more than with 15 bins)
 # 36-1536-15: ~10.6GB
 # 36-1024-15-2blocksperlayer: ~10.2GB
+# 48-512-8: ~4.2GB
+
+# Run time:
+# 512 to 1024 hidden --> about 2x run time.
+# 1 to 2 blocks per layer --> about 1.5x run time.
+# 36p2-1024-15 takes about 12 hours on IvI for 10000 iters (with 500 evals and 20 plotting steps).
+
+# Num params:
+# 12-512-8: 7,993,656
+# 12-512-16: 9,547,992
+# 12-1024-8: 28,563,768
+# 120-512-8: 79,936,560 (~8.7GB)
+
+# Looks like we need bigger models! 24 blocks, 1024 hidden units, 15 bins works much better for overfitting on 1000 MD
+#  samples with 2 molecules than 16-512-11, which works much better than the default of 12-256-8.
+# Cosine ends up better than step scheduler, but only because it ends up with a lower learning rate at the right moment.
+# Grad norm seems to not matter much. Just set to 1?
 
 # 24-1024-15 for 5K iters performs very similarly in loss to 24-512-11 and 16-1024-11 for 10K iter (cosine)!
 #  So assuming bins is not too important, we see than 2x iters = 2x hidden units = 1.5x blocks.
 #  Pretty stark difference in KLs though.
 
-# TODO: Current runs check (2^4=16):
-# How much does hidden dim (512 vs 1024) matter with 36 layers?
-# Does using 2 blocks per layer improve performance?
-# How much do spline bins matter (8 vs 15)?
-# Cosine vs designed step scheduler: prefer the former (fewer hyperparams), but latter may be better?
-# Extra: compare run 55 with almost equivalent one on IvI: 36p2-1024-15 with step decay of 0.3 after 2K iters (vs 2.5K).
+# Compare 71 and 59 to see largest difference with model size (cosine scheduler).
+# How much does hidden dim (512 vs 1024) matter with 36 layers? More is better for loss, worse for KL.
+# Does using 2 blocks per layer improve performance? Somewhat, but mostly in loss; worse for KL mostly.
+# How much do spline bins matter (8 vs 15)?  Matters little, but more is slightly higher loss, worse KL in general.
+# Cosine vs designed step scheduler: prefer the former (fewer hyperparams), but latter may be better? Probably cosine.
+#   Would be best if we can stretch the last 10-20% of training time; e.g., run more training with lr < 0.1 * initial_lr.
+#   Perhaps running for more iters also achieves this indirectly, although this might waste computation in early/mid steps?
+
+# TODO: Current runs
+# 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins. 

@@ -292,10 +292,12 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
+    num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
+    print(f" Model with {num_model_params} parameters")
+    logger.write({"num_parameters": num_model_params})
 
     # Initialize optimizer and its parameters
     #  Taken from ALDP's train.py.
-    print("Setting up training parameters...")
     lr = cfg.training.lr
     weight_decay = cfg.training.wd
     optimizer_name = "adam" if not "optimizer" in cfg.training else cfg.training.optimizer
@@ -372,11 +374,9 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
         print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
 
-    print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)
 
     # Create trainer
-    print("Setting up trainer...")
     if cfg.training.use_buffer is False:
         # TODO: Implement this for forward KL training with MD data!
         # raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
