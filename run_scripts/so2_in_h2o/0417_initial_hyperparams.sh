@@ -99,20 +99,21 @@ for index in "${!SCHEDULER[@]}"; do
   sleep .1
 done
 
-# Memory usage (blocks, hidden units, bins): 1blockperlayer unless otherwise specified.
+# Memory usage (blocks, hidden units, bins): 1blockperlayer unless otherwise specified (2 solvent).
 # 24-1024-15: ~4.7GB
 # 36-1024-15: ~6.7GB
 # 36-1024-8: ~7GB (weird but true, actually more than with 15 bins)
 # 36-1536-15: ~10.6GB
 # 36-1024-15-2blocksperlayer: ~10.2GB
 # 48-512-8: ~4.2GB
+# 13 solvent: 36-512-8: ~8.2GB
 
-# Run time:
+# Run time (2 solvent):
 # 512 to 1024 hidden --> about 2x run time.
 # 1 to 2 blocks per layer --> about 1.5x run time.
 # 36p2-1024-15 takes about 12 hours on IvI for 10000 iters (with 500 evals and 20 plotting steps).
 
-# Num params:
+# Num params (2 solvent):
 # 12-512-8: 7,993,656
 # 12-512-16: 9,547,992
 # 12-1024-8: 28,563,768

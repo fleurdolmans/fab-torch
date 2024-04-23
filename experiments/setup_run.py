@@ -294,6 +294,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     fab_model = setup_model(cfg, target)
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
     print(f" Model with {num_model_params} parameters")
+    print(fab_model.flow)
     logger.write({"num_parameters": num_model_params})
 
     # Initialize optimizer and its parameters
