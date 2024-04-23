@@ -42,7 +42,7 @@ flow:                                  # Properties of the flow model
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
   hidden_units: 512  # 256           # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 16 # 8                    # Int, number of bins of the neural splines
+  num_bins: 8 # 8                    # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
