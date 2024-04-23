@@ -326,7 +326,8 @@ def _run(cfg: DictConfig) -> None:
             plot_marginal_hists=cfg.evaluation.plot_marginal_hists,
             external_constraints=cfg.target.external_constraints,
             internal_constraints=cfg.target.internal_constraints,
-            rigidwater=cfg.target.rigidwater,
+            rigid_water=cfg.target.rigid_water,
+            constraint_radius=cfg.target.constraint_radius,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")

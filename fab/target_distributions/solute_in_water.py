@@ -48,8 +48,10 @@ class TriatomicInWaterSys(TestSystem):
     internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
         or "none". Should be "none" during training, since otherwise the energy of flow samples cannot be properly
         computed (will only be able to compute a projection of these samples onto 'valid' configurations).
-    rigidwater: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
+    rigid_water: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
         False during training, for reasons mentioned in `internal_constraints` docstring.
+    constraint_radius: float, radius (in nm) of the spherical constraint for keeping the droplet in place.
+        Should be rounded to whole Angstrom.
     """
     def __init__(
             self,
@@ -60,7 +62,8 @@ class TriatomicInWaterSys(TestSystem):
             dim: int,
             external_constraints: bool,
             internal_constraints: str,
-            rigidwater: bool,
+            rigid_water: bool,
+            constraint_radius: float,
             **kwargs,
     ):
         TestSystem.__init__(self, **kwargs)
@@ -72,7 +75,7 @@ class TriatomicInWaterSys(TestSystem):
         self.dim = dim
         self.external_constraints = external_constraints
         self.internal_constraints = internal_constraints
-        self.rigidwater = rigidwater
+        self.rigid_water = rigid_water
 
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
@@ -106,7 +109,7 @@ class TriatomicInWaterSys(TestSystem):
                 nonbondedMethod=app.CutoffNonPeriodic,
                 nonbondedCutoff=1.0 * unit.nanometers,
                 constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
-                rigidWater=rigidwater,  # `False` for flexible H2O
+                rigidWater=rigid_water,  # `False` for flexible H2O
             )
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
             # TODO: Not fully implemented!
@@ -136,7 +139,7 @@ class TriatomicInWaterSys(TestSystem):
             center.addParticle(0, [])
 
             # Add spherical restraint to hold the droplet
-            force = mm.CustomExternalForce('w*max(0, r-1.0)^2; r=sqrt(x*x+y*y+z*z)')
+            force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(constraint_radius))
             force.addGlobalParameter("w", 100.0)
             self.system.addForce(force)
             for i in range(self.system.getNumParticles()):
@@ -181,8 +184,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
     internal_constraints: str, internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths)
         or "none". Should be "none" during training, since otherwise the energy of flow samples cannot be properly
         computed (will only be able to compute a projection of these samples onto 'valid' configurations).
-    rigidwater: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
+    rigid_water: bool, whether to use rigid water molecules. If False, the water molecules will be flexible. Should
         False during training, for reasons mentioned in `internal_constraints` docstring.
+    constraint_radius: float, radius (in nm) of the spherical constraint for keeping the droplet in place.
+        Should be rounded to whole Angstrom.
     """
     def __init__(
         self,
@@ -207,7 +212,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
         plot_marginal_hists: bool = False,
         external_constraints: bool = True,
         internal_constraints: str = "none",
-        rigidwater: bool = False,
+        rigid_water: bool = False,
+        constraint_radius: float = 1.0,
     ):
         super(SoluteInWater, self).__init__()
 
@@ -264,7 +270,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.cartesian_dim,
             external_constraints,
             internal_constraints,
-            rigidwater,
+            rigid_water,
+            constraint_radius,
         )
 
         # Generate trajectory for coordinate transform if no data path is specified

@@ -32,7 +32,8 @@ def run_md_sim(cfg: DictConfig):
         dim,
         cfg.external_constraints,
         cfg.internal_constraints,
-        cfg.rigidwater,
+        cfg.rigid_water,
+        cfg.constraint_radius,
     )
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
@@ -72,7 +73,9 @@ def run_md_sim(cfg: DictConfig):
     sim.step(cfg.burnin_steps)
 
     # Saving data
-    cnstrnts = f"_ec{cfg.external_constraints}_ic{cfg.internal_constraints}_rw{cfg.rigidwater}"
+    cnstrnts = (
+        f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
+    )
     solute = pathlib.Path(cfg.solute_pdb_path).stem
     filename = (
         f"{solute}InWater_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"

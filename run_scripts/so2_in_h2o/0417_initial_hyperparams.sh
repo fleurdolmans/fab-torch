@@ -136,4 +136,4 @@ done
 #   Perhaps running for more iters also achieves this indirectly, although this might waste computation in early/mid steps?
 
 # TODO: Current runs
-# 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins. 
+# 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins.

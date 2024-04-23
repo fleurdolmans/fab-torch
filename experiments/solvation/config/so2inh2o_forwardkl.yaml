@@ -11,7 +11,7 @@ hydra:
 
 target:                               # Properties of molecular system
   solvent: water
-  dim: 27  # 18  45                   # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 126  # 27                   # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
@@ -20,14 +20,14 @@ target:                               # Properties of molecular system
   solute_xml_path: ${node.data_dir}/molecules/solutes/so2.xml           # Filepath to solvent xml
   solute_inpcrd_path: null                                              # Filepath to solvent inpcrd
   solute_prmtop_path: null                                              # Filepath to solvent prmtop
-  # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
-  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq1000_burn100000_steps100000_fpt0.5_every10_ecTrue_icnone_rwFalse.h5
-  test_samples_path: null
-  # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
   external_constraints: true          # Whether to use external force constraints for keeping the system in place.
   internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-  rigidwater: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+  rigid_water: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+  constraint_radius: 0.5              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  # Filepaths to load samples from
+  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps100000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps100000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  test_samples_path: null
 
 flow:                                  # Properties of the flow model
   solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the fab paper
@@ -38,11 +38,11 @@ flow:                                  # Properties of the flow model
     type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 120  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+  blocks: 24  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 512  # 256           # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 8 # 8                    # Int, number of bins of the neural splines
+  hidden_units: 1024  # 256           # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 16 # 8                    # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -68,7 +68,7 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4  # 4                 # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 5000  #50000          # Int, maximum number of iteration
+  n_iterations: 10000  #50000          # Int, maximum number of iteration
   n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
   batch_size: 1024                    # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
