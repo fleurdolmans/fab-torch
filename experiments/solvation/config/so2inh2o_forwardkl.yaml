@@ -38,10 +38,10 @@ flow:                                  # Properties of the flow model
     type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 24  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+  blocks: 36  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 1024  # 256           # Int, number of hidden units of the NN in neural spline layers
+  hidden_units: 512  # 256           # Int, number of hidden units of the NN in neural spline layers
   num_bins: 16 # 8                    # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
