@@ -23,34 +23,20 @@ NUM_EVAL=500
 NUM_PLOTS=50
 NUM_CKPTS=1
 
-# Schedular args
-#SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine")
-#RATE_DECAY=(1 1 1 1 1 1 1 1)
-#DECAY_ITER=(1 1 1 1 1 1 1 1)
-#
-## Stability args
-#GRAD_NORM=(1 1 1 1 1 1 1 1)
-#
-## Architecture args
-#BLOCKS=(36 48 60 72 84 96 108 120)
-#HIDDEN_UNITS=(512 512 512 512 512 512 512 512)
-#NUM_BINS=(8 8 8 8 8 8 8 8)
-#BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
-
-# Schedular args
-SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine")
-RATE_DECAY=(1 1 1 1 1)
-DECAY_ITER=(1 1 1 1 1)
+# Scheduler args
+SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine")
+RATE_DECAY=(1 1 1 1 1 1 1 1)
+DECAY_ITER=(1 1 1 1 1 1 1 1)
 
 # Stability args
-GRAD_NORM=(1 1 1 1 1)
+GRAD_NORM=(1 1 1 1 1 1 1 1)
 
 # Architecture args
-BLOCKS=(36 36 48 60 72)
-HIDDEN_UNITS=(512 1024 512 512 512)
-NUM_BINS=(8 8 8 8 8)
-BLOCKS_PER_LAYER=(1 1 1 1 1)
+BLOCKS=(24 36 36 36 48 60 72 84)
+HIDDEN_UNITS=(1024 512 1024 1024 512 512 512 512
+NUM_BINS=(16 8 8 16 8 8 8 8)
+BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
 JOB_NAME=0417_hyperparams
 
@@ -106,7 +92,17 @@ done
 # 36-1536-15: ~10.6GB
 # 36-1024-15-2blocksperlayer: ~10.2GB
 # 48-512-8: ~4.2GB
-# 13 solvent: 36-512-8: ~8.2GB
+
+# 5 solvent
+# 24-1024-8: ~ 5.4GB
+# 36-512-8: ~4.7GB
+# 36-1024-8: ~7.6GB
+# 36-1024-16: ~10.1GB
+# 60-512-8: ~7.1GB
+# 96-512-8: ~10.7GB
+
+# 13 solvent:
+# 36-512-8: ~8.2GB
 
 # Run time (2 solvent):
 # 512 to 1024 hidden --> about 2x run time.
