@@ -33,10 +33,13 @@ DECAY_ITER=(1 1 1 1 1 1 1 1)
 GRAD_NORM=(1 1 1 1 1 1 1 1)
 
 # Architecture args
-BLOCKS=(24 36 36 36 48 60 72 84)
-HIDDEN_UNITS=(1024 512 1024 1024 512 512 512 512)
-NUM_BINS=(16 8 8 16 8 8 8 8)
+BLOCKS=(24 24 36 36 24 24 36 36)
+HIDDEN_UNITS=(512 1024 512 1024 512 1024 512 1024)
+NUM_BINS=(8 8 8 8 8 8 8 8)
 BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
+
+# Target args
+CONSTRAINT_RADIUS = (0.3 0.3 0.3 0.3 0.4 0.4 0.4 0.4)
 
 JOB_NAME=0417_hyperparams
 
@@ -78,7 +81,8 @@ for index in "${!SCHEDULER[@]}"; do
       training.max_grad_norm=${GRAD_NORM[$index]} training.lr_scheduler.type=${SCHEDULER[$index]} \
       training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
       flow.blocks=${BLOCKS[index]} flow.blocks_per_layer=${BLOCKS_PER_LAYER[index]} \
-      flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]}
+      flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
+      training.constraint_radius=${CONSTRAINT_RADIUS[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
