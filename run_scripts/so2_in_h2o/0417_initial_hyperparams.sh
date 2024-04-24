@@ -82,7 +82,7 @@ for index in "${!SCHEDULER[@]}"; do
       training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
       flow.blocks=${BLOCKS[index]} flow.blocks_per_layer=${BLOCKS_PER_LAYER[index]} \
       flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
-      training.constraint_radius=${CONSTRAINT_RADIUS[index]}
+      target.constraint_radius=${CONSTRAINT_RADIUS[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
