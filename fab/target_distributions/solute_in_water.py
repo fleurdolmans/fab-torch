@@ -52,6 +52,7 @@ class TriatomicInWaterSys(TestSystem):
         False during training, for reasons mentioned in `internal_constraints` docstring.
     constraint_radius: float, radius (in nm) of the spherical constraint for keeping the droplet in place.
         Should be rounded to whole Angstrom.
+    constraint_force: float, force constant for the spherical droplet constraint.
     """
     def __init__(
             self,
@@ -64,6 +65,7 @@ class TriatomicInWaterSys(TestSystem):
             internal_constraints: str,
             rigid_water: bool,
             constraint_radius: float,
+            constraint_force: float,
             **kwargs,
     ):
         TestSystem.__init__(self, **kwargs)
@@ -73,9 +75,11 @@ class TriatomicInWaterSys(TestSystem):
         self.solute_inpcrd_path = solute_inpcrd_path
         self.solute_prmtop_path = solute_prmtop_path
         self.dim = dim
-        self.external_constraints = external_constraints
         self.internal_constraints = internal_constraints
         self.rigid_water = rigid_water
+        self.external_constraints = external_constraints
+        self.constrain_radius = constraint_radius
+        self.constraint_force = constraint_force
 
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
@@ -140,7 +144,7 @@ class TriatomicInWaterSys(TestSystem):
 
             # Add spherical restraint to hold the droplet
             force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(constraint_radius))
-            force.addGlobalParameter("w", 100.0)
+            force.addGlobalParameter("w", constraint_force)
             self.system.addForce(force)
             for i in range(self.system.getNumParticles()):
                 force.addParticle(i, [])
@@ -188,6 +192,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         False during training, for reasons mentioned in `internal_constraints` docstring.
     constraint_radius: float, radius (in nm) of the spherical constraint for keeping the droplet in place.
         Should be rounded to whole Angstrom.
+    constraint_force: float, force constant for the spherical droplet constraint.
     """
     def __init__(
         self,
@@ -214,6 +219,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         internal_constraints: str = "none",
         rigid_water: bool = False,
         constraint_radius: float = 1.0,
+        constraint_force: float = 10000.0
     ):
         super(SoluteInWater, self).__init__()
 
@@ -272,6 +278,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             internal_constraints,
             rigid_water,
             constraint_radius,
+            constraint_force,
         )
 
         # Generate trajectory for coordinate transform if no data path is specified

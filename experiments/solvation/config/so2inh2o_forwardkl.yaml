@@ -20,13 +20,14 @@ target:                               # Properties of molecular system
   solute_xml_path: ${node.data_dir}/molecules/solutes/so2.xml           # Filepath to solvent xml
   solute_inpcrd_path: null                                              # Filepath to solvent inpcrd
   solute_prmtop_path: null                                              # Filepath to solvent prmtop
-  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
   internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-  rigid_water: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
-  constraint_radius: 0.5              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  rigid_water: false                  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
+  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps100000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
-  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps100000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
   test_samples_path: null
 
 flow:                                  # Properties of the flow model

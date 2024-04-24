@@ -34,6 +34,7 @@ def run_md_sim(cfg: DictConfig):
         cfg.internal_constraints,
         cfg.rigid_water,
         cfg.constraint_radius,
+        cfg.constraint_force,
     )
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
@@ -74,7 +75,8 @@ def run_md_sim(cfg: DictConfig):
 
     # Saving data
     cnstrnts = (
-        f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
+        f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_fc{cfg.constraint_force}_"
+        f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
     )
     solute = pathlib.Path(cfg.solute_pdb_path).stem
     filename = (

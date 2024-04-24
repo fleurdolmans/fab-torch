@@ -132,5 +132,7 @@ done
 #   Would be best if we can stretch the last 10-20% of training time; e.g., run more training with lr < 0.1 * initial_lr.
 #   Perhaps running for more iters also achieves this indirectly, although this might waste computation in early/mid steps?
 
-# TODO: Current runs
-# 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins.
+# Another run analysis for 2 solvent:
+# 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins. Runs are numbered 80-82 with duplicates.
+# These all work very well, except 72 layers, which gives very high KL.
+# 36p1 gets lowest KL, 36p2 second lowest. 36p1 gets highest loss, but 36p2 is third highest loss: potentially p2 is usefull.
