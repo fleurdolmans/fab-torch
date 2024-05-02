@@ -33,13 +33,13 @@ DECAY_ITER=(1 1 1 1 1 1 1 1)
 GRAD_NORM=(1 1 1 1 1 1 1 1)
 
 # Architecture args
-BLOCKS=(24 24 36 36 24 24 36 36)
-HIDDEN_UNITS=(512 1024 512 1024 512 1024 512 1024)
+BLOCKS=(12 12 16 16 20 20 24 24)
+HIDDEN_UNITS=(256 512 256 512 256 512 256 512)
 NUM_BINS=(8 8 8 8 8 8 8 8)
 BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
 # Target args
-CONSTRAINT_RADIUS=(0.3 0.3 0.3 0.3 0.4 0.4 0.4 0.4)
+CONSTRAINT_RADIUS=(0.3 0.3 0.3 0.3 0.3 0.3 0.3 0.3)
 
 JOB_NAME=0417_hyperparams
 
@@ -139,4 +139,11 @@ done
 # Another run analysis for 2 solvent:
 # 10K MD samples, 50K iters; 36 48 60 72 layers with 512 hidden (and one with 1024 for 36 layers), 8 bins. Runs are numbered 80-82 with duplicates.
 # These all work very well, except 72 layers, which gives very high KL.
-# 36p1 gets lowest KL, 36p2 second lowest. 36p1 gets highest loss, but 36p2 is third highest loss: potentially p2 is usefull.
+# 36p1 gets lowest KL, 36p2 second lowest. 36p1 gets highest loss, but 36p2 is third highest loss: potentially p2 is useful.
+
+# Analysis for 5 solvent:
+# Running with constraint radius 0.3 and 0.4. 100K train, 10K val MD samples. 24 and 36 layers, 512 and 1024 hidden, 8 bins, 1 block per layer.
+# Runs 123-130 --> fits train really well, but overfits heavily! 0.3 seems to be better than 0.4 for structure.
+
+# Repetition of above with just 0.3 and smaller models: 12-16-20-24 layers, 256-512 hiddens. TODO:
+# Runs 131-138
