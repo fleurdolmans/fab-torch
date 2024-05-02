@@ -144,6 +144,7 @@ done
 # Analysis for 5 solvent:
 # Running with constraint radius 0.3 and 0.4. 100K train, 10K val MD samples. 24 and 36 layers, 512 and 1024 hidden, 8 bins, 1 block per layer.
 # Runs 123-130 --> fits train really well, but overfits heavily! 0.3 seems to be better than 0.4 for structure.
+# FORGOT WEIGHT DECAY!
 
-# Repetition of above with just 0.3 and smaller models: 12-16-20-24 layers, 256-512 hiddens. TODO:
-# Runs 131-138
+# Repetition of above with just 0.3 and smaller models: 12-16-24 layers, 256-512 hiddens. Also a 24+1024 and 36+512. Now with weight decay. TODO:
+# Runs 139-146

@@ -21,12 +21,14 @@ Solvation experiments are run using `experiments/solvation/run.py`. Experiments 
 
 Currently, we support two methods of training the Boltzmann Generator/Normalising Flow; likelihood (forward KL-divergence) training using MD samples and FAB training without MD samples (although MD samples are still required for evaluation). FAB is much slower, so is not recommended for initial tests; as a general rule, use it only once likelihood training with MD samples works. Configuration files for each are provided, ending in either `_forwardkl.yaml` or `_fab_pbuff.yaml` (FAB with prioritised buffer). 
 
-MD data can be created using `experiments/solvation/create_md_data.py`. This script uses the OpenMM library to run MD simulations. These scripts create data files that can be used as `train_samples_path` (or `val_samples_path` or `test_samples_path`) in the Hydra config for training and/or evaluating on MD samples.
+MD data can be created using `experiments/solvation/create_md_data.py`. This script uses the OpenMM library to run MD simulations. These scripts create data files that can be used as `train_samples_path` (or `val_samples_path` or `test_samples_path`) in the Hydra configs of the Boltzmann Generators for training and/or evaluating on MD samples.
 
 ### Example commands:
-All of these commands use a Hydra config file that specifies all the arguments for the run. These are located in `./experiments/solvation/config/`. The configs take a `node` argument that sets the machine paths. It is specified by the files in `./experiments/solvation/config/node/`: the default `node` is `desktop` (see `defaults` at the top of every config file). You can create your own node by creating a new file in `./experiments/solvation/config/node/` and specifying the paths on your machine. Then you can chance the default node of the configs to your own node to automatically run everything with the paths on your machine.
+All the below commands use a Hydra config file that specifies all the arguments for the run. These are located in `experiments/solvation/config/`. 
 
-Command should be run after activating the conda environment (here assumed to be `bgsol`).
+The configs take a `node` argument that sets the machine paths. It is specified by the files in `experiments/solvation/config/node/`: the default `node` is `desktop` (see `defaults` at the top of every config file). You can create your own node by creating a new file in `experiments/solvation/config/node/` and specifying the paths on your machine. Then you can chance the default node of the configs to your own node to automatically run everything with the paths on your machine.
+
+Commands should be run after activating the conda environment (here assumed to be `bgsol`).
 
 Create MD data:
 > $ python ./experiments/solvation/create_md_data.py --config-name make_md_data.yaml
@@ -40,7 +42,7 @@ SO2 in water, likelihood training:
 H2O in water, FAB training:
 > $ python ./experiments/solvation/run.py --config-name h2oinh2o_fab_pbuff.yaml
 
-You may need to set the `PYTHONPATH` and `LD_LIBRARY_PATH` environment variables to properly run everything when running on a cluster. Example:
+You may need to set the `PYTHONPATH` and `LD_LIBRARY_PATH` environment variables to properly run everything in some special cases, e.g. when running on a cluster. Example:
 > $ PYTHONPATH="{PATH_TO_fab-torch_DIR}" LD_LIBRARY_PATH="{PATH_TO_CONDA_DIR}/envs/bgsol/lib" ${PATH_TO_CONDA_DIR}/envs/bgsol/bin/python ./experiments/solvation/run.py --config-name so2inh2o_forwardkl.yaml
 
 
