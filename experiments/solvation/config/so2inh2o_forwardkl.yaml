@@ -11,7 +11,7 @@ hydra:
 
 target:                               # Properties of molecular system
   solvent: water
-  dim: 54  # 27                   # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
@@ -39,11 +39,11 @@ flow:                                  # Properties of the flow model
     type: gauss-uni  # gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 24  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+  blocks: 12  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 512  # 256           # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 8 # 8                    # Int, number of bins of the neural splines
+  hidden_units: 256  # 256            # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 8 # 8                     # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
@@ -76,7 +76,7 @@ training:                             # Properties of the training procedure
   use_gpu: true
   use_64_bit: true
   lr: 5.e-4  # 5.e-4                  # Double, learning rate
-  wd: 0  #1.e-5                       # Double, regularization parameter
+  wd: 1.e-5                       # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
     type: cosine                        # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
