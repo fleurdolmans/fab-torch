@@ -146,5 +146,9 @@ done
 # Runs 123-130 --> fits train really well, but overfits heavily! 0.3 seems to be better than 0.4 for structure.
 # FORGOT WEIGHT DECAY!
 
-# Repetition of above with just 0.3 and smaller models: 12-16-24 layers, 256-512 hiddens. Also a 24+1024 and 36+512. Now with weight decay. TODO:
+# Repetition of above with just 0.3 and smaller models: 12-16-24 layers, 256-512 hiddens. Also a 24+1024 and 36+512. Now with weight decay.
 # Runs 139-146
+# Doesn't fit as well (energies don't match between train and val) and logloss seems overfitted still.
+
+# 10x more data # TODO
+# Runs 147-154

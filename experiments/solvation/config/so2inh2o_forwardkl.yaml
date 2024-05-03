@@ -26,8 +26,8 @@ target:                               # Properties of molecular system
   constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
   constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
   # Filepaths to load samples from
-  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps1000000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
-  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps100000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  train_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  val_samples_path: ${node.data_dir}/molecules/md/so2InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps1000000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
   test_samples_path: null
 
 flow:                                  # Properties of the flow model
