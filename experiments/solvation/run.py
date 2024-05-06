@@ -2,7 +2,6 @@ import os
 import json
 import pathlib
 import hydra
-import warnings
 from omegaconf import DictConfig, OmegaConf
 from typing import List
 
@@ -19,6 +18,7 @@ from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 
 SAVE_DIR = None
+
 
 def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
     def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
@@ -106,7 +106,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             plt.tight_layout()
             figs.append(fig)
 
-        # RDF of flow samples vs MD samples
+        # RDF and energies of flow samples vs MD samples
         num_flow_samples = 10000
         # num_flow_samples = 1000
         # num_flow_samples = 100
@@ -123,11 +123,6 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         md_samples_boltz_logprob, md_jac = target.p.log_prob_and_jac(target_data_i)
         md_samples_energy = -1 * (md_samples_boltz_logprob - md_jac).detach().cpu().numpy() * R * T
 
-        # TODO: There seems to be one sample in every flow generation that has 2.5e8 kJ/mol energy.
-        #  Both for 8mol water and 3mol so2.
-        #  This is likely a numerical issue? Fix this.
-        #  Actually, for 3mol so2 this crazy peak moves towards 1e8 and then 3-8e6 after about 800-1000 iterations.
-        # md_samples_boltz_logprob[:3], md_jac[:3], md_samples_energy[:3], R*T, flow_samples_boltz_logprob[:3], flow_jac[:3], flow_samples_energy[:3]
         fig = plt.figure(figsize=(17, 10))
         plt.subplot(2, 2, 1)
         hist_range = (min(md_samples_r_oxygen), max(md_samples_r_oxygen))  # nm
@@ -175,26 +170,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.tight_layout()
         figs.append(fig)
 
-        # Potential alternatives: plot with MDtraj+NGLView or RDKit.
-        # from simtk.openmm import app
-        # from rdkit import Chem
-        # from rdkit.Chem import Draw
-        # import nglview
-        # import mdtraj
-        # Setup tmp folder for saving temporary pdb files.
-        # tmp_folder = pathlib.Path(SAVE_DIR) / "tmp"
-        # tmp_folder.mkdir(parents=True, exist_ok=True)
-        # tmp_file = tmp_folder / f"tmp{i}.pdb"
-        # app.PDBFile.writeFile(target.system.topology, pos.reshape(-1, 3), open(tmp_file, 'w'))
-        # Using MDtraj + NGLView to visualise the high energy states.
-        # traj = mdtraj.load(str(tmp_file))
-        # view = nglview.show_mdtraj(traj)
-        # view.add_representation("ball+stick")
-        # figs.append(view)
-        # Using RDKit
-        # molecule = Chem.MolFromPDBFile(tmp_file, removeHs=False)
-        # img = Draw.MolToImage(molecule)
-        # figs.append(img)
+        # Plot some of the molecular states in Cartesian space.
+        # Plots MD samples, and lowest + highest energy states from the flow samples.
         sorted_energy = flow_samples_energy.argsort()
         high_energy_inds = sorted_energy[-2:]
         low_energy_inds = sorted_energy[:2]
@@ -237,12 +214,6 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
                             [pos[i][1], pos[i + 2][1]],
                             [pos[i][2], pos[i + 2][2]], color='grey')
 
-            # Draw the coordinate planes for debugging
-            # plane_edges = [-0.4, 0.4]  # Just needs to be bigger than the xyz plot limits.
-            # xx, yy = np.meshgrid(plane_edges, plane_edges)
-            # ax.plot_surface(xx * 0, yy, yy, alpha=0.2, color="blue")
-            # ax.plot_surface(xx, yy * 0, yy, alpha=0.2, color="blue")
-            # ax.plot_surface(xx, yy, yy * 0, alpha=0.2, color="blue")
             # Adding labels
             ax.set_xlabel('x (nm)')
             ax.set_ylabel('y (nm)')

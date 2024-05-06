@@ -20,7 +20,7 @@ mkdir -p "${LAUNCH_DIR}"
 
 TRAIN_ITERS=50000
 NUM_EVAL=500
-NUM_PLOTS=50
+NUM_PLOTS=10
 NUM_CKPTS=1
 
 
@@ -33,9 +33,9 @@ DECAY_ITER=(1 1 1 1 1 1 1 1)
 GRAD_NORM=(1 1 1 1 1 1 1 1)
 
 # Architecture args
-BLOCKS=(12 12 16 16 24 24 24 36)
-HIDDEN_UNITS=(256 512 256 512 256 512 1024 512)
-NUM_BINS=(8 8 8 8 8 8 8 8)
+BLOCKS=(36 36 36 48 48 60 60 72)
+HIDDEN_UNITS=(512 1024 1024 512 512 512 512 512)
+NUM_BINS=(16 8 16 8 16 8 16 16)
 BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
 # Target args
@@ -150,5 +150,8 @@ done
 # Runs 139-146
 # Doesn't fit as well (energies don't match between train and val) and logloss seems overfitted still.
 
-# 10x more data # TODO
-# Runs 147-154
+# 10x more data
+# Runs 147-154: logprob no longer going down for test, this is good! More data helps. Biggest model (36 layers, 512 hidden) performs best: RDF matches, energy still not. Probably need bigger model even?
+
+# Bigger models with the 10x data # TODO
+# Runs 155-162: 36-72 layers, mostly 512 hidden, but some 36-1024. Compare with previous biggest: 36-512-8.
