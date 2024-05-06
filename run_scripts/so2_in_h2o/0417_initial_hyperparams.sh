@@ -24,40 +24,23 @@ NUM_PLOTS=10
 NUM_CKPTS=1
 
 
-## Scheduler args
-#SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine")
-#RATE_DECAY=(1 1 1 1 1 1 1 1)
-#DECAY_ITER=(1 1 1 1 1 1 1 1)
-#
-## Stability args
-#GRAD_NORM=(1 1 1 1 1 1 1 1)
-#
-## Architecture args
-#BLOCKS=(36 36 36 48 48 60 60 72)
-#HIDDEN_UNITS=(512 1024 1024 512 512 512 512 512)
-#NUM_BINS=(16 8 16 8 16 8 16 16)
-#BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
-#
-## Target args
-#CONSTRAINT_RADIUS=(0.3 0.3 0.3 0.3 0.3 0.3 0.3 0.3)
-
-
 # Scheduler args
-SCHEDULER=("cosine" "cosine")
-RATE_DECAY=(1 1)
-DECAY_ITER=(1 1)
+SCHEDULER=("cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine" "cosine")
+RATE_DECAY=(1 1 1 1 1 1 1 1)
+DECAY_ITER=(1 1 1 1 1 1 1 1)
 
 # Stability args
-GRAD_NORM=(1 1)
+GRAD_NORM=(1 1 1 1 1 1 1 1)
 
 # Architecture args
-BLOCKS=(60 72)
-HIDDEN_UNITS=(512 512)
-NUM_BINS=(16 16)
-BLOCKS_PER_LAYER=(1 1)
+BLOCKS=(36 36 36 48 48 60 60 72)
+HIDDEN_UNITS=(512 1024 1024 512 512 512 512 512)
+NUM_BINS=(16 8 16 8 16 8 16 16)
+BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
 # Target args
-CONSTRAINT_RADIUS=(0.3 0.3)
+CONSTRAINT_RADIUS=(0.3 0.3 0.3 0.3 0.3 0.3 0.3 0.3)
+
 
 JOB_NAME=0417_hyperparams
 
@@ -86,7 +69,7 @@ for index in "${!SCHEDULER[@]}"; do
   echo "#SBATCH --cpus-per-task=12" >> ${SLURM}
   echo "#SBATCH --ntasks-per-node=1" >> ${SLURM}
   echo "#SBATCH --mem=11G" >> ${SLURM}
-  echo "#SBATCH --time=1-12:00:00" >> ${SLURM}
+  echo "#SBATCH --time=3:00:00" >> ${SLURM}
   echo "#SBATCH --nodes=1" >> ${SLURM}
   echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
   {
