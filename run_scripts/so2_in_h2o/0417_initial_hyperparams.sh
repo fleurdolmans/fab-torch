@@ -72,7 +72,7 @@ for index in "${!SCHEDULER[@]}"; do
   echo "#SBATCH --cpus-per-task=12" >> ${SLURM}
   echo "#SBATCH --ntasks-per-node=1" >> ${SLURM}
   echo "#SBATCH --mem=11G" >> ${SLURM}
-  echo "#SBATCH --time=3:00:00" >> ${SLURM}
+  echo "#SBATCH --time=3-0:00:00" >> ${SLURM}
   echo "#SBATCH --nodes=1" >> ${SLURM}
   echo "export PYTHONPATH=:\$PYTHONPATH:" >> ${SLURM}
   {
