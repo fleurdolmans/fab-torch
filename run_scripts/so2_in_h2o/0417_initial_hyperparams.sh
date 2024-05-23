@@ -163,4 +163,4 @@ done
 # Above runs crashed, but did not that deeper models (48+ layers) plateaued quickly in marginal forward KL. Maybe use lower LRs?
 # Runs 175-182: 36-72 layers, mostly 512 hidden, but some 36-1024. Compare with previous biggest: 36-512-8.
 # Lower lr of 2e-4 instead of 4e-4 for 48+ layers.
-# TODO analyse
+# TODO analyse; 72 layer one failed because CUDA mem error.
