@@ -3,12 +3,10 @@ defaults:
   - _self_
   - node: desktop
 
-#solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb           # Filepath to solvent pdb
-#solute_xml_path: null
 solute_pdb_path: ${node.data_dir}/molecules/solutes/so2.pdb           # Filepath to solvent pdb
-solute_xml_path: ${node.data_dir}/molecules/solutes/so2.xml           # Filepath to solvent xml
-solute_inpcrd_path: null                                              # Filepath to solvent inpcrd
-solute_prmtop_path: null                                              # Filepath to solvent prmtop
+solute_xml_path: ${node.data_dir}/molecules/solutes/so2.xml           # Filepath to solvent xml; not needed for water solute.
+solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
+solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
 out_dir: ${node.data_dir}/molecules/md/                               # Where to store resulting MD frames.
 num_solvent_molecules: 5                # Number of solvent molecules to simulate.
 temperature: 300.0                      # Temperature in Kelvin.

@@ -17,7 +17,7 @@ target:                               # Properties of molecular system
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
   n_threads: 18                       # Int, number of threads to be used, number of cores if null
   solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb       # Filepath to solvent pdb
-  solute_xml_path: null                                               # Filepath to solvent xml; not needed for water.
+  solute_xml_path: null                                               # Filepath to solvent xml; not needed for water solute.
   solute_inpcrd_path: null                                            # Filepath to solvent inpcrd; currently unused.
   solute_prmtop_path: null                                            # Filepath to solvent prmtop; currently unused.
   internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
