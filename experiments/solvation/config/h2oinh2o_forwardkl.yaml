@@ -10,50 +10,49 @@ hydra:
     chdir: true
 
 target:                               # Properties of molecular system
-  solvent: water
+  solvent: water                      # Name of solvent molecules (currently only water is supported).
   dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 18  # 1, 18                      # Int, number of threads to be used, number of cores if null
+  n_threads: 18                       # Int, number of threads to be used, number of cores if null
   solute_pdb_path: ${node.data_dir}/molecules/solutes/water.pdb       # Filepath to solvent pdb
-  solute_xml_path: null                                               # Filepath to solvent xml
-  solute_inpcrd_path: null                                            # Filepath to solvent inpcrd
-  solute_prmtop_path: null                                            # Filepath to solvent prmtop
+  solute_xml_path: null                                               # Filepath to solvent xml; not needed for water.
+  solute_inpcrd_path: null                                            # Filepath to solvent inpcrd; currently unused.
+  solute_prmtop_path: null                                            # Filepath to solvent prmtop; currently unused.
+  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
+  rigid_water: false                  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
+  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
   # Filepaths to load samples from
   train_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
   val_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
   test_samples_path: null
-  # NOTE: Do these have to match the MD data, or do we want to generate MD data with best practices (with H2O constraints), and compute energy without constraints?
-  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
-  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-  rigid_water: false                   # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by defult (bond length and angles).
-  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
-  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
 
 flow:                                  # Properties of the flow model
-  solvent_flow: true                   # Bool, flag whether to use the flow model used for aldp in the fab paper
-  use_snf: false                      # Bool, flag whether to use Stochastic Flow
-  resampled_base: false               # Bool, flag whether to use resampled base distribution
+  solvent_flow: true                   # Bool, specifies model: this should be `true` for solute-solvent settings.
+  use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
+  resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
   type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
   base:
     type: gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  blocks: 12  #12                     # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+  blocks: 36  # 12                    # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 256  # 256            # Int, number of hidden units of the NN in neural spline layers
-  num_bins: 8 # 8, 9                   # Int, number of bins of the neural splines
+  hidden_units: 512  # 256            # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 8                         # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
-  circ_shift: random  # constant, random                  # String, whether to shift circular coordinates, can be none, constant, or random
+  circ_shift: random                  # String, whether to shift circular coordinates, can be none, constant, or random
   actnorm: False                      # Bool, flag whether to include an ActNorm layers
   mixing: null                        # String, how features are mixed
 
 
-fab:  # Just using loss_type and use_ais from this when doing forward KL training.
+fab:  # We are essentially just using the loss_type and use_ais arguments when doing forward KL training, but the rest is here for consistency.
   loss_type: forward_kl               # Whether to use AIS, and type of loss for AIS. If not AIS, rest of args are only used for potential eval.
   use_ais: false                      # Whether to use AIS for evaluation still
   n_intermediate_distributions: 8     # Int, number of intermediate distributions
@@ -68,26 +67,26 @@ fab:  # Just using loss_type and use_ais from this when doing forward KL trainin
 
 training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
-  num_workers: 4  # 4                 # Int, number of workers to be used for data loading
+  num_workers: 4                      # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  n_iterations: 5000  #50000          # Int, maximum number of iteration
+  n_iterations: 50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
   batch_size: 1024                    # Int, batch size used during training
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
   lr: 5.e-4                           # Double, learning rate
-  wd: 1.e-5                     # Double, regularization parameter
+  wd: 1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
-    type: step                        # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
-    rate_decay: 0.3                   # Double, rate of decay for exponential scheduler or LRStep.
-    decay_iter: 2000                  # Int, number of iterations before decay for exponential scheduler or LRStep.
+    type: cosine                      # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
+    rate_decay: 1                     # Double, rate of decay for exponential scheduler or LRStep.
+    decay_iter: 1                     # Int, number of iterations before decay for exponential scheduler or LRStep.
   warmup_iter: null                   # Int, number of iterations used for warmup
-  max_grad_norm: 1.e3                 # Double, limit for gradient clipping
+  max_grad_norm: 1                    # Double, limit for gradient clipping
   # Buffer args
-  use_buffer: false  # true                 # Buffer args follow below here
-  prioritised_buffer: false  #true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
+  use_buffer: false                   # Buffer args follow below here
+  prioritised_buffer: false           # If True then FAB loss WILL be used no matter what fab.loss_type is.
 
 
 evaluation:
@@ -95,15 +94,15 @@ evaluation:
   print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
   plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging.
-  n_plots: 50                         # number of times we visualise the model throughout training.
-  n_eval: 500  # ${training.n_iterations}  # 20                          # for calculating metrics of flow w.r.t target.
+  n_plots: 10                         # number of times we visualise the model throughout training.
+  n_eval: 500                         # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
-  n_checkpoints: 10                   # number of model checkpoints saved
+  n_checkpoints: 1                    # number of model checkpoints saved
 
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_iter${training.n_iterations}
+    name: ${fab.loss_type}_dim${target.dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
     project: H2O_in_H2O
     entity: timsey
 #  pandas_logger:
