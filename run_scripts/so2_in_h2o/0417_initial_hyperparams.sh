@@ -38,6 +38,9 @@ HIDDEN_UNITS=(512 1024 1024 512 512 512 512 512)
 NUM_BINS=(16 8 16 8 16 8 16 16)
 BLOCKS_PER_LAYER=(1 1 1 1 1 1 1 1)
 
+# Training ars
+LR=("5.e-4" "5.e-4" "5.e-4" "2.e-4" "2.e-4" "2.e-4" "2.e-4" "2.e-4")
+
 # Target args
 CONSTRAINT_RADIUS=(0.3 0.3 0.3 0.3 0.3 0.3 0.3 0.3)
 
@@ -83,7 +86,7 @@ for index in "${!SCHEDULER[@]}"; do
       training.lr_scheduler.rate_decay=${RATE_DECAY[$index]} training.lr_scheduler.decay_iter=${DECAY_ITER[$index]} \
       flow.blocks=${BLOCKS[index]} flow.blocks_per_layer=${BLOCKS_PER_LAYER[index]} \
       flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
-      target.constraint_radius=${CONSTRAINT_RADIUS[index]}
+      target.constraint_radius=${CONSTRAINT_RADIUS[index]} training.lr=${LR[index]}
   } >> ${SLURM}
 
   sbatch ${SLURM}
@@ -154,5 +157,10 @@ done
 # 10x more data
 # Runs 147-154: logprob no longer going down for test, this is good! More data helps. Biggest model (36 layers, 512 hidden) performs best: RDF matches, energy still not. Probably need bigger model even?
 
-# Bigger models with the 10x data # TODO
-# Runs 155-162: 36-72 layers, mostly 512 hidden, but some 36-1024. Compare with previous biggest: 36-512-8.
+# Bigger models with the 10x data: lots of crashes?
+# Runs 155-174: 36-72 layers, mostly 512 hidden, but some 36-1024. Compare with previous biggest: 36-512-8.
+
+# Above runs crashed, but did not that deeper models (48+ layers) plateaued quickly in marginal forward KL. Maybe use lower LRs?
+# Runs 175-182: 36-72 layers, mostly 512 hidden, but some 36-1024. Compare with previous biggest: 36-512-8.
+# Lower lr of 2e-4 instead of 4e-4 for 48+ layers.
+# TODO analyse
