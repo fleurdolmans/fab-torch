@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=1:00:00
+#SBATCH --time=0:50:00
 
 module purge
 module load 2025
@@ -39,4 +39,4 @@ export PYTHONPATH="${MAIN_DIR}:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
 srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
-  --config-name make_md_data.yaml solute_name=so2
+  --config-name make_md_data.yaml solute_name=water solute_xml_path=null

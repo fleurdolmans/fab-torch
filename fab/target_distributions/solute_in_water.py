@@ -99,6 +99,7 @@ class TriatomicInWaterSys(TestSystem):
             # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
             modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
             forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
+            # forcefield = app.ForceField('amber19-all.xml', 'amber19/tip3pfb.xml')
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
             if solute_xml_path is not None:
                 forcefield.loadFile(solute_xml_path)

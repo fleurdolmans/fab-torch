@@ -3,9 +3,12 @@
 # Name of project folder
 PROJECT_NAME=fab-torch
 # Original code folder is here
-MAIN_DIR=/home/tbbakke/${PROJECT_NAME}
+BASE_DIR="${SCRATCH:-$HOME}"
+MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
+
+
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch/
+LAUNCH_DIR="${MAIN_DIR}/launch"
 mkdir -p "${LAUNCH_DIR}"
 
 TRAIN_ITERS=10000
