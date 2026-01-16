@@ -2,3 +2,13 @@
 *__pycache__/
 *.pt
 *.ipynb_checkpoints/
+
+# SLURM output
+slurm-*.out
+slurm-*.err
+
+# Scratch / launch dirs
+launch/
+
+# Old files
+requirements_old.txt

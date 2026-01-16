@@ -3,8 +3,10 @@ defaults:
   - _self_
   - node: desktop
 
-solute_pdb_path: ${node.data_dir}/molecules/solutes/so2.pdb           # Filepath to solvent pdb
-solute_xml_path: ${node.data_dir}/molecules/solutes/so2.xml           # Filepath to solvent xml; not needed for water solute.
+solute_name: so2                        # Name of the solute molecule. Default is so2.
+solute_pdb_path: ${node.data_dir}/molecules/solutes/${solute_name}.pdb           # Filepath to solvent pdb
+solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml           # Filepath to solvent xml; not needed for water solute.
+
 solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
 solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
 out_dir: ${node.data_dir}/molecules/md/                               # Where to store resulting MD frames.

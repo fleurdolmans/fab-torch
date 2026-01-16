@@ -1,9 +1,14 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from simtk import openmm as mm
-from simtk import unit
-from simtk.openmm import app
+# from simtk import openmm as mm
+# from simtk import unit
+# from simtk.openmm import app
+
+import openmm as mm
+from openmm import unit
+from openmm import app
+
 from mdtraj.reporters import HDF5Reporter
 from sys import stdout
 import json
