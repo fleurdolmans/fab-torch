@@ -223,6 +223,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         transition_operator = None
 
+    print("GPU available:",torch.cuda.is_available())
     # use GPU if available
     if torch.cuda.is_available() and cfg.training.use_gpu:
         flow.cuda()
@@ -309,6 +310,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         optimizer = torch.optim.Adamax(optimizer_param, lr=lr, weight_decay=weight_decay)
     else:
         raise NotImplementedError("The optimizer " + optimizer_name + " is not implemented.")
+    
     # Scheduler
     if "lr_scheduler" in cfg.training:
         if cfg.training.lr_scheduler.type == "exponential":
