@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-source /home/timsey/anaconda3/bin/activate fab
+source /home/fdolmans/anaconda3/bin/activate fab
 
 nvidia-smi
 
-HOME_DIR=/home/timsey
+HOME_DIR=/home/fdolmans
 CONDA_ENV_DIR=${HOME_DIR}/anaconda3/envs/fab
 PROJECT_DIR=${HOME_DIR}/Projects/fab-torch
 
