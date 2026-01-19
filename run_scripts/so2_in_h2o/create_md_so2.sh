@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:10:00
+#SBATCH --time=01:40:00
 
 module purge
 module load 2025

@@ -52,7 +52,7 @@ for index in "${!BLOCKS[@]}"; do
     echo nvidia-smi
     echo PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}" HYDRA_FULL_ERROR=0 PYTHONUNBUFFERED=1 CUDA_VISIBLE_DEVICES=0 \
       /home/tbbakke/anaconda3/envs/bgsol/bin/python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \
-      --config-name h2oinh2o_forwardkl.yaml node=ivicl \
+      --config-name h2oinh2o_forwardkl.yaml \
       training.n_iterations=${TRAIN_ITERS} evaluation.n_eval=${NUM_EVAL} evaluation.n_plots=${NUM_PLOTS} evaluation.n_checkpoints=${NUM_CKPTS} \
       flow.blocks=${BLOCKS[index]} flow.hidden_units=${HIDDEN_UNITS[index]} flow.num_bins=${NUM_BINS[index]} \
       training.lr=${LR[index]} training.wd=${WD[index]}
