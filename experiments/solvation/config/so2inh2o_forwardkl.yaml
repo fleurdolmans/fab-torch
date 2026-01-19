@@ -105,6 +105,6 @@ logger:
   wandb:
     name: ${fab.loss_type}_dim${target.dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
     project: SO2_in_H2O
-    entity: timsey
+    entity: fleur-dolmans-university-of-amsterdam
 #  pandas_logger:
 #    save_period: 100                  # how often to save the pandas dataframe as a csv
