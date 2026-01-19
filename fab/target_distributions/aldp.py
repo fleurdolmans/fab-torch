@@ -5,9 +5,10 @@ import numpy as np
 from fab.target_distributions.base import TargetDistribution
 
 import boltzgen as bg
-from simtk import openmm as mm
-from simtk import unit
-from simtk.openmm import app
+import openmm as mm
+from openmm import unit
+from openmm import app
+
 from openmmtools import testsystems
 import mdtraj
 import tempfile
