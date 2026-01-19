@@ -9,7 +9,7 @@ solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml          
 
 solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
 solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
-out_dir: ${node.data_dir}/molecules/md/                               # Where to store resulting MD frames.
+out_dir: ${node.data_dir}/molecules/md/${solute_name}/                # Where to store resulting MD frames.
 num_solvent_molecules: 5                # Number of solvent molecules to simulate.
 temperature: 300.0                      # Temperature in Kelvin.
 femtoseconds_per_timestep: 0.5          # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
@@ -24,3 +24,4 @@ rigid_water: false                      # Rigid water molecules true/false.
 constraint_radius: 0.3                  # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
 constraint_force: 10000.0               # Force constant of the spherical droplet constraint in kJ/mol/nm^2
 plot_md_data: false                     # Plot some diagnostics after simulation yes/no.
+platform_name: "Reference"              # OpenMM platform to use: "CUDA", "CPU", "OpenCL", or "Reference".

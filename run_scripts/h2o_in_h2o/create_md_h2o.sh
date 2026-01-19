@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=fab-torch-md
-#SBATCH --output=slurm-%j.out
-#SBATCH --error=slurm-%j.err
+#SBATCH --job-name=md-h2o-in-h2o
+#SBATCH --output=logs/slurm-h2o-%j.out
+#SBATCH --error=logs/slurm-h2o-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=0:50:00
+#SBATCH --partition=gpu_h100
+#SBATCH --time=00:10:00
 
 module purge
 module load 2025
