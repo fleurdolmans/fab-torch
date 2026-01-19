@@ -10,4 +10,4 @@ normflows==1.6.1
 numpy
 pandas>=2.2
 tqdm==4.64.1
-wandb==0.16.6
+wandb==0.24.0
