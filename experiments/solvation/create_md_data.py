@@ -142,6 +142,7 @@ def run_md_sim(cfg: DictConfig):
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     run_md_sim(cfg)
+    print("MD data creation completed. MD data saved in ", cfg.out_dir)
 
 
 if __name__ == "__main__":
