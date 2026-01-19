@@ -1,9 +1,7 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-# from simtk import openmm as mm
-# from simtk import unit
-# from simtk.openmm import app
+import os
 
 import openmm as mm
 from openmm import unit
@@ -51,7 +49,7 @@ def run_md_sim(cfg: DictConfig):
         system.topology,
         system.system,
         integrator,
-        platform=mm.Platform.getPlatformByName("Reference"),
+        platform=mm.Platform.getPlatformByName(cfg.platform_name),
     )
     sim.context.setPositions(system.positions)
     # Minimize energy: Perform an energy minimization to remove any irregularities in the initial configuration
@@ -93,15 +91,17 @@ def run_md_sim(cfg: DictConfig):
     with open((out_dir / filename).with_suffix(".json"), "w") as f:
         json.dump(cfg_dict, f, indent=4)
     sim.reporters.append(HDF5Reporter(str(out_dir / filename), cfg.save_interval))
+    
     sim.reporters.append(
         app.statedatareporter.StateDataReporter(
-            str(out_dir / "last_md_run_data.txt"),
+            str(out_dir / "last_md_run_start.txt"),
             cfg.save_interval,
             step=True,
             potentialEnergy=True,
             temperature=True,
         )
     )
+
     # Run the production simulation: Finally, run the simulation for a desired number of steps:
     sim.step(cfg.num_steps)
 
@@ -109,7 +109,7 @@ def run_md_sim(cfg: DictConfig):
     if cfg.plot_md_data:
         import matplotlib.pyplot as plt
         # Load data of this run from disk.
-        with open(out_dir / "last_md_run_data.txt", "r") as f:
+        with open(out_dir / "last_md_run_start.txt", "r") as f:
             report = f.read()
             steps, energies, temps = [], [], []
             for r, line in enumerate(report.split("\n")[1:]):
