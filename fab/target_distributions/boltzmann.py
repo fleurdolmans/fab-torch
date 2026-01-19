@@ -2,9 +2,9 @@ import torch
 from torch import nn
 import numpy as np
 
-from simtk import openmm as mm
-from simtk import unit
-from simtk.openmm import app
+import openmm as mm
+from openmm import unit
+from openmm import app
 
 import multiprocessing as mp
 

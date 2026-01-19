@@ -13,9 +13,9 @@ import numpy as np
 import torch
 from torch import nn
 from torch import Tensor
-from simtk import openmm as mm
-from simtk import unit
-from simtk.openmm import app
+import openmm as mm
+from openmm import unit
+from openmm import app
 from openmmtools.testsystems import TestSystem
 
 from fab.utils.logging import Logger
