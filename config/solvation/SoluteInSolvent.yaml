@@ -1,0 +1,118 @@
+# Config file specifying the setup of a Boltzmann Generator
+defaults:
+  - _self_
+  - node: snellius
+  - user: fleur
+
+hydra:
+  run:
+    dir: ${node.output_dir}/SoluteIn${target.solvent}/${target.solute_name}_in_${target.solvent}/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+  job:
+    chdir: true
+
+target:                               # Properties of molecular system
+  solute_name: water                  # Name of the solute molecule. Default is water.
+  solvent: water                      # Name of solvent molecules (currently only water is supported).
+  dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  temperature: 300                    # Double, temperature of the system
+  energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
+  energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
+  n_threads: 18                       # Int, number of threads to be used, number of cores if null
+  solute_pdb_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.pdb           # Filepath to solvent pdb
+  solute_xml_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.xml           # Filepath to solvent xml. Not needed for water solute, fill in null in that case.
+  solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
+  solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
+  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
+  rigid_water: false                  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
+  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
+  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
+  # Filepaths to load samples from
+  train_samples_path: ${node.data_dir}/molecules/md/${target.solute_name}/${target.solute_name}In${target.solvent}_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  val_samples_path: ${node.data_dir}/molecules/md/${target.solute_name}/${target.solute_name}In${target.solvent}_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps1000000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  test_samples_path: null
+
+flow:                                  # Properties of the flow model
+  solvent_flow: true                   # Bool, specifies model: this should be `true` for solute-solvent settings.
+  use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
+  resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
+  type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
+  base:
+    type: gauss-uni
+    params: null
+    learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
+  blocks: 36  # 12                    # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
+                                      #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
+  blocks_per_layer: 1                 # Int, number of blocks per layer
+  hidden_units: 512  # 256            # Int, number of hidden units of the NN in neural spline layers
+  num_bins: 8                         # Int, number of bins of the neural splines
+  init_identity: True                 # Bool, flag whether to initialize layers as identity map
+  dropout: 0.                         # Float, dropout probability for the NN layers
+                                      # For below: if specified, a permutation, and a affine coupling layer
+  circ_shift: random                  # String, whether to shift circular coordinates, can be none, constant, or random
+  actnorm: False                      # Bool, flag whether to include an ActNorm layers
+  mixing: null                        # String, how features are mixed
+
+
+fab:  
+  loss_type: fab_alpha_div            # Whether to use AIS, and type of loss for AIS. Default 'fab_alpha_div' uses AIS. If non-AIS, rest of args only used for potential eval.
+  use_ais: true                       # Whether to use AIS for evaluation still. Default is true.
+  n_intermediate_distributions: 8     # Int, number of intermediate distributions
+  alpha: 2.0
+  transition_operator:
+    type: hmc                         # Type of MCMC transition to use; hmc=Hamiltonian Monte Carlo.
+    n_inner_steps: 4                  # Number of leapfrog steps to take in each HMC transition.
+    init_step_size: 0.05              # original eps = 0.1 / 2
+    tune_step_size: true              # Bool, flag whether to adjust step size for Metropolis
+    target_p_accept: 0.65             # Target acceptance probability for Metropolis-Hastings step size tuning.
+
+
+training:                             # Properties of the training procedure
+  seed: 0                             # Int, seed to be used for the random number generator
+  num_workers: 4                      # Int, number of workers to be used for data loading
+  checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
+  n_iterations: 50000                 # Int, maximum number of iteration
+  n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
+  batch_size: 1024                    # Int, batch size used during training
+  tlimit: null                        # Int, time limit of run in seconds
+  use_gpu: true
+  use_64_bit: true
+  lr: 5.e-4                           # Double, learning rate
+  wd: 1.e-5                           # Double, regularization parameter
+  optimizer: adam                     # String, name of the optimizer
+  lr_scheduler:
+    type: cosine                      # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
+    rate_decay: 1                     # Double, rate of decay for exponential scheduler or LRStep.
+    decay_iter: 1                     # Int, number of iterations before decay for exponential scheduler or LRStep.
+  warmup_iter: null                   # Int, number of iterations used for warmup
+  max_grad_norm: 1                    # Double, limit for gradient clipping
+  buffer:                             # Buffer args follow below here 
+    use: true                  # Whether to use a replay buffer during training.
+    prioritised: true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
+    # Only used when buffer.use is true:
+    maximum_length: 524288     # ALDP used 512 * 1024 (batch_size)
+    min_length: 65536          # ALDP used 64 * 1024 (batch_size); this means a long initial step where the buffer is filled to this number of samples!
+    n_batches_sampling: 8      # Number of updates (batches) to do after every buffer sampling step
+    w_adjust_max_clip: 10      # clipping of weight adjustment factor for prioritised replay
+    temp: 1.0                  # Rate that we weight new experience over old (for non-prioritised replay only)
+    log_w_clip_frac: null      # Null for no clipping, for non-prioritised replay only.
+
+
+evaluation:
+  eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
+  print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
+  plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
+  plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging.
+  n_plots: 10                         # number of times we visualise the model throughout training.
+  n_eval: 500                         # for calculating metrics of flow w.r.t target.
+  eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
+  n_checkpoints: 1                    # number of model checkpoints saved
+
+
+logger:
+  wandb:
+    name: ${fab.loss_type}_dim${target.dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
+    project: ${target.solvent}_in_${target.solvent}
+    entity: ${user.wandb.entity}
+#  pandas_logger:
+#    save_period: 100                  # how often to save the pandas dataframe as a csv
