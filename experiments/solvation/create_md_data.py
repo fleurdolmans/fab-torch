@@ -25,6 +25,9 @@ def run_md_sim(cfg: DictConfig):
     out_dir = pathlib.Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if cfg.solvent != "water":
+        raise NotImplementedError("Currently only water solvent is supported.")
+
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
     system = TriatomicInWaterSys(
@@ -83,7 +86,7 @@ def run_md_sim(cfg: DictConfig):
     )
     solute = pathlib.Path(cfg.solute_pdb_path).stem
     filename = (
-        f"{solute}InWater_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
+        f"{solute}In{cfg.solvent}_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
         f"_steps{int(cfg.num_steps)}_fpt{cfg.femtoseconds_per_timestep}_every{int(cfg.save_interval)}{cnstrnts}.h5"
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
