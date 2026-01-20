@@ -1,8 +1,9 @@
 # Config file specifying the setup of a Boltzmann Generator
 defaults:
   - _self_
-  - node: desktop
+  - node: snellius
 
+solvent: water                      # Name of solvent molecules (currently only water is supported).
 solute_name: so2                        # Name of the solute molecule. Default is so2.
 solute_pdb_path: ${node.data_dir}/molecules/solutes/${solute_name}.pdb           # Filepath to solvent pdb
 solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml           # Filepath to solvent xml; not needed for water solute.
@@ -24,4 +25,4 @@ rigid_water: false                      # Rigid water molecules true/false.
 constraint_radius: 0.3                  # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
 constraint_force: 10000.0               # Force constant of the spherical droplet constraint in kJ/mol/nm^2
 plot_md_data: false                     # Plot some diagnostics after simulation yes/no.
-platform_name: "CUDA"                   # OpenMM platform to use: "CUDA", "CPU", "OpenCL", or "Reference".
+platform_name: "Reference"              # OpenMM platform to use: "CUDA", "CPU", "OpenCL", or "Reference".

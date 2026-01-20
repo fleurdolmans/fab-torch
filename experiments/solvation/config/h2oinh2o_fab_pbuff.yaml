@@ -27,7 +27,7 @@ target:                               # Properties of molecular system
   constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
   # Filepaths to load samples from. Training data is not necessary when using FAB loss (energy training).
   train_samples_path: null
-  val_samples_path: ${node.data_dir}/molecules/md/waterInWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  val_samples_path: ${node.data_dir}/molecules/md/${target.solute_name}InWater_dim${target.dim}_temp${target.temperature}_eq10000_burn100000_steps10000_fpt0.5_every10_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
   test_samples_path: null
 
 flow:                                  # Properties of the flow model
