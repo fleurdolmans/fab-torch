@@ -39,4 +39,4 @@ export PYTHONPATH="${MAIN_DIR}:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 
 srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
-  --config-name make_md_data.yaml solute_name=so2
+  --config-name entry experiment=make_md_data solute_name=so2
