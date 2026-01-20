@@ -141,7 +141,7 @@ def run_md_sim(cfg: DictConfig):
         plt.close()
 
 
-@hydra.main(config_path="./config/", config_name="make_md_data.yaml", version_base="1.1")
+@hydra.main(config_path="./config/", config_name="entry", version_base="1.1")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     run_md_sim(cfg)
