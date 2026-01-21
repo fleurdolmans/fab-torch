@@ -1,7 +1,4 @@
-hydra:
-  searchpath:
-    - file://${oc.env:PROJECT_ROOT}/config
-
 defaults:
   - _self_
-  - experiment: SoluteInSolvent
+  - /node: snellius
+  - /user: fleur
