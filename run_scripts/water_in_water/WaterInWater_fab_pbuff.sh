@@ -52,11 +52,12 @@ export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
 export PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES=""
+export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
-  --config-name entry experiment=SoluteInSolvent \\
+  --config-name SoluteInSolvent \\
   target.solute=${SOLUTE} target.solvent=${SOLVENT} target.solute_xml_path=null \\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
   training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
