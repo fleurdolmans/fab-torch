@@ -37,6 +37,10 @@ srun nvidia-smi
 # Environment variables (no need to force CUDA_VISIBLE_DEVICES; Slurm sets GPU visibility)
 export PYTHONPATH="${MAIN_DIR}:${PYTHONPATH:-}"
 export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
+export MAIN_DIR="${MAIN_DIR}"
 
+# Create MD data for SO2 in water and plot diagnostics
 srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
-  --config-name entry experiment=make_md_data solute_name=water solute_xml_path=null
+  --config-name make_md_data \
+  solute_name=water \
+  solute_xml_path=null 
