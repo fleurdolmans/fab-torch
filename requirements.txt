@@ -8,6 +8,7 @@ mdtraj
 nflows==0.14
 normflows==1.6.1
 numpy
+nglview
 pandas>=2.2
 tqdm==4.64.1
 wandb==0.24.0
