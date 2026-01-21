@@ -1,8 +1,11 @@
 # Config file specifying the setup of a Boltzmann Generator
+hydra:
+  searchpath:
+    - file://${oc.env:MAIN_DIR}/config
+    
 defaults:
+  - entry 
   - _self_
-  - node: snellius
-  - user: fleur
 
 hydra:
   run:

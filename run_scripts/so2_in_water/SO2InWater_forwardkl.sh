@@ -52,13 +52,14 @@ export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
 export PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES=""
+export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
 
 # We are essentially just using the loss_type and use_ais arguments when doing forward KL training.
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
-  --config-name entry experiment=SoluteInSolvent \\
+  --config-name SoluteInSolvent \\
   target.solute=${SOLUTE} target.solvent=${SOLVENT} \\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\

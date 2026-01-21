@@ -14,6 +14,52 @@ import pathlib
 
 from fab.target_distributions.solute_in_water import TriatomicInWaterSys
 
+def plot_md_diagnostics(report_path: str | pathlib.Path, save_dir: str | pathlib.Path | None = None, show: bool = False):
+    import matplotlib.pyplot as plt
+    # Load data of this run from disk.
+    report_path = pathlib.Path(report_path)
+
+    # Load data of this run from disk.
+    with open(report_path, "r") as f:
+        report = f.read()
+
+    steps, energies, temps = [], [], []
+    for r, line in enumerate(report.split("\n")[1:]):  # skip header
+        if not line:
+            continue
+        step, energy, temp = line.split(",")
+        if r == 0:
+            initial_step = int(float(step))
+        steps.append(int(float(step)) - initial_step)
+        energies.append(float(energy))
+        temps.append(float(temp))
+
+    fig, ax1 = plt.subplots()
+    ax1.plot(steps, energies, label="Potential energy")
+    ax1.set_ylabel("Potential energy (kJ/mol)")
+    ax1.set_ylim(min(energies) * 1.05, 0)
+    ax1.legend(loc="upper left")
+
+    ax2 = ax1.twinx()
+    ax2.plot(steps, temps, label="Temperature")
+    ax2.set_ylabel("Temperature (K)")
+    ax2.legend(loc="upper right")
+
+    ax1.set_xlabel("Saved frame index (relative steps)")
+    plt.tight_layout()
+
+    if save_dir is not None:
+        save_dir = pathlib.Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        out_path = save_dir / "md_energy_temperature.png"
+        fig.savefig(out_path, dpi=300)
+        print(f"Saved MD diagnostics plot to {out_path}")
+
+    if show:
+        plt.show()
+    
+    plt.close(fig)
+
 
 def run_md_sim(cfg: DictConfig):
     """
@@ -108,44 +154,17 @@ def run_md_sim(cfg: DictConfig):
     # Run the production simulation: Finally, run the simulation for a desired number of steps:
     sim.step(cfg.num_steps)
 
-    # Plot some diagnostics.
-    if cfg.plot_md_data:
-        import matplotlib.pyplot as plt
-        # Load data of this run from disk.
-        with open(out_dir / "last_md_run_start.txt", "r") as f:
-            report = f.read()
-            steps, energies, temps = [], [], []
-            for r, line in enumerate(report.split("\n")[1:]):
-                if len(line) == 0:
-                    continue
-                step, energy, temp = line.split(",")
-                if r == 0:
-                    initial_step = int(float(step))
-                steps.append(int(float(step)) - initial_step)
-                energies.append(float(energy))
-                temps.append(float(temp))
 
-        fig, ax1 = plt.subplots()
-        ax1.plot(steps, energies, label="Potential energy")
-        ax1.set_ylabel("MD energy estimate (kJ/mol)")
-        ax1.set_ylim(min(energies) * 1.05, 0)
-        plt.legend(loc="upper left")
-
-        ax2 = ax1.twinx()
-        ax2.plot(steps, temps, label="Temperature", color="orange")
-        ax2.set_ylabel("MD temperature estimate (K)")
-        plt.legend(loc="upper right")
-
-        plt.xlabel("MD sample index")
-        plt.show()
-        plt.close()
-
-
-@hydra.main(config_path="./config/", config_name="entry", version_base="1.1")
+@hydra.main(config_path="./config/", config_name="make_md_data", version_base="1.1")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    run_md_sim(cfg)
-    print("MD data creation completed. MD data saved in ", cfg.out_dir)
+    if cfg.run_md:
+        run_md_sim(cfg)
+        print("MD data creation completed. MD data saved in ", cfg.out_dir)
+    
+    # Plot MD diagnostics.
+    if cfg.plot.md_diagnostics:
+        plot_md_diagnostics(report_path=pathlib.Path(cfg.out_dir) / "last_md_run_start.txt", save_dir=cfg.plot.save_dir, show=cfg.plot.show)
 
 
 if __name__ == "__main__":

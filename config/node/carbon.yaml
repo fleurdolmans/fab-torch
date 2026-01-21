@@ -1,7 +1,3 @@
-defaults:
-  - _self_
-  - user: fleur
-
 name: carbon
 data_dir: /home/${user.username}/HDD/data
 output_dir: /home/${user.username}/HDD/results/fab
