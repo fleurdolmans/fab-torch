@@ -12,3 +12,6 @@ launch/
 
 # Old files
 requirements_old.txt
+
+# Macbook file
+.DS_Store
