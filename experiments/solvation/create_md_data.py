@@ -130,8 +130,8 @@ def run_md_sim(cfg: DictConfig):
         f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
     )
     filename = (
-        f"{cfg.solute_name_name}In{cfg.solvent_name}_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
-        f"_steps{int(cfg.num_steps)}_fpt{cfg.femtoseconds_per_timestep}_every{int(cfg.save_interval)}{cnstrnts}.h5"
+        f"{cfg.solute_name_name}In{cfg.solvent_name}_dim{int(dim)}_temp{cfg.temperature}_eq{cfg.equi_steps}_burn{cfg.burnin_steps}"
+        f"_steps{cfg.num_steps}_fpt{cfg.femtoseconds_per_timestep}_every{cfg.save_interval}{cnstrnts}.h5"
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict["cartesian_dim"] = dim
