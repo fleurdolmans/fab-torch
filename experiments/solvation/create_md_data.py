@@ -4,8 +4,7 @@ from omegaconf import DictConfig, OmegaConf
 import os
 
 import openmm as mm
-from openmm import unit
-from openmm import app
+from openmm import unit, app
 
 from mdtraj.reporters import HDF5Reporter
 from sys import stdout
@@ -130,9 +129,8 @@ def run_md_sim(cfg: DictConfig):
         f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_fc{cfg.constraint_force}_"
         f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
     )
-    solute = pathlib.Path(cfg.solute_pdb_path).stem
     filename = (
-        f"{solute}In{cfg.solvent}_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
+        f"{cfg.solute_name_name}In{cfg.solvent_name}_dim{int(dim)}_temp{int(cfg.temperature)}_eq{int(cfg.equi_steps)}_burn{int(cfg.burnin_steps)}"
         f"_steps{int(cfg.num_steps)}_fpt{cfg.femtoseconds_per_timestep}_every{int(cfg.save_interval)}{cnstrnts}.h5"
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)

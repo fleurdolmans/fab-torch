@@ -283,7 +283,7 @@ def _run(cfg: DictConfig) -> None:
     # - media: Directory containing any media files logged to Wandb, such as images.
 
     # Target distribution setup
-    if cfg.target.solvent == "water":
+    if cfg.target.solvent_name == "water":
         target = SoluteInWater(
             solute_pdb_path=cfg.target.solute_pdb_path,
             solute_xml_path=cfg.target.solute_xml_path,
@@ -321,7 +321,7 @@ def _run(cfg: DictConfig) -> None:
     setup_trainer_and_run_flow(cfg, setup_triatomic_in_h2o_plotter, target)
 
 # Run with hydra configuration.
-@hydra.main(config_path="./config/", config_name="entry", version_base="1.1")
+@hydra.main(config_path="./config/", config_name="SoluteInSolvent", version_base="1.1")
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     _run(cfg)
