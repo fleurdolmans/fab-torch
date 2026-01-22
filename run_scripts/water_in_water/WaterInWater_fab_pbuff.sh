@@ -5,7 +5,6 @@ PROJECT_NAME="fab-torch"
 # Original code folder is here
 BASE_DIR="${SCRATCH:-$HOME}"
 MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
-CONDA_ENV_DIR=${BASE_DIR}/anaconda3/envs/bgsol
 
 CONDA_ENV="bgsol"
 
@@ -58,7 +57,7 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute=${SOLUTE} target.solvent=${SOLVENT} target.solute_xml_path=null \\
+  target.solvent_name=${SOLUTE} target.solvent_name=${SOLVENT} target.solute_xml_path=null \\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
   training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF

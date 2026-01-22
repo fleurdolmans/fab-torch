@@ -8,7 +8,7 @@ defaults:
   - _self_
 
 solvent: water                      # Name of solvent molecules (currently only water is supported).
-solute_name: so2                        # Name of the solute molecule. Default is so2.
+solute: so2                        # Name of the solute molecule. Default is so2.
 solute_pdb_path: ${node.data_dir}/molecules/solutes/${solute_name}.pdb           # Filepath to solvent pdb
 solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml           # Filepath to solvent xml; not needed for water solute.
 
