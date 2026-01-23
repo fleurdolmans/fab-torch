@@ -96,8 +96,7 @@ def setup_buffer(
         dim = fab_model.target_distribution.internal_dim  # Use internal dimension if provided
     else:
         dim = cfg.target.dim  # applies to flow and target
-    if cfg.training.prioritised_buffer is False:
-
+    if cfg.training.buffer.prioritised is False:
         def initial_sampler():
             # used to fill the replay buffer up to its minimum size
             x, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
@@ -107,10 +106,10 @@ def setup_buffer(
 
         buffer = ReplayBuffer(
             dim=dim,
-            max_length=cfg.training.maximum_buffer_length,
-            min_sample_length=cfg.training.min_buffer_length,
+            max_length=cfg.training.buffer.maximum_length,
+            min_sample_length=cfg.training.buffer.min_length,
             initial_sampler=initial_sampler,
-            temperature=cfg.training.buffer_temp,
+            temperature=cfg.training.buffer.temp,
         )
     else:
         # buffer
@@ -122,8 +121,8 @@ def setup_buffer(
 
         buffer = PrioritisedReplayBuffer(
             dim=dim,
-            max_length=cfg.training.maximum_buffer_length,
-            min_sample_length=cfg.training.min_buffer_length,
+            max_length=cfg.training.buffer.maximum_length,
+            min_sample_length=cfg.training.buffer.min_length,
             initial_sampler=initial_sampler,
             fill_buffer_during_init=auto_fill_buffer,
         )
@@ -158,7 +157,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         dim = target.internal_dim  # Use internal dimension if provided
     else:
         dim = cfg.target.dim  # applies to flow and target
-    p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.prioritised_buffer
+    p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.buffer.prioritised
     if cfg.flow.solvent_flow:
         flow = make_wrapped_normflow_solvent_flow(
             cfg,
@@ -282,8 +281,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     #     n_transition_operator_inner_steps=cfg.fab.transition_operator.n_inner_steps,
     #     n_intermediate_ais_dist=cfg.fab.n_intermediate_distributions,
     #     transition_operator_type=cfg.fab.transition_operator.type,
-    #     use_buffer=cfg.training.use_buffer,
-    #     min_buffer_length=cfg.training.min_buffer_length,
+    #     use_buffer=cfg.training.buffer.user,
+    #     min_buffer_length=cfg.training.buffer.min_length,
     # )
     print(f"Running for {n_iterations} iterations.")
     cfg.training.n_iterations = n_iterations
@@ -356,12 +355,14 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         )
 
     # Create buffer if needed
-    print("Setting up buffer...")
-    buffer_time = time.time()
-    if cfg.training.use_buffer is True:
+    if cfg.training.buffer.use is True:
+        print("Setting up buffer...")
+        buffer_time = time.time()
+
         buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=chkpt_dir is None)
     else:
         buffer = None
+
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
         fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location)
@@ -380,7 +381,23 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     plot = setup_plotter(cfg, target, buffer)
 
     # Create trainer
-    if cfg.training.use_buffer is False:
+    if buffer:
+        trainer = PrioritisedBufferTrainer(
+            model=fab_model,
+            optimizer=optimizer,
+            logger=logger,
+            plot=plot,
+            optim_scheduler=scheduler,
+            save_path=save_path,
+            buffer=buffer,
+            n_batches_buffer_sampling=cfg.training.buffer.n_batches_sampling,
+            max_gradient_norm=cfg.training.max_grad_norm,
+            w_adjust_max_clip=cfg.training.buffer.w_adjust_max_clip,
+            alpha=cfg.fab.alpha,
+            lr_step=lr_step,
+            warmup_scheduler=warmup_scheduler,
+        )
+    else:
         # TODO: Implement this for forward KL training with MD data!
         # raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
         trainer = Trainer(
@@ -394,35 +411,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             lr_step=lr_step,
             print_eval=cfg.evaluation.print_eval,
         )
-    # elif cfg.training.prioritised_buffer is False:
-    #     trainer = BufferTrainer(
-    #         model=fab_model,
-    #         optimizer=optimizer,
-    #         logger=logger,
-    #         plot=plot,
-    #         optim_scheduler=scheduler,
-    #         save_path=save_path,
-    #         buffer=buffer,
-    #         n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
-    #         clip_ais_weights_frac=cfg.training.log_w_clip_frac,
-    #         max_gradient_norm=cfg.training.max_grad_norm,
-    #     )
-    else:
-        trainer = PrioritisedBufferTrainer(
-            model=fab_model,
-            optimizer=optimizer,
-            logger=logger,
-            plot=plot,
-            optim_scheduler=scheduler,
-            save_path=save_path,
-            buffer=buffer,
-            n_batches_buffer_sampling=cfg.training.n_batches_buffer_sampling,
-            max_gradient_norm=cfg.training.max_grad_norm,
-            w_adjust_max_clip=cfg.training.w_adjust_max_clip,
-            alpha=cfg.fab.alpha,
-            lr_step=lr_step,
-            warmup_scheduler=warmup_scheduler,
-        )
+        
 
     print("Starting training...")
     trainer.run(
