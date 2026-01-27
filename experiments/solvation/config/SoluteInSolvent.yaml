@@ -107,6 +107,7 @@ training:                             # Properties of the training procedure
     w_adjust_max_clip: 10      # clipping of weight adjustment factor for prioritised replay
     temp: 1.0                  # Rate that we weight new experience over old (for non-prioritised replay only)
     log_w_clip_frac: null      # Null for no clipping, for non-prioritised replay only.
+    platform_name: "CUDA"      # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
 
 evaluation:
