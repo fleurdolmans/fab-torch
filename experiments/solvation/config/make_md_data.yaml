@@ -7,14 +7,15 @@ defaults:
   - entry 
   - _self_
 
-solvent: water                      # Name of solvent molecules (currently only water is supported).
-solute: so2                        # Name of the solute molecule. Default is so2.
+solvent_name: water                      # Name of solvent molecules (currently only water is supported).
+solute_name: so2                        # Name of the solute molecule. Default is so2.
 solute_pdb_path: ${node.data_dir}/molecules/solutes/${solute_name}.pdb           # Filepath to solvent pdb
 solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml           # Filepath to solvent xml; not needed for water solute.
 
-solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
-solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
-out_dir: ${node.data_dir}/molecules/md/${solute_name}/                # Where to store resulting MD frames.
+solute_inpcrd_path: null                                                          # Filepath to solvent inpcrd; currently unused.
+solute_prmtop_path: null                                                          # Filepath to solvent prmtop; currently unused.
+simulation_version: v1                                                            # Version name for the simulation; used in output filenames.
+out_dir: ${node.data_dir}/molecules/md/${solute_name}/${simulation_version}/      # Where to store resulting MD frames.
 
 run_md: true                            # Run the MD simulation true/false.
 
@@ -31,7 +32,7 @@ internal_constraints: "none"            # "none" or "hbonds": "none" for non-rig
 rigid_water: false                      # Rigid water molecules true/false.
 constraint_radius: 0.3                  # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
 constraint_force: 10000.0               # Force constant of the spherical droplet constraint in kJ/mol/nm^2
-platform_name: "CUDA"                   # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
+platform_name: CUDA                   # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
 plot:
   md_diagnostics: true                 # Plot MD diagnostics after simulation true/false.
