@@ -70,9 +70,23 @@ def run_md_sim(cfg: DictConfig):
     out_dir = pathlib.Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Raise error when solvent is not water
     if cfg.solvent != "water":
         raise NotImplementedError("Currently only water solvent is supported.")
 
+    # Set platform properties based on the selected platform
+    platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
+    if cfg.platform_name == "CUDA":
+        platform_properties = {
+        "CudaPrecision": "mixed",   # Best speed/accuracy tradeoff
+        "DeviceIndex": "0",         # Pick GPU 0
+    }
+    elif cfg.platform_name in platform_list:
+        platform_properties = None
+    else:
+        raise NotImplementedError(f"Platform {cfg.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
+    
+    # Initialize the TriatomicInWaterSys class with the necessary parameters:
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
     dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
     system = TriatomicInWaterSys(
@@ -97,8 +111,13 @@ def run_md_sim(cfg: DictConfig):
         system.topology,
         system.system,
         integrator,
-        platform=mm.Platform.getPlatformByName(cfg.platform_name),
+        mm.Platform.getPlatformByName(cfg.platform_name),
+        platform_properties,
     )
+    print("OpenMM platform:", sim.context.getPlatform().getName())
+    if sim.context.getPlatform().getName() == "CUDA":
+        print("CUDA properties:", sim.context.getPlatform().getPropertyNames())
+        
     sim.context.setPositions(system.positions)
     # Minimize energy: Perform an energy minimization to remove any irregularities in the initial configuration
     sim.minimizeEnergy()

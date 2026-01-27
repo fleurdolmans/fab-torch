@@ -281,6 +281,19 @@ def _run(cfg: DictConfig) -> None:
     # - wandb-metadata.json: JSON file containing metadata about the run.
     # - requirements.txt: Plaintext file of pip packages used.
     # - media: Directory containing any media files logged to Wandb, such as images.
+    
+    # Set platform properties based on the selected platform
+    platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
+    if cfg.platform_name == "CUDA":
+        platform_properties = {
+        "CudaPrecision": "mixed",   # Best speed/accuracy tradeoff
+        "DeviceIndex": "0",         # Pick GPU 0
+    }
+    elif cfg.platform_name in platform_list:
+        platform_properties = None
+    else:
+        raise NotImplementedError(f"Platform {cfg.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
+
 
     # Target distribution setup
     if cfg.target.solvent_name == "water":
@@ -308,6 +321,8 @@ def _run(cfg: DictConfig) -> None:
             rigid_water=cfg.target.rigid_water,
             constraint_radius=cfg.target.constraint_radius,
             constraint_force=cfg.target.constraint_force,
+            platform_name=cfg.platform_name,
+            platform_properties=platform_properties
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
