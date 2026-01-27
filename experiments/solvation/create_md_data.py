@@ -71,14 +71,14 @@ def run_md_sim(cfg: DictConfig):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Raise error when solvent is not water
-    if cfg.solvent != "water":
+    if cfg.solvent_name != "water":
         raise NotImplementedError("Currently only water solvent is supported.")
 
     # Set platform properties based on the selected platform
     platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
     if cfg.platform_name == "CUDA":
         platform_properties = {
-        "CudaPrecision": "mixed",   # Best speed/accuracy tradeoff
+        "Precision": "mixed",   # Best speed/accuracy tradeoff
         "DeviceIndex": "0",         # Pick GPU 0
     }
     elif cfg.platform_name in platform_list:
@@ -117,7 +117,7 @@ def run_md_sim(cfg: DictConfig):
     print("OpenMM platform:", sim.context.getPlatform().getName())
     if sim.context.getPlatform().getName() == "CUDA":
         print("CUDA properties:", sim.context.getPlatform().getPropertyNames())
-        
+
     sim.context.setPositions(system.positions)
     # Minimize energy: Perform an energy minimization to remove any irregularities in the initial configuration
     sim.minimizeEnergy()
@@ -149,7 +149,7 @@ def run_md_sim(cfg: DictConfig):
         f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
     )
     filename = (
-        f"{cfg.solute_name_name}In{cfg.solvent_name}_dim{int(dim)}_temp{cfg.temperature}_eq{cfg.equi_steps}_burn{cfg.burnin_steps}"
+        f"{cfg.solute_name}In{cfg.solvent_name}_dim{int(dim)}_temp{cfg.temperature}_eq{cfg.equi_steps}_burn{cfg.burnin_steps}"
         f"_steps{cfg.num_steps}_fpt{cfg.femtoseconds_per_timestep}_every{cfg.save_interval}{cnstrnts}.h5"
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)

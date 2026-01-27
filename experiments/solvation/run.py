@@ -286,7 +286,7 @@ def _run(cfg: DictConfig) -> None:
     platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
     if cfg.platform_name == "CUDA":
         platform_properties = {
-        "CudaPrecision": "mixed",   # Best speed/accuracy tradeoff
+        "Precision": "mixed",   # Best speed/accuracy tradeoff
         "DeviceIndex": "0",         # Pick GPU 0
     }
     elif cfg.platform_name in platform_list:

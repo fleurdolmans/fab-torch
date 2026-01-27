@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=01:40:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -43,4 +43,7 @@ export MAIN_DIR="${MAIN_DIR}"
 srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
   --config-name make_md_data \
   solute_name=water \
-  solute_xml_path=null 
+  solute_xml_path=null \
+  simulation_version="v2" \
+  num_solvent_molecules=95 \
+  constraint_radius=0.8 
