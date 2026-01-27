@@ -220,7 +220,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
         internal_constraints: str = "none",
         rigid_water: bool = False,
         constraint_radius: float = 1.0,
-        constraint_force: float = 10000.0
+        constraint_force: float = 10000.0,
+        platform_name: str = "None",
+        platform_properties: Optional[Dict[str, str]] = None,
     ):
         super(SoluteInWater, self).__init__()
 
@@ -282,6 +284,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             constraint_force,
         )
 
+
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
         if not val_samples_path or not use_val_data_for_transform:
@@ -289,8 +292,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.system.topology,
                 self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-                platform=mm.Platform.getPlatformByName("Reference"),
+                mm.Platform.getPlatformByName(self.platform_name),
+                self.platform_properties,
             )
+
+            print("OpenMM platform:", traj_sim.context.getPlatform().getName())
+   
             traj_sim.context.setPositions(self.system.positions)
             traj_sim.minimizeEnergy()
             state = traj_sim.context.getState(getPositions=True)
@@ -340,8 +347,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.system.topology,
                 self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-                mm.Platform.getPlatformByName("Reference"),
+                mm.Platform.getPlatformByName(cfg.platform_name),
+                self.platform_properties,
             )
+
+            print("OpenMM platform:", traj_sim.context.getPlatform().getName())
+            
             self.p = TransformedBoltzmann(
                 sim.context,
                 temperature,
