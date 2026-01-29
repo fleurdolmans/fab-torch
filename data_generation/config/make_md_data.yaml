@@ -16,6 +16,7 @@ solute_inpcrd_path: null                                                        
 solute_prmtop_path: null                                                          # Filepath to solvent prmtop; currently unused.
 simulation_version: v1                                                            # Version name for the simulation; used in output filenames.
 out_dir: ${node.data_dir}/molecules/md/${solute_name}/${simulation_version}/      # Where to store resulting MD frames.
+diagnostics_filename: run_statistics.txt                                       # Where to store MD diagnostics plots.
 
 create_md: true                         # Run the MD simulation true/false.
 validate_md: true                       # Validate the MD simulation true/false.
@@ -33,9 +34,8 @@ internal_constraints: "none"            # "none" or "hbonds": "none" for non-rig
 rigid_water: false                      # Rigid water molecules true/false.
 constraint_radius: 0.3                  # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
 constraint_force: 10000.0               # Force constant of the spherical droplet constraint in kJ/mol/nm^2
-platform_name: CUDA                   # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
+platform_name: CUDA                     # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
 plot:
-  md_diagnostics: true                 # Plot MD diagnostics after simulation true/false.
+  md_diagnostics: true                  # Plot MD diagnostics after simulation true/false.
   show: false                           # Show plots interactively true/false.
-  save_dir: ${out_dir}plots/            # Directory to save plots; if null, plots are not saved.

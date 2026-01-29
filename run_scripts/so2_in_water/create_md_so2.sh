@@ -45,9 +45,4 @@ srun python "${MAIN_DIR}/data_generation/md_data.py" \
   solute_name=so2 \
   simulation_version="v6" \
   num_solvent_molecules=50 \
-  constraint_radius=0.8 \
-  equi_steps=1000 \
-  burnin_steps=2000 \
-  num_steps=20000 \
-  report_interval=100 \
-  save_interval=100 
+  constraint_radius=0.8 

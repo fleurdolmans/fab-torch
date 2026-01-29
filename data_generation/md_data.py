@@ -118,7 +118,7 @@ def create_md_sim(cfg: DictConfig):
     
     sim.reporters.append(
         app.statedatareporter.StateDataReporter(
-            str(out_dir / "run_statistics.txt"),
+            str(out_dir / cfg.diagnostics_filename),
             cfg.save_interval,
             step=True,
             potentialEnergy=True,
@@ -130,10 +130,15 @@ def create_md_sim(cfg: DictConfig):
     sim.step(cfg.num_steps)
 
 
-def plot_md_diagnostics(report_path: str | pathlib.Path, save_dir: str | pathlib.Path | None = None, show: bool = False):
+def plot_md_diagnostics(out_dir: str | pathlib.Path, diagnostics_filename: str , show: bool = False):
+    """
+    Plot MD diagnostics (potential energy and temperature over time) from the MD simulation report.
+    Saves a plot to save_dir if provided, and shows the plot if show=True.
+    """
     import matplotlib.pyplot as plt
     # Load data of this run from disk.
-    report_path = pathlib.Path(report_path)
+    out_dir = pathlib.Path(out_dir)
+    report_path = pathlib.Path(out_dir / diagnostics_filename)
 
     # Load data of this run from disk.
     with open(report_path, "r") as f:
@@ -164,23 +169,29 @@ def plot_md_diagnostics(report_path: str | pathlib.Path, save_dir: str | pathlib
     ax1.set_xlabel("Saved frame index (relative steps)")
     plt.tight_layout()
 
-    if save_dir is not None:
-        save_dir = pathlib.Path(save_dir)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        out_path = save_dir / "md_energy_temperature.png"
-        fig.savefig(out_path, dpi=300)
-        print(f"Saved MD diagnostics plot to {out_path}")
+    if out_dir is not None:
+        out_dir = out_dir / "md_energy_temperature.png"
+        fig.savefig(out_dir, dpi=300)
+        print(f"Saved MD diagnostics plot to {out_dir}")
 
     if show:
         plt.show()
     
     plt.close(fig)
 
-def validate_md(cfg: DictConfig) -> dict:
-    out_dir = pathlib.Path(cfg.out_dir)
-    traj_pdb = out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.pdb"
-    traj_h5 = out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
-    md_log = out_dir / "run_statistics.txt"
+def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_path: str | pathlib.Path) -> dict:
+    """ 
+    Validate the MD simulation results for a triatomic solute in water solvent.
+    Checks include:
+    - Existence of trajectory and log files
+    - Parsing and statistics of potential energy and temperature
+    - Basic geometry checks for solute molecule (bond lengths, angles)
+    - Anchor atom behavior if external constraints are used
+    Results are outputed in a validation report (JSON), saved in out_dir 
+    """
+
+    out_dir = pathlib.Path(out_dir)
+    md_log = pathlib.Path(out_dir / diagnostics_filename)
 
     # Where to save the validation result
     validation_json = out_dir / f"validation_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.json"
@@ -204,16 +215,6 @@ def validate_md(cfg: DictConfig) -> dict:
             json.dump(report, f, indent=2)
 
     try:
-        # Locate trajectory file
-        if traj_h5.exists():
-            traj_path = traj_h5
-        elif traj_pdb.exists():
-            traj_path = traj_pdb
-        else:
-            raise FileNotFoundError(
-                f"No trajectory found. Expected {traj_pdb.name} or {traj_h5.name} in {out_dir}."
-            )
-
         if not md_log.exists():
             raise FileNotFoundError(f"Missing MD log file: {md_log}")
 
@@ -299,7 +300,8 @@ def validate_md(cfg: DictConfig) -> dict:
 
             if len(o_idx) == 1 and len(h_idx) == 2:
                 o = int(o_idx[0])
-                h1, h2 = map(int(h_idx))
+                h1, h2 = map(int, h_idx)
+                
 
                 angle_triplet = np.array([[h1, o, h2]])
                 angle_rad = md.compute_angles(traj[0], angle_triplet)[0][0]
@@ -321,7 +323,7 @@ def validate_md(cfg: DictConfig) -> dict:
             solute = top.select("not water")
             s_idx = top.select("not water and element S")
             o_idx = top.select("not water and element O")
-            
+
             if len(s_idx) == 1 and len(o_idx) == 2:
                 s = int(s_idx[0])
                 o1, o2 = map(int, o_idx)
@@ -419,10 +421,22 @@ def main(cfg: DictConfig):
     
     # Plot MD diagnostics.
     if cfg.plot.md_diagnostics:
-        plot_md_diagnostics(report_path=pathlib.Path(cfg.out_dir) / "run_statistics.txt", save_dir=cfg.plot.save_dir, show=cfg.plot.show)
-    
+        plot_md_diagnostics(out_path=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, show=cfg.plot.show)
+
+    # Validate trajectory file
     if cfg.validate_md:
-        validate_md(cfg)
+        traj_h5 = cfg.out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
+        traj_pdb = cfg.out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.pdb"
+        
+        if traj_h5.exists():
+            traj_path = traj_h5
+        elif traj_pdb.exists():
+            traj_path = traj_pdb
+        else:
+            raise FileNotFoundError(
+                f"No trajectory found. Expected {traj_pdb.name} or {traj_h5.name} in {out_dir}."
+            )
+        validate_md(report_path=diagnostics_dir, traj_path=traj_path)
         print("MD data validation completed.")
 
 
