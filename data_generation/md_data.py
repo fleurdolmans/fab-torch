@@ -114,8 +114,7 @@ def create_md_sim(cfg: DictConfig):
     
     # Add reporters to save trajectory and state data at specified intervals
     sim.reporters.append(HDF5Reporter(str(out_dir / filename), cfg.save_interval))
-    sim.reporters.append(app.PDBReporter(str((out_dir / filename).with_suffix(".pdb")), cfg.save_interval))
-    
+
     sim.reporters.append(
         app.statedatareporter.StateDataReporter(
             str(out_dir / cfg.diagnostics_filename),
@@ -194,7 +193,10 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
     md_log = pathlib.Path(out_dir / diagnostics_filename)
 
     # Where to save the validation result
-    validation_json = out_dir / f"validation_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.json"
+    file_name = pathlib.Path(traj_path).stem.split("_")
+    print(file_name)
+    validation_json = out_dir / f"validation_{file_name[1]}_{file_name[2]}.json"
+    print(validation_json)
 
     report: dict = {
         "status": "unknown",
@@ -421,22 +423,20 @@ def main(cfg: DictConfig):
     
     # Plot MD diagnostics.
     if cfg.plot.md_diagnostics:
-        plot_md_diagnostics(out_path=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, show=cfg.plot.show)
+        plot_md_diagnostics(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, show=cfg.plot.show)
 
     # Validate trajectory file
     if cfg.validate_md:
-        traj_h5 = cfg.out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
-        traj_pdb = cfg.out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.pdb"
+        traj_h5 = pathlib.Path(cfg.out_dir) / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
         
         if traj_h5.exists():
             traj_path = traj_h5
-        elif traj_pdb.exists():
-            traj_path = traj_pdb
         else:
             raise FileNotFoundError(
-                f"No trajectory found. Expected {traj_pdb.name} or {traj_h5.name} in {out_dir}."
+                f"No trajectory found. Expected {traj_h5.name} in {out_dir}."
             )
-        validate_md(report_path=diagnostics_dir, traj_path=traj_path)
+        
+        validate_md(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, traj_path=traj_path)
         print("MD data validation completed.")
 
 
