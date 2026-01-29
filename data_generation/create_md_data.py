@@ -156,7 +156,10 @@ def run_md_sim(cfg: DictConfig):
     cfg_dict["cartesian_dim"] = dim
     with open((out_dir / filename).with_suffix(".json"), "w") as f:
         json.dump(cfg_dict, f, indent=4)
+    
+    # Add reporters to save trajectory and state data at specified intervals
     sim.reporters.append(HDF5Reporter(str(out_dir / filename), cfg.save_interval))
+    sim.reporters.append(app.PDBReporter(str(out_dir / f"traj_{cfg.solute_name}In{cfg.solvent_name}.pdb"), cfg.save_interval))
     
     sim.reporters.append(
         app.statedatareporter.StateDataReporter(
