@@ -17,7 +17,8 @@ solute_prmtop_path: null                                                        
 simulation_version: v1                                                            # Version name for the simulation; used in output filenames.
 out_dir: ${node.data_dir}/molecules/md/${solute_name}/${simulation_version}/      # Where to store resulting MD frames.
 
-run_md: true                            # Run the MD simulation true/false.
+create_md: true                         # Run the MD simulation true/false.
+validate_md: true                       # Validate the MD simulation true/false.
 
 num_solvent_molecules: 5                # Number of solvent molecules to simulate.
 temperature: 300.0                      # Temperature in Kelvin.
