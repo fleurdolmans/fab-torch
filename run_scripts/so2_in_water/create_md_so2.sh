@@ -40,10 +40,10 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export MAIN_DIR="${MAIN_DIR}"
 
 # Create MD data for SO2 in water and plot diagnostics
-srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
+srun python "${MAIN_DIR}/data_generation/create_md_data.py" \
   --config-name make_md_data \
   solute_name=so2 \
-  simulation_version="v4" \
-  num_solvent_molecules=95 \
+  simulation_version="v5" \
+  num_solvent_molecules=50 \
   constraint_radius=0.8 \
   report_interval=5000 
