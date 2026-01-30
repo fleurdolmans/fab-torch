@@ -59,7 +59,8 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solvent_name=${SOLUTE} target.solvent_name=${SOLVENT} target.solute_xml_path=null\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
+  target.solute_xml_path=null target.simulation_version=v3\\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
   training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false \\

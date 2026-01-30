@@ -38,11 +38,13 @@ target:                               # Properties of molecular system
 
   # Filepaths to load samples from
   simulation_version: v1                                                              # Version name for the simulation; used in output filenames.
-  md_data_dir: ${node.data_dir}/molecules/md/${solute_name}/${simulation_version}/      # Directory where MD data is stored.
-  samples_file: ${target.solute_name}In${target.solvent_name}_${simulation_version}.h5
+  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.simulation_version}/      # Directory where MD data is stored.
+  samples_file: traj_${target.solute_name}In${target.solvent_name}_${target.simulation_version}.h5
   train_samples_path: ${target.md_data_dir}/${target.samples_file}
   val_samples_path: ${target.md_data_dir}/${target.samples_file}
   test_samples_path: null
+  platform_name: CUDA                     # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
+
 
 flow:                                  # Properties of the flow model
   solvent_flow: true                   # Bool, specifies model: this should be `true` for solute-solvent settings.

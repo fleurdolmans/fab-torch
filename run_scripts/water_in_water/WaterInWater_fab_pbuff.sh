@@ -57,7 +57,8 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solvent_name=${SOLUTE} target.solvent_name=${SOLVENT} target.solute_xml_path=null \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
+  target.solute_xml_path=null target.simulation_version=v3\\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
   training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
