@@ -245,33 +245,32 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         # Load any MD data
         self.eval_mode = eval_mode
-        self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
+        # self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
         self.train_data_config, self.val_data_config, self.test_data_config = None, None, None
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
         self.train_data_i, self.val_data_i, self.test_data_i = None, None, None
         self.train_logdet_xi, self.val_logdet_xi, self.test_logdet_xi = None, None, None
         if train_samples_path:
-            self.train_samples_path = pathlib.Path(train_samples_path)
+            train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
-            self.train_data_x = self.load_target_data(self.train_samples_path, self.cartesian_dim).double()
+            self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim).double()
             # Load associated config
-            with open(self.train_samples_path.with_suffix(".json"), "r") as f:
-                self.train_data_config = json.load(f)
+            # with open(self.train_samples_path.with_suffix(".json"), "r") as f:
+            #     self.train_data_config = json.load(f)
         if val_samples_path:
-            self.val_samples_path = pathlib.Path(val_samples_path)
-            self.val_data_x = self.load_target_data(self.val_samples_path, self.cartesian_dim).double()
+            val_samples_path = pathlib.Path(val_samples_path)
+            self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
             # Load associated config
-            with open(self.val_samples_path.with_suffix(".json"), "r") as f:
-                self.val_data_config = json.load(f)
+            # with open(self.val_samples_path.with_suffix(".json"), "r") as f:
+            #     self.val_data_config = json.load(f)
         if test_samples_path:
-            self.test_samples_path = pathlib.Path(test_samples_path)
-            self.test_data_x = self.load_target_data(self.test_samples_path, self.cartesian_dim).double()
+            test_samples_path = pathlib.Path(test_samples_path)
+            self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim).double()
             # Load associated config
-            with open(self.test_samples_path.with_suffix(".json"), "r") as f:
-                self.test_data_config = json.load(f)
+            # with open(self.test_samples_path.with_suffix(".json"), "r") as f:
+            #     self.test_data_config = json.load(f)
 
         # Initialise system
-        print(self.train_data_config)
         self.system = TriatomicInWaterSys(
             solute_pdb_path,
             solute_xml_path,
@@ -290,9 +289,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.platform_properties = platform_properties
 
 
-
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
+        print(val_samples_path)
         if not val_samples_path or not use_val_data_for_transform:
             traj_sim = app.Simulation(
                 self.system.topology,
@@ -301,7 +300,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 mm.Platform.getPlatformByName(self.platform_name),
                 self.platform_properties,
             )
-
             print("OpenMM platform:", traj_sim.context.getPlatform().getName())
    
             traj_sim.context.setPositions(self.system.positions)
@@ -324,15 +322,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:
-            bad = None
-            for i in range(self.train_data_x.shape[0]):
-                try:
-                    _ = self.coordinate_transform.inverse(self.train_data_x[i:i+1])
-                except Exception as e:
-                    print("FAILED frame", i, "error:", e)
-                    bad = i
-                    break
-            assert bad is None
+            print("train_data_x is not none")
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
@@ -365,6 +355,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 mm.Platform.getPlatformByName(self.platform_name),
                 self.platform_properties,
             )
+            print("in n_threads")
 
             print("OpenMM platform:", traj_sim.context.getPlatform().getName())
             

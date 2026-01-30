@@ -13,7 +13,7 @@ SOLVENT="water"
 JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch/
+LAUNCH_DIR=${MAIN_DIR}/launch
 mkdir -p "${LAUNCH_DIR}"
 
 # Create dir for specific experiment run
