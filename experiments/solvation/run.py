@@ -247,6 +247,29 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         return figs
     return plot
 
+def pick_system_keys(d: dict) -> dict:
+    """Keep only keys that define the physical system / target distribution."""
+    if d is None:
+        return None
+    # adjust these to match your JSON structure
+    # if your JSON is a full resolved hydra config, it'll likely have a "target" section
+    tgt = d.get("target", d)  # support either nested or flat
+    keys = [
+        "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
+        "dim", "temperature",
+        "external_constraints", "internal_constraints", "rigid_water",
+        "constraint_radius", "constraint_force"
+    ]
+    return {k: tgt.get(k) for k in keys if k in tgt}
+
+
+def load_cfg_json(samples_path):
+    if not samples_path:
+        return None
+    p = pathlib.Path(samples_path)
+    with open(p.with_suffix(".json"), "r") as f:
+        return json.load(f)
+
 
 def _run(cfg: DictConfig) -> None:
     # Seeds
@@ -294,7 +317,45 @@ def _run(cfg: DictConfig) -> None:
     else:
         raise NotImplementedError(f"Platform {cfg.target.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'.")
 
+    # Load train/val/test data configs from JSON file if they exist.
+    train_data_config = load_cfg_json(cfg.target.train_samples_path)
+    val_data_config   = load_cfg_json(cfg.target.val_samples_path)
+    test_data_config  = load_cfg_json(cfg.target.test_samples_path)
 
+    # Check that train/val/test data have same configs
+    configs = [train_data_config, val_data_config, test_data_config]
+    configs = [c for c in configs if c is not None]  # keep only existing ones
+
+    # Check all equal
+    if not all(cfg == configs[0] for cfg in configs[1:]):
+        raise ValueError("Train, val, and test configs are not identical.")
+
+    # Build list of system configs (physics-only)
+    system_cfgs = []
+    for name, dc in [("train", train_data_config), ("val", val_data_config), ("test", test_data_config)]:
+        if dc is None:
+            continue
+        sys_part = pick_system_keys(dc)
+        if not sys_part:  # None or empty dict
+            raise ValueError(f"{name} config JSON exists but doesn't contain expected target/system keys.")
+        system_cfgs.append((name, sys_part))
+
+    if not system_cfgs:
+        # no dataset jsons -> just run with hydra cfg
+        base_system = None
+    else:
+        # choose train as canonical if present, otherwise first available
+        base_name, base_system = next(((n, s) for (n, s) in system_cfgs if n == "train"), system_cfgs[0])
+
+        # check all system configs match base
+        mismatches = [(n, s) for (n, s) in system_cfgs if s != base_system]
+        if mismatches:
+            raise ValueError(f"Train/val/test system configs differ. Base={base_name}, mismatches={[n for n,_ in mismatches]}")
+
+        # overwrite hydra cfg.target with dataset physics config
+        cfg = OmegaConf.merge(cfg, OmegaConf.create({"target": base_system}))
+
+ 
     # Target distribution setup
     if cfg.target.solvent_name == "water":
         target = SoluteInWater(
