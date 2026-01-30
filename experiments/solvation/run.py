@@ -284,15 +284,15 @@ def _run(cfg: DictConfig) -> None:
     
     # Set platform properties based on the selected platform
     platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
-    if cfg.platform_name == "CUDA":
+    if cfg.target.platform_name == "CUDA":
         platform_properties = {
         "Precision": "mixed",   # Best speed/accuracy tradeoff
         "DeviceIndex": "0",         # Pick GPU 0
     }
-    elif cfg.platform_name in platform_list:
+    elif cfg.target.platform_name in platform_list:
         platform_properties = None
     else:
-        raise NotImplementedError(f"Platform {cfg.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
+        raise NotImplementedError(f"Platform {cfg.target.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'.")
 
 
     # Target distribution setup
@@ -321,7 +321,7 @@ def _run(cfg: DictConfig) -> None:
             rigid_water=cfg.target.rigid_water,
             constraint_radius=cfg.target.constraint_radius,
             constraint_force=cfg.target.constraint_force,
-            platform_name=cfg.platform_name,
+            platform_name=cfg.target.platform_name,
             platform_properties=platform_properties
         )
     else:

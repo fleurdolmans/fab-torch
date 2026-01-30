@@ -271,6 +271,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.test_data_config = json.load(f)
 
         # Initialise system
+        print(self.train_data_config)
         self.system = TriatomicInWaterSys(
             solute_pdb_path,
             solute_xml_path,
@@ -283,6 +284,11 @@ class SoluteInWater(nn.Module, TargetDistribution):
             constraint_radius,
             constraint_force,
         )
+
+        # OpenMM platform
+        self.platform_name = platform_name
+        self.platform_properties = platform_properties
+
 
 
         # Generate trajectory for coordinate transform if no data path is specified
@@ -318,6 +324,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:
+            bad = None
+            for i in range(self.train_data_x.shape[0]):
+                try:
+                    _ = self.coordinate_transform.inverse(self.train_data_x[i:i+1])
+                except Exception as e:
+                    print("FAILED frame", i, "error:", e)
+                    bad = i
+                    break
+            assert bad is None
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
@@ -347,7 +362,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.system.topology,
                 self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-                mm.Platform.getPlatformByName(cfg.platform_name),
+                mm.Platform.getPlatformByName(self.platform_name),
                 self.platform_properties,
             )
 
