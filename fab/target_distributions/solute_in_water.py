@@ -322,7 +322,20 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:
-            print("train_data_x is not none")
+            # Find bad frames that cause coordinate transform to fail
+            # bad = self.find_bad_frames_bisect(
+            #     self.train_data_x.double().reshape(self.train_data_x.shape[0], -1),
+            #     "train",
+            #     chunk_size=8192,
+            # )
+     
+            # # Save and filter bad frames
+            # if len(bad) > 0:
+            #     out_dir = os.path.join(self.save_dir, "bad_frames")
+            #     self.train_data_x = self.save_and_filter_bad_frames(
+            #         self.train_data_x, bad, out_dir, "train"
+            #     )
+
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
@@ -511,3 +524,87 @@ class SoluteInWater(nn.Module, TargetDistribution):
             warnings.warn("No summary metrics were computed.")
 
         return summary_dict
+    
+    def find_bad_frames_bisect(
+        self,
+        X: torch.Tensor,
+        name: str,
+        chunk_size: int = 8192,
+        msg_substring: str = "Found rotation around axis with x=0 outside of coordinate setup.",
+        max_bad: int | None = None,
+        ):
+
+        """
+        Find indices of frames in X that cause coordinate_transform.inverse() to raise a specific ValueError.
+        Uses chunk testing + bisection to avoid O(N) per-frame calls.
+        """
+        assert X.ndim == 2, f"{name}: expected (n_frames, dim), got {tuple(X.shape)}"
+        if X.shape[1] != self.cartesian_dim:
+            raise ValueError(
+                f"{name}: dim mismatch: X.shape[1]={X.shape[1]} vs cartesian_dim={self.cartesian_dim}"
+            )
+
+        X = X.to(self.device)
+        n = X.shape[0]
+        bad = []
+
+        def fails(i0: int, i1: int) -> bool:
+            try:
+                with torch.no_grad():
+                    _ = self.coordinate_transform.inverse(X[i0:i1])
+                return False
+            except ValueError as e:
+                if msg_substring in str(e):
+                    return True
+                raise  # other errors should still surface
+
+        print("Finding bad frames via bisection...")
+        # 1) coarse scan
+        failing_ranges = []
+        for i0 in range(0, n, chunk_size):
+            i1 = min(n, i0 + chunk_size)
+            if fails(i0, i1):
+                failing_ranges.append((i0, i1))
+
+        # 2) bisect failing ranges to isolate failing frames
+        stack = failing_ranges[:]
+        while stack:
+            i0, i1 = stack.pop()
+            if i1 - i0 == 1:
+                bad.append(i0)
+                if max_bad is not None and len(bad) >= max_bad:
+                    break
+                continue
+            mid = (i0 + i1) // 2
+            if fails(i0, mid):
+                stack.append((i0, mid))
+            if fails(mid, i1):
+                stack.append((mid, i1))
+
+        bad = sorted(set(bad))
+        print(f"[{name}] total={n} bad={len(bad)} rate={len(bad)/max(1,n):.3e}")
+        if bad:
+            print(f"[{name}] first bad indices: {bad[:20]}")
+        return bad
+    
+
+    # def save_and_filter_bad_frames(self, X: torch.Tensor, bad_idx: list[int], out_dir: str, base_name: str) -> torch.Tensor:
+    #     os.makedirs(out_dir, exist_ok=True)
+
+    #     bad_idx_t = torch.tensor(bad_idx, dtype=torch.long)
+    #     good_mask = torch.ones(X.shape[0], dtype=torch.bool)
+    #     good_mask[bad_idx_t] = False
+
+    #     X_bad = X[bad_idx_t]
+    #     X_good = X[good_mask]
+
+    #     # Save tensors
+    #     torch.save(X_bad.cpu(), os.path.join(out_dir, f"{base_name}_bad_frames.pt"))
+    #     torch.save(bad_idx_t.cpu(), os.path.join(out_dir, f"{base_name}_bad_indices.pt"))
+    #     torch.save(X_good.cpu(), os.path.join(out_dir, f"{base_name}_filtered.pt"))
+
+    #     print(f"Saved bad frames: {X_bad.shape} -> {base_name}_bad_frames.pt")
+    #     print(f"Saved bad indices: {len(bad_idx)} -> {base_name}_bad_indices.pt")
+    #     print(f"Saved filtered data: {X_good.shape} -> {base_name}_filtered.pt")
+
+    #     return X_good
