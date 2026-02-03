@@ -4,8 +4,6 @@ import math
 
 import normflows as nf
 
-
-
 def stable_inverse_softplus(x):
     return x + torch.log(-torch.expm1(-x))
 
@@ -35,6 +33,16 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         else:
             print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
+
+
+        self._stats = {
+            "seam_x": 0,
+            "seam_z": 0,
+            "degenerate": 0,
+            "calls": 0,
+            "B": 0,
+        }
+        
         # self.device = transform_data.device
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
@@ -43,6 +51,23 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             self._setup_scale_phi(z)
             self._setup_offset_phi(z)
             self._setup_scale_theta(z)
+    
+    def reset_stats(self):
+        for k in self._stats:
+            self._stats[k] = 0
+
+    def get_stats(self):
+        out = dict(self._stats)
+        self.reset_stats()
+        return out
+    
+    def _begin_stats(self, B: int):
+        self._stats["calls"] += 1
+        self._stats["B"] += int(B)
+
+    def _record(self, name: str, mask: torch.Tensor):
+        self._stats[name] += int(mask.sum().item())
+        
 
     def forward(self, z):
         # For water-in-water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
@@ -108,7 +133,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         scale_theta = z.new_ones(1) / 2
         self.register_buffer("scale_theta", scale_theta)
 
-    def setup_coordinate_system(self, x):
+    def setup_coordinate_system(self, x, setup=False):
         """
         Set up the global coordinate system. Essentially just
         :param x: Cartesian coordinates: n_batch x n_atoms . 3
@@ -132,7 +157,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         #  coordinates. Note that this is equivalent to using planar angles between the solute-molecule-plane and
         #  the plane formed by the first two solute atoms and any other atom in the system.
         # x is then the original x coordinates in the new coordinate system.
-        x = self.rotate_into_global_coordinate_system(x, z_axis, y_axis)
+        x = self.rotate_into_global_coordinate_system(x, z_axis, y_axis, setup=setup)
 
         x_coord = x.reshape(x.shape[0], -1)  # The original x coordinates in the new coordinate system, but flattened.
         return x, x_coord, z_axis, y_axis
@@ -149,7 +174,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         if setup:
             assert x.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
 
-        x, x_coord, z_axis, y_axis = self.setup_coordinate_system(x)
+        B = x.shape[0]
+        if not setup:
+            self._begin_stats(B)
+
+        x, x_coord, z_axis, y_axis = self.setup_coordinate_system(x, setup=setup)
 
         solute_atom0 = x[:, 0, :]
         if not torch.isclose(x.new_zeros(x.shape[0], 3), solute_atom0).all():
@@ -210,13 +239,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             elif atom_num == 2:  # r and phi
                 r = torch.norm(atom_coords, dim=-1)
                 fr_scaled = stable_inverse_softplus(r)  # Inverse softplus: this is f_s * s_r
-                phi, _ = get_angle_and_normal(
-                    z_axis,
-                    solute_atom0,
-                    atom_coords,
-                    ctx=f"phi_atom_{atom_num}",
-                )
-                # phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)  # this is f_phi * s_phi
+                phi, _, seam, deg = get_angle_and_normal(z_axis, solute_atom0, atom_coords)  # this is f_phi * s_phi
+                if not setup:
+                    self._record("seam_x", seam)
+                    self._record("degenerate", deg)
+
                 unnorm_z[:, atom_num, 0] = fr_scaled
                 unnorm_z[:, atom_num, 1] = phi
                 if not setup:
@@ -240,14 +267,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             else:  # r, phi, theta
                 r = torch.norm(atom_coords, dim=-1)
                 fr_scaled = stable_inverse_softplus(r)  # Inverse softplus: this is f_r * s_r
-                # phi, _ = get_angle_and_normal(z_axis, solute_atom0, atom_coords)  # this is f_phi * s_phi
-                phi, _ = get_angle_and_normal(
-                    z_axis,
-                    solute_atom0,
-                    atom_coords,
-                    ctx=f"phi_atom_{atom_num}",
+                phi, _, seam, deg = get_angle_and_normal(z_axis, solute_atom0, atom_coords)  # this is f_phi * s_phi
+                if not setup:
+                    self._record("seam_x", seam)
+                    self._record("degenerate", deg)
 
-                )
                 solute_atom0 = x[:, 0, :]
                 solute_atom1 = x[:, 1, :]
                 solute_atom2 = x[:, 2, :]  # TODO: make this a dummy if the solute does not define a plane
@@ -436,8 +460,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         return x, log_det_jac
 
-    @staticmethod
-    def rotate_into_global_coordinate_system(x, z_axis, y_axis):
+    def rotate_into_global_coordinate_system(self,x, z_axis, y_axis, setup=False):
         """
         Sets up the global coordinate system that we transform into 3D spherical coordinates.
 
@@ -457,7 +480,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # E.g. we want to align the first H atom with the z-axis.
         # The rotation should happen along the normal given by the z-O-H plane (for water).
         # This is the culprit for the error when the first solute hydrogen has y==0 exactly.
-        phi_rad, phi_axis = get_angle_and_normal(z_axis, solute_atom0, solute_atom1, align_first_solute_h=True, ctx="setup_align_H1")
+        phi_rad, phi_axis, seam, deg = get_angle_and_normal(z_axis, solute_atom0, solute_atom1, align_first_solute_h=True)
+
+        if not setup:
+            self._record("seam_x", seam)
+            self._record("degenerate", deg)
+
+
         phi_rotation = rotation_matrix(phi_axis, phi_rad)
         x_phi = torch.einsum("bij,bnj -> bni", phi_rotation, x_centered)
 
@@ -473,7 +502,11 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # Angle between atom_to_align and projection, through origin (solute_atom0)
         if not torch.isclose(solute_atom0, torch.zeros_like(solute_atom0)).all():
             raise ValueError("Solute atom0 is not at the origin.")
-        theta_rad, _ = get_angle_and_normal(y_axis, solute_atom0, xy_proj, to_yz_plane=True, ctx="setup_align_yz")
+        theta_rad, _, seam, deg = get_angle_and_normal(y_axis, solute_atom0, xy_proj, to_yz_plane=True)
+        
+        if not setup:
+            self._record("seam_z", seam)
+            self._record("degenerate", deg)
         # We rotate around the alignment axis (z-axis) to put the molecule into the yz-plane
         theta_rotation = rotation_matrix(z_axis, theta_rad)
         # x rotated into the yz plane
@@ -489,7 +522,7 @@ def unit_vector(vector):
     return vector / torch.norm(vector, dim=-1, keepdim=True)
 
 
-def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_solute_h=False, ctx=None):
+def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_solute_h=False):
     """
     Returns the angle between three atoms in radian, and the axis of rotation.
 
@@ -516,9 +549,12 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     cn = torch.linalg.norm(cross, dim=-1)
     deg = cn < eps_deg
     if deg.any():
-        # optional: keep raising here (this is genuinely ill-defined)
-        raise ValueError("Degenerate angle: cross-product norm ~ 0 (rotation axis undefined).")
-    
+        # deterministic fallback: angle 0, arbitrary axis
+        # (axis won't matter because angle=0)
+        cross = cross.clone()
+        cross[deg] = torch.tensor([1.0, 0.0, 0.0], device=cross.device, dtype=cross.dtype)
+        rads = rads.clone()
+        rads[deg] = 0.0
     #-------------------------------------------------------------------   
 
     # We need to fix the rotation axis orientation, so that we know how to reconstruct X from the angle
@@ -529,18 +565,13 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     # Note that this can mess up if we are rotating vectors into the yz-plane, since the rotation axis has x=0 there.
     #  If so, we want to use the z > 0 vector as the normal.
 
-    if to_yz_plane:
-        #-------------------------------------------------------------------     
-        # orientation using z; if z ~ 0 fall back to y
+    if to_yz_plane: 
+        # Orientation using z; if z ~ 0 fall back to y
         sign = torch.sign(cross[:, 2])          # primary sign test (z-component)
-        z0   = torch.abs(cross[:, 2]) < eps_x   # detect seam (z ≈ 0)
-        sign = torch.where(z0,
+        seam   = torch.abs(cross[:, 2]) < eps_x   # detect seam (z ≈ 0)
+        sign = torch.where(seam,
                         torch.sign(cross[:, 1]),  # fallback sign test (y-component)
                         sign)
-        #-------------------------------------------------------------------     
-        # if not torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
-        #     raise ValueError("Convention is to rotate normal with x!=0 if possible, but `to_yz_plane` was True.")
-        # sign = torch.sign(cross[:, 2])  # Flip direction if z < 0
     else:
         # What if x == 0? Then we still need to pick a convention for the rotation axis, but how do we make sure
         #  this is consistent? See the below check. This situation occurs when the first solute hydrogen has
@@ -550,42 +581,20 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
         #  axis to rotate around for aligning the first solute hydrogen with the z-axis. The only problem may be with
         #  the reverse transformation, where we would need to know how exactly to invert this (set a convention).
         #  Here we are in a situation where the rotation axis has z=0 and x=0, so we can use y>0 as our convention.
-        # if torch.isclose(cross[:, 0], cross.new_zeros(cross.shape[0])).any():
-        #     # Exception: both x and z are 0, so use y-axis as rotation axis. Convention is to use the y>0 axis.
-        #     sign = torch.sign(cross[:, 1])  # Flip direction if y < 0
-        #     # Actually, this signing is unnecessary, since this exception should only happen when aligning the
-        #     #  first solute hydrogen during coordinate setup. We can just rotate however we want, since we never have
-        #     #  to reverse this rotation (this atom is always set to align to the z-axis in the reverse transform).
-        #     if not align_first_solute_h:
-        #         raise ValueError("Found rotation around axis with x=0 outside of coordinate setup.")
-        #     # cross[:, 0] += 1e-8  # Increases error, and doesn't fully fix the problem when non-solute atom has y=0.
-        # else:
-        #     # Standard setting: use x value for defining rotation direction.
-        #     sign = torch.sign(cross[:, 0])  # Flip direction if x < 0
-        #-------------------------------------------------------------------     
-        # standard: use x; if x ~ 0 (seam) fall back to y
+    
+        # Standard: use x; if x ~ 0 (seam) fall back to y
         sign = torch.sign(cross[:, 0])
-        x0 = torch.abs(cross[:, 0]) < eps_x
-        sign = torch.where(x0, torch.sign(cross[:, 1]), sign)
+        seam = torch.abs(cross[:, 0]) < eps_x
+        sign = torch.where(seam, torch.sign(cross[:, 1]), sign)
     
-    if ctx is not None:
-        # only prints occasionally to avoid spam
-        if torch.rand(()) < 1e-4:
-            n = int(x0.sum().item()) if not to_yz_plane else int(z0.sum().item())
-            B = cross.shape[0]
-            if n > 0:
-                print(f"[SEAM] ctx={ctx} n={n}/{B}")
-    
-    # avoid sign == 0
+    # Avoid sign == 0
     sign = torch.where(sign == 0, torch.ones_like(sign), sign) 
-    #-------------------------------------------------------------------     
-
     cross = sign.unsqueeze(-1) * cross
     # Adjust angles:
     #  This evaluates to: 2pi - rads if sign = -1, else: 0 + rads
     rads = 2 * math.pi * (1 - sign) / 2 + sign * rads
 
-    return rads, cross
+    return rads, cross, seam, deg
 
 
 def get_theta(atom1, atom2, atom3, atom4, phi):

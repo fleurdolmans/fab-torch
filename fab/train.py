@@ -199,6 +199,28 @@ class Trainer:
                     "iteration": i,
                 }
             )
+
+            ct = getattr(target_dist, "coordinate_transform", None)
+            if ct is not None and hasattr(ct, "get_stats"):
+
+                s = ct.get_stats()
+                B = max(int(s.get("B", 0)), 1)
+                # Rates
+                info.update({
+                    "geom/seam_x_rate": s.get("seam_x", 0) / B,
+                    "geom/seam_z_rate": s.get("seam_z", 0) / B,
+                    "geom/degenerate_rate": s.get("degenerate", 0) / B,
+                })
+
+                # Raw counts (optional but nice for debugging)
+                info.update({
+                    "geom/seam_x_count": s.get("seam_x", 0),
+                    "geom/seam_z_count": s.get("seam_z", 0),
+                    "geom/degenerate_count": s.get("degenerate", 0),
+                    "geom/calls": s.get("calls", 0),
+                    "geom/B": s.get("B", 0),
+                })
+
             self.logger.write(info)
 
             loss_str = f"   Iter {i}, Train loss: {loss.cpu().detach().item():.4f}"
