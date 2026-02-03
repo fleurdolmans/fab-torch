@@ -95,7 +95,7 @@ def setup_buffer(
     if hasattr(fab_model.target_distribution, "internal_dim"):
         dim = fab_model.target_distribution.internal_dim  # Use internal dimension if provided
     else:
-        dim = cfg.target.dim  # applies to flow and target
+        dim = cfg.target.cartesian_dim  # applies to flow and target
     if cfg.training.buffer.prioritised is False:
         def initial_sampler():
             # used to fill the replay buffer up to its minimum size
@@ -156,7 +156,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         #  weights and the like in the AIS loss. Thus, we need the AIS samples to be in internal space.
         dim = target.internal_dim  # Use internal dimension if provided
     else:
-        dim = cfg.target.dim  # applies to flow and target
+        dim = cfg.target.cartesian_dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.buffer.prioritised
     if cfg.flow.solvent_flow:
         flow = make_wrapped_normflow_solvent_flow(
