@@ -38,7 +38,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:40:00
+#SBATCH --time=00:35:00
 
 module purge
 module load 2025
