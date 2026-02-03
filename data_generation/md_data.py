@@ -25,51 +25,51 @@ def create_md_sim(cfg: DictConfig):
     See also:
     http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#saving-the-results
     """
-    out_dir = pathlib.Path(cfg.out_dir)
+    out_dir = pathlib.Path(cfg.target.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Raise error when solvent is not water
-    if cfg.solvent_name != "water":
+    if cfg.target.solvent_name != "water":
         raise NotImplementedError("Currently only water solvent is supported.")
 
     # Set platform properties based on the selected platform
     platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
-    if cfg.platform_name == "CUDA":
+    if cfg.target.platform_name == "CUDA":
         platform_properties = {
         "Precision": "mixed",   # Best speed/accuracy tradeoff
         "DeviceIndex": "0",         # Pick GPU 0
     }
-    elif cfg.platform_name in platform_list:
+    elif cfg.target.platform_name in platform_list:
         platform_properties = None
     else:
-        raise NotImplementedError(f"Platform {cfg.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
+        raise NotImplementedError(f"Platform {cfg.target.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
     
     # Initialize the TriatomicInWaterSys class with the necessary parameters:
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
-    dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
+    dim = 3 * (3 + 3 * cfg.target.num_solvent_molecules)
     system = TriatomicInWaterSys(
-        cfg.solute_pdb_path,
-        cfg.solute_xml_path,
-        cfg.solute_inpcrd_path,
-        cfg.solute_prmtop_path,
+        cfg.target.solute_pdb_path,
+        cfg.target.solute_xml_path,
+        cfg.target.solute_inpcrd_path,
+        cfg.target.solute_prmtop_path,
         dim,
-        cfg.external_constraints,
-        cfg.internal_constraints,
-        cfg.rigid_water,
-        cfg.constraint_radius,
-        cfg.constraint_force,
+        cfg.target.external_constraints,
+        cfg.target.internal_constraints,
+        cfg.target.rigid_water,
+        cfg.target.constraint_radius,
+        cfg.target.constraint_force,
     )
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
     integrator = mm.LangevinMiddleIntegrator(
-        cfg.temperature * unit.kelvin, 1.0 / unit.picosecond, cfg.femtoseconds_per_timestep * unit.femtosecond
+        cfg.target.temperature * unit.kelvin, 1.0 / unit.picosecond, cfg.target.femtoseconds_per_timestep * unit.femtosecond
     )
     # integrator = mm.VerletIntegrator(0.001 * unit.picoseconds)
     sim = app.Simulation(
         system.topology,
         system.system,
         integrator,
-        mm.Platform.getPlatformByName(cfg.platform_name),
+        mm.Platform.getPlatformByName(cfg.target.platform_name),
         platform_properties,
     )
     print("OpenMM platform:", sim.context.getPlatform().getName())
@@ -83,14 +83,14 @@ def create_md_sim(cfg: DictConfig):
     sim.reporters.append(
         app.statedatareporter.StateDataReporter(
             stdout,
-            cfg.report_interval,
+            cfg.target.report_interval,
             step=True,
             potentialEnergy=True,
             temperature=True,
             progress=True,
             remainingTime=True,
             elapsedTime=True,
-            totalSteps=cfg.equi_steps + cfg.burnin_steps + cfg.num_steps,
+            totalSteps=cfg.target.equi_steps + cfg.target.burnin_steps + cfg.target.num_steps,
         )
     )
 
@@ -100,15 +100,14 @@ def create_md_sim(cfg: DictConfig):
     # Run the burn-in simulation: Run the simulation for a desired number of steps, discarding the
     # first few steps to allow the system to reach equilibrium
     sim.step(cfg.burnin_steps)
-
     # Saving data
     cnstrnts = (
         f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_fc{cfg.constraint_force}_"
         f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
     )
-    filename = f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
+    filename = f"traj_{cfg.solute_name}In{cfg.solvent_name}.h5"
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    cfg_dict["cartesian_dim"] = dim
+    cfg_dict.target["cartesian_dim"] = dim
     with open((out_dir / filename).with_suffix(".json"), "w") as f:
         json.dump(cfg_dict, f, indent=4)
     
@@ -127,7 +126,6 @@ def create_md_sim(cfg: DictConfig):
 
     # Run the production simulation: Finally, run the simulation for a desired number of steps:
     sim.step(cfg.num_steps)
-
 
 def plot_md_diagnostics(out_dir: str | pathlib.Path, diagnostics_filename: str , show: bool = False):
     """
@@ -321,7 +319,7 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
                     )
             
 
-        elif cfg.solute_name == "so2":
+        elif cfg.target.solute_name == "so2":
             solute = top.select("not water")
             s_idx = top.select("not water and element S")
             o_idx = top.select("not water and element O")
@@ -424,16 +422,15 @@ def main(cfg: DictConfig):
     # Plot MD diagnostics.
     if cfg.plot.md_diagnostics:
         plot_md_diagnostics(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, show=cfg.plot.show)
-
     # Validate trajectory file
     if cfg.validate_md:
-        traj_h5 = pathlib.Path(cfg.out_dir) / f"traj_{cfg.solute_name}In{cfg.solvent_name}_{cfg.simulation_version}.h5"
+        traj_h5 = pathlib.Path(cfg.out_dir) / f"traj_{cfg.solute_name}In{cfg.solvent_name}.h5"
         
         if traj_h5.exists():
             traj_path = traj_h5
         else:
             raise FileNotFoundError(
-                f"No trajectory found. Expected {traj_h5.name} in {out_dir}."
+                f"No trajectory found. Expected {traj_h5.name} in {cfg.out_dir}."
             )
         
         validate_md(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, traj_path=traj_path)
