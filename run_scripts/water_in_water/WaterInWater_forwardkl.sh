@@ -63,7 +63,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.solute_xml_path=null target.simulation_version=v2\\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=512 flow.num_bins=9 \\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false \\
+  training.n_iterations=100 training.buffer.use=false training.buffer.prioritised=false \\
   evaluation.n_eval=500 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 

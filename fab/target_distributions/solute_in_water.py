@@ -322,19 +322,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:
-            # Find bad frames that cause coordinate transform to fail
-            # bad = self.find_bad_frames_bisect(
-            #     self.train_data_x.double().reshape(self.train_data_x.shape[0], -1),
-            #     "train",
-            #     chunk_size=8192,
-            # )
-     
-            # # Save and filter bad frames
-            # if len(bad) > 0:
-            #     out_dir = os.path.join(self.save_dir, "bad_frames")
-            #     self.train_data_x = self.save_and_filter_bad_frames(
-            #         self.train_data_x, bad, out_dir, "train"
-            #     )
 
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
@@ -491,6 +478,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                     n += v.numel()
     
                 summary_dict["flow_test_log_prob"] = s / n
+                summary_dict["flow_test_log_prob_per_dim"] = (s / n) / self.internal_dim
             # Log_prob of target data under flow
             # with torch.no_grad():
             #     # log_q_fn is the log_prob function of the flow.
@@ -616,24 +604,3 @@ class SoluteInWater(nn.Module, TargetDistribution):
             print(f"[{name}] first bad indices: {bad[:20]}")
         return bad
     
-
-    # def save_and_filter_bad_frames(self, X: torch.Tensor, bad_idx: list[int], out_dir: str, base_name: str) -> torch.Tensor:
-    #     os.makedirs(out_dir, exist_ok=True)
-
-    #     bad_idx_t = torch.tensor(bad_idx, dtype=torch.long)
-    #     good_mask = torch.ones(X.shape[0], dtype=torch.bool)
-    #     good_mask[bad_idx_t] = False
-
-    #     X_bad = X[bad_idx_t]
-    #     X_good = X[good_mask]
-
-    #     # Save tensors
-    #     torch.save(X_bad.cpu(), os.path.join(out_dir, f"{base_name}_bad_frames.pt"))
-    #     torch.save(bad_idx_t.cpu(), os.path.join(out_dir, f"{base_name}_bad_indices.pt"))
-    #     torch.save(X_good.cpu(), os.path.join(out_dir, f"{base_name}_filtered.pt"))
-
-    #     print(f"Saved bad frames: {X_bad.shape} -> {base_name}_bad_frames.pt")
-    #     print(f"Saved bad indices: {len(bad_idx)} -> {base_name}_bad_indices.pt")
-    #     print(f"Saved filtered data: {X_good.shape} -> {base_name}_filtered.pt")
-
-    #     return X_good
