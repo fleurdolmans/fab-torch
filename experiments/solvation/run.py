@@ -247,28 +247,47 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         return figs
     return plot
 
-def pick_system_keys(d: dict) -> dict:
+def pick_system_keys(d: dict, keys: list) -> dict:
     """Keep only keys that define the physical system / target distribution."""
     if d is None:
         return None
     # adjust these to match your JSON structure
     # if your JSON is a full resolved hydra config, it'll likely have a "target" section
     tgt = d.get("target", d)  # support either nested or flat
-    keys = [
-        "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
-        "dim", "temperature",
-        "external_constraints", "internal_constraints", "rigid_water",
-        "constraint_radius", "constraint_force"
-    ]
     return {k: tgt.get(k) for k in keys if k in tgt}
 
 
-def load_cfg_json(samples_path):
-    if not samples_path:
+def load_json(path):
+    """Load the JSON file if it exists; otherwise return None."""
+    # If no path provided, return None
+    if not path:
         return None
-    p = pathlib.Path(samples_path)
-    with open(p.with_suffix(".json"), "r") as f:
+
+    p = pathlib.Path(path).with_suffix(".json")
+    # Check if the file exists before trying to load it
+    if not p.exists():
+        return None
+
+    with p.open("r") as f:
         return json.load(f)
+
+def overwrite_cfg(cfg, system_cfgs):
+    """Overwrite hydra cfg.target with the system config from the MD data JSON, 
+    if it exists, and check consistency if multiple JSONs exist. Only overwrite MD_KEYS."""
+    if not system_cfgs:
+        return cfg
+    else:
+        # Choose train as canonical if present, otherwise first available
+        base_name, base_system = next(((n, s) for (n, s) in system_cfgs if n == "train"), system_cfgs[0])
+
+        # Check all system configs match base
+        mismatches = [(n, s) for (n, s) in system_cfgs if s != base_system]
+        if mismatches:
+            raise ValueError(f"Train/val/test system configs differ. Base={base_name}, mismatches={[n for n,_ in mismatches]}")
+
+        # Overwrite hydra cfg.target with dataset physics config
+        cfg = OmegaConf.merge(cfg, OmegaConf.create({"target": base_system}))
+        return cfg
 
 
 def _run(cfg: DictConfig) -> None:
@@ -316,45 +335,7 @@ def _run(cfg: DictConfig) -> None:
         platform_properties = None
     else:
         raise NotImplementedError(f"Platform {cfg.target.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'.")
-
-    # Load train/val/test data configs from JSON file if they exist.
-    train_data_config = load_cfg_json(cfg.target.train_samples_path)
-    val_data_config   = load_cfg_json(cfg.target.val_samples_path)
-    test_data_config  = load_cfg_json(cfg.target.test_samples_path)
-
-    # Check that train/val/test data have same configs
-    configs = [train_data_config, val_data_config, test_data_config]
-    configs = [c for c in configs if c is not None]  # keep only existing ones
-
-    # Check all equal
-    if not all(cfg == configs[0] for cfg in configs[1:]):
-        raise ValueError("Train, val, and test configs are not identical.")
-
-    # Build list of system configs (physics-only)
-    system_cfgs = []
-    for name, dc in [("train", train_data_config), ("val", val_data_config), ("test", test_data_config)]:
-        if dc is None:
-            continue
-        sys_part = pick_system_keys(dc)
-        if not sys_part:  # None or empty dict
-            raise ValueError(f"{name} config JSON exists but doesn't contain expected target/system keys.")
-        system_cfgs.append((name, sys_part))
-
-    if not system_cfgs:
-        # no dataset jsons -> just run with hydra cfg
-        base_system = None
-    else:
-        # choose train as canonical if present, otherwise first available
-        base_name, base_system = next(((n, s) for (n, s) in system_cfgs if n == "train"), system_cfgs[0])
-
-        # check all system configs match base
-        mismatches = [(n, s) for (n, s) in system_cfgs if s != base_system]
-        if mismatches:
-            raise ValueError(f"Train/val/test system configs differ. Base={base_name}, mismatches={[n for n,_ in mismatches]}")
-
-        # overwrite hydra cfg.target with dataset physics config
-        cfg = OmegaConf.merge(cfg, OmegaConf.create({"target": base_system}))
-
+    
  
     # Target distribution setup
     if cfg.target.solvent_name == "water":
@@ -363,7 +344,7 @@ def _run(cfg: DictConfig) -> None:
             solute_xml_path=cfg.target.solute_xml_path,
             solute_inpcrd_path=cfg.target.solute_inpcrd_path,
             solute_prmtop_path=cfg.target.solute_prmtop_path,
-            dim=cfg.target.dim,
+            dim=cfg.target.cartesian_dim,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,
             energy_max=cfg.target.energy_max,
@@ -387,6 +368,7 @@ def _run(cfg: DictConfig) -> None:
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
+    
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
         target = target.double()
@@ -399,7 +381,31 @@ def _run(cfg: DictConfig) -> None:
 # Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="SoluteInSolvent", version_base="1.1")
 def run(cfg: DictConfig) -> None:
+    MD_KEYS = [
+        "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
+        "cartesian_dim", "temperature",
+        "external_constraints", "internal_constraints", "rigid_water",
+        "constraint_radius", "constraint_force"
+    ]
+    # Load MD data specifics from MD data JSON files if they exist.
+    # Use the specific listed in the MD_KEYS
+    train_data_config = load_json(cfg.target.train_samples_path)
+    val_data_config   = load_json(cfg.target.val_samples_path)
+    test_data_config  = load_json(cfg.target.test_samples_path)
+
+    system_cfgs = []
+    for name, dc in [("train", train_data_config), ("val", val_data_config), ("test", test_data_config)]:
+        if dc is None:
+            continue
+        sys_part = pick_system_keys(dc, MD_KEYS)
+        if not sys_part:
+            raise ValueError(f"{name} config JSON exists but has none of the expected keys: {MD_KEYS}")
+        system_cfgs.append((name, sys_part))
+
+    # Overwrite hydra cfg.target with the system config from the MD data JSON, 
+    cfg = overwrite_cfg(cfg, system_cfgs)
     print(OmegaConf.to_yaml(cfg))
+
     _run(cfg)
 
 

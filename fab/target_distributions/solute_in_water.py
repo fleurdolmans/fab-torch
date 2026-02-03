@@ -421,6 +421,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             log_w: Optional[Tensor] = None,
             log_q_fn: Callable = None,
             batch_size: int = 1000,
+            n_eval: int = 500,
             iteration: Optional[int] = None,
             flow: Optional[nn.Module] = None,
     ):
@@ -449,7 +450,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         # This function is typically called both with Flow (likelihood available for samples) and with Flow+AIS
         # samples (no likelihood available for Flow+AIS samples).
-        summary_dict = {}
+
         # Load MD data for evaluation
         if self.eval_mode == "val":  # TODO: batch this?
             # Note that x (Cartesian) data is NOT centered!
@@ -465,21 +466,45 @@ class SoluteInWater(nn.Module, TargetDistribution):
         else:
             raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
 
+        # Subsample on CPU
+        N = target_data_i.shape[0]
+        n_use = min(n_eval, N)
+
+        # deterministic or random
+        idx = torch.randperm(N)[:n_use]
+
+        target_data_i_eval = target_data_i[idx]
+        target_logdet_xi_eval = target_logdet_xi[idx]
+
+
+        summary_dict = {}
+
         # Log_prob of flow given, so use this for evaluating the log probability of MD data.
-        if log_q_fn:
-            # Log_prob of target data under flow
+        if log_q_fn is not None:
             with torch.no_grad():
-                # log_q_fn is the log_prob function of the flow.
-                log_q_test = log_q_fn(target_data_i) + target_logdet_xi
-            test_mean_log_prob = torch.mean(log_q_test)
-            summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
+                s = 0.0
+                n = 0
+                for start in range(0, target_data_i_eval.shape[0], batch_size):
+                    end = start + batch_size
+                    v = log_q_fn(target_data_i_eval[start:end]) + target_logdet_xi_eval[start:end]
+                    s += v.sum().item()
+                    n += v.numel()
+    
+                summary_dict["flow_test_log_prob"] = s / n
+            # Log_prob of target data under flow
+            # with torch.no_grad():
+            #     # log_q_fn is the log_prob function of the flow.
+            #     log_q_test = log_q_fn(target_data_i) + target_logdet_xi
+            # test_mean_log_prob = torch.mean(log_q_test)
+            # summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
 
         # Use flow samples for computing marginal KL estimates.
         if samples is None:  # No samples provided, so generate using flow.
             assert flow, (
                 "Flow model must be provided for generating evaluation samples if none are provided."
             )
-            num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
+            # num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
+            num_flow_samples = target_data_i_eval.shape[0]  # match n_eval
             with torch.no_grad():
                 flow_samples, _ = flow.sample_and_log_prob((num_flow_samples,))
         else:  # Samples provided (can be Flow or Flow+AIS samples).
@@ -490,8 +515,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # TODO: Possibly batch this if necessary?
         nbins = 200
         hist_range = [-5, 5]
-        target_data_kl = target_data_i.cpu().clone().numpy()
-        flow_samples_kl = flow_samples.cpu().clone().numpy()
+
+        target_data_kl = target_data_i_eval.detach().cpu().numpy()
+        flow_samples_kl = flow_samples.detach().cpu().numpy()
+
+        # target_data_kl = target_data_i.cpu().clone().numpy()
+        # flow_samples_kl = flow_samples.cpu().clone().numpy()
         hists_test = np.zeros((nbins, self.internal_dim))
         hists_flow = np.zeros((nbins, self.internal_dim))
         for dim in range(self.internal_dim):

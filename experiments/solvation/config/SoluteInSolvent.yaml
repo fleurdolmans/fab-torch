@@ -14,7 +14,7 @@ hydra:
 target:                               # Properties of molecular system
   solute_name: water                  # Name of the solute molecule. Default is water.
   solvent_name: water                      # Name of solvent molecules (currently only water is supported).
-  dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  cartesian_dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
@@ -39,7 +39,7 @@ target:                               # Properties of molecular system
   # Filepaths to load samples from
   simulation_version: v1                                                              # Version name for the simulation; used in output filenames.
   md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.simulation_version}/      # Directory where MD data is stored.
-  samples_file: traj_${target.solute_name}In${target.solvent_name}_${target.simulation_version}.h5
+  samples_file: traj_${target.solute_name}In${target.solvent_name}.h5
   train_samples_path: ${target.md_data_dir}/${target.samples_file}
   val_samples_path: ${target.md_data_dir}/${target.samples_file}
   test_samples_path: null
@@ -126,7 +126,7 @@ evaluation:
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
+    name: ${target.simulation_version}_${fab.loss_type}_dim${target.cartesian_dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
     project: ${target.solute_name}_in_${target.solvent_name}
     entity: ${user.wandb.entity}
 #  pandas_logger:
