@@ -540,8 +540,7 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     cross = torch.cross(v2_u, v1_u, dim=-1)  # normal vector
     dot = torch.sum(v1_u * v2_u, dim=-1)
     rads = torch.arccos(torch.clip(dot, -1.0, 1.0))
-
-    #-------------------------------------------------------------------   
+ 
     eps_x = 1e-12
     eps_deg = 1e-12
 
@@ -555,7 +554,6 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
         cross[deg] = torch.tensor([1.0, 0.0, 0.0], device=cross.device, dtype=cross.dtype)
         rads = rads.clone()
         rads[deg] = 0.0
-    #-------------------------------------------------------------------   
 
     # We need to fix the rotation axis orientation, so that we know how to reconstruct X from the angle
     #  information in I. So we pick the convention that the rotation is the normal with x > 0.
