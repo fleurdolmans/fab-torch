@@ -10,5 +10,9 @@ slurm-*.err
 # Scratch / launch dirs
 launch/
 
+# Entry config files (differ per machine / user)
+data_generation/config/entry.yaml
+experiments/solvation/config/entry.yaml
+
 # Macbook file
 .DS_Store
