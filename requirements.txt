@@ -1,15 +1,9 @@
 boltzgen @ git+https://github.com/VincentStimper/boltzmann-generators.git
-h5py>=3.11
 hydra-core==1.3.2
 hydra-joblib-launcher==1.2.0
 joblib==1.2.0
 larsflow @ git+https://github.com/VincentStimper/resampled-base-flows.git
-matplotlib>=3.7
-mdtraj
 nflows==0.14
 normflows==1.6.1
-numpy
-nglview
-pandas>=2.2
 tqdm==4.64.1
 wandb==0.24.0
