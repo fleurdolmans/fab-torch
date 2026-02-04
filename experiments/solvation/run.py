@@ -381,8 +381,8 @@ def _run(cfg: DictConfig) -> None:
 # Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="SoluteInSolvent", version_base="1.1")
 def run(cfg: DictConfig) -> None:
+    # "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
     MD_KEYS = [
-        "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
         "cartesian_dim", "temperature",
         "external_constraints", "internal_constraints", "rigid_water",
         "constraint_radius", "constraint_force"
