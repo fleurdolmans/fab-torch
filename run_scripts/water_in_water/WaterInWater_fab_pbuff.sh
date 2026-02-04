@@ -18,7 +18,7 @@ CONDA_ENV="bgsol"
 
 SOLUTE="water"
 SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="fab_${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch/
@@ -36,11 +36,12 @@ cd "${LOGS_DIR}/${PROJECT_NAME}"
 
 # Make SLURM file
 SLURM="${LOGS_DIR}/run.sh"
+mkdir -p "${LOGS_DIR}/logs"   # ensure GPU job logs dir exists
 cat > "${SLURM}" <<EOF
 #!/bin/bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=logs/slurm-${SOLUTE}-%j.out
-#SBATCH --error=logs/slurm-${SOLUTE}-%j.err
+#SBATCH --output=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.out
+#SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9

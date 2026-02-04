@@ -1,4 +1,13 @@
-#!/bin/sh
+#!/bin/bash
+#SBATCH --job-name=prep_so2_water
+#SBATCH --output=logs/prep-%j.out
+#SBATCH --error=logs/prep-%j.err
+#SBATCH --partition=staging
+#SBATCH --time=00:05:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+
+set -euo pipefail
 
 PROJECT_NAME="fab-torch"
 
@@ -28,17 +37,18 @@ cd "${LOGS_DIR}/${PROJECT_NAME}"
 
 # Make SLURM file
 SLURM="${LOGS_DIR}/run.sh"
+mkdir -p "${LOGS_DIR}/logs"   # ensure GPU job logs dir exists
 cat > "${SLURM}" <<EOF
 #!/bin/bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=logs/slurm-${SOLUTE}-%j.out
-#SBATCH --error=logs/slurm-${SOLUTE}-%j.err
+#SBATCH --output=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.out
+#SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=00:35:00
+#SBATCH --partition=gpu_h100
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -46,6 +56,9 @@ module load Anaconda3/2025.06-1
 
 source \$(conda info --base)/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV}
+
+python -c "import sys, hydra; print('PY', sys.executable, 'hydra', hydra.__version__)"
+python -c "import numpy; from openmm import app; print('numpy', numpy.__version__, 'openmm app OK')"
 
 export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
@@ -61,9 +74,13 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v1\\
   fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false \\
-  evaluation.n_eval=500 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  flow.blocks=12 flow.hidden_units=512 flow.num_bins=9 \\
+  training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
+  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
+
+chmod +x "${SLURM}"
+
+echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
