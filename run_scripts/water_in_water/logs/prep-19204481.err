@@ -1,0 +1,40 @@
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
+sbatch: Single-node jobs run on a shared node by default. Add --exclusive if you want to use a node exclusively.
+sbatch: A full node consists of 64 CPU cores, 737280 MiB of memory and 4 GPUs and can be shared by up to 4 jobs.
+sbatch: By default shared jobs get 11520 MiB of memory per CPU core, unless explicitly overridden with --mem-per-cpu, --mem-per-gpu or --mem.
+sbatch: You will be charged for 2 GPUs, based on the number of CPUs, GPUs and the amount memory that you've requested.
+sbatch: You could request 2 GPUs (--gpus-per-node=2) without increasing the price.
