@@ -1,4 +1,12 @@
-#!/bin/sh
+#!/bin/bash
+#SBATCH --job-name=prep_water_water
+#SBATCH --output=logs/prep-%j.out
+#SBATCH --error=logs/prep-%j.err
+#SBATCH --partition=staging
+#SBATCH --time=00:05:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+set -euo pipefail
 
 PROJECT_NAME="fab-torch"
 
@@ -45,12 +53,13 @@ module load 2025
 module load Anaconda3/2025.06-1
 
 source \$(conda info --base)/etc/profile.d/conda.sh
+conda deactivate
 conda activate ${CONDA_ENV}
 
 export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
 export PYTHONUNBUFFERED=1
-export CUDA_VISIBLE_DEVICES=""
+export CUDA_VISIBLE_DEVICES=0
 export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
@@ -58,9 +67,13 @@ nvidia-smi
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
-  target.solute_xml_path=null target.simulation_version=v3\\
+  target.solute_xml_path=null target.simulation_version=v1\\
   flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
   training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
+
+chmod +x "${SLURM}"
+
+echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
