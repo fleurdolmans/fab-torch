@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:03:00
+#SBATCH --time=01:00:00
 
 module purge
 module load 2025
@@ -43,6 +43,6 @@ export MAIN_DIR="${MAIN_DIR}"
 srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=so2 \
-  simulation_version="v6" \
-  num_solvent_molecules=50 \
-  constraint_radius=0.8 
+  simulation_version="v2" \
+  num_solvent_molecules=5 \
+  constraint_radius=0.3 
