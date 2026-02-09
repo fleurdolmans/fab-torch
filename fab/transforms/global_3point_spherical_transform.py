@@ -541,8 +541,8 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     dot = torch.sum(v1_u * v2_u, dim=-1)
     rads = torch.arccos(torch.clip(dot, -1.0, 1.0))
  
-    eps_x = 1e-12
-    eps_deg = 1e-12
+    eps_x = 1e-9
+    eps_deg = 1e-9
 
     # True degeneracy: axis undefined (vectors parallel)
     cn = torch.linalg.norm(cross, dim=-1)

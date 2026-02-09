@@ -96,6 +96,15 @@ def setup_buffer(
         dim = fab_model.target_distribution.internal_dim  # Use internal dimension if provided
     else:
         dim = cfg.target.cartesian_dim  # applies to flow and target
+    
+    buffer_device = (
+        "cuda"
+        if torch.cuda.is_available() and cfg.training.use_gpu
+        else "cpu"
+    )
+    print("Buffer device:", buffer_device)
+    flow_device = next(fab_model.flow.parameters()).device 
+    print("Flow device:", flow_device)
     if cfg.training.buffer.prioritised is False:
         def initial_sampler():
             # used to fill the replay buffer up to its minimum size
@@ -114,9 +123,13 @@ def setup_buffer(
     else:
         # buffer
         def initial_sampler():
+            # Calls AIS
+            t0 = time.time()
             point, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
                 cfg.training.batch_size, logging=False, purpose="init buffer fill"
             )
+            dt = time.time() - t0
+            print(f"[buffer prefill] AIS batch done in {dt:.2f}s")
             return point.x.detach(), log_w, point.log_q.detach()
 
         buffer = PrioritisedReplayBuffer(
@@ -125,7 +138,9 @@ def setup_buffer(
             min_sample_length=cfg.training.buffer.min_length,
             initial_sampler=initial_sampler,
             fill_buffer_during_init=auto_fill_buffer,
+            device=buffer_device,
         )
+        print("Replay buffer device:", buffer.buffer.x.device)
     return buffer
 
 
@@ -362,6 +377,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=chkpt_dir is None)
     else:
         buffer = None
+    
 
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
@@ -378,9 +394,11 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
         print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
 
+    print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)
 
     # Create trainer
+    print("Create trainer...")
     if buffer:
         trainer = PrioritisedBufferTrainer(
             model=fab_model,
@@ -411,7 +429,6 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             lr_step=lr_step,
             print_eval=cfg.evaluation.print_eval,
         )
-        
 
     print("Starting training...")
     trainer.run(
