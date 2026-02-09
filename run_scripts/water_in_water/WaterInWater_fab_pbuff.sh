@@ -44,10 +44,10 @@ cat > "${SLURM}" <<EOF
 #SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=9
+#SBATCH --cpus-per-task=18
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:05:00
+#SBATCH --time=04:00:00
 
 module purge
 module load 2025
@@ -69,8 +69,9 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
   target.solute_xml_path=null target.simulation_version=v1\\
-  flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
-  training.n_iterations=500 evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  flow.blocks=12 flow.hidden_units=512 flow.num_bins=8 \\
+  training.lr=5e-5 training.buffer.min_length=8192 training.buffer.maximum_length=131072 \\
+  training.n_iterations=1000 evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 
 chmod +x "${SLURM}"
@@ -78,3 +79,5 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
+
+# fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=16 fab.transition_operator.target_p_accept=0.8 \\
