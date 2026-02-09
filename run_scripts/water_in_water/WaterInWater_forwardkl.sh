@@ -75,6 +75,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   flow.blocks=12 flow.hidden_units=256 \\
   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
   evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
+
 EOF
 
 chmod +x "${SLURM}"

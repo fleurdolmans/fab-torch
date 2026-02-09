@@ -61,9 +61,12 @@ class TriatomicInWaterSys(TestSystem):
             solute_inpcrd_path: str,
             solute_prmtop_path: str,
             dim: int,
-            external_constraints: bool,
-            internal_constraints: str,
+            boundary_condition: str,
+            box_length_nm: float,
+            nonbonded_cutoff_nm: float,
             rigid_water: bool,
+            internal_constraints: str,
+            external_constraints: bool,
             constraint_radius: float,
             constraint_force: float,
             **kwargs,
@@ -75,12 +78,14 @@ class TriatomicInWaterSys(TestSystem):
         self.solute_inpcrd_path = solute_inpcrd_path
         self.solute_prmtop_path = solute_prmtop_path
         self.dim = dim
+        self.boundary_condition = boundary_condition
+        self.box_length_nm = box_length_nm
         self.internal_constraints = internal_constraints
         self.rigid_water = rigid_water
         self.external_constraints = external_constraints
-        self.constrain_radius = constraint_radius
+        self.constraint_radius = constraint_radius
         self.constraint_force = constraint_force
-
+        self.nonbonded_cutoff_nm = nonbonded_cutoff_nm
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
         self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
@@ -103,19 +108,45 @@ class TriatomicInWaterSys(TestSystem):
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
             if solute_xml_path is not None:
                 forcefield.loadFile(solute_xml_path)
-            # Add solvent
-            if self.num_solvent_molecules > 0:
-                # TODO: set padding=1.0 * unit.nanometers ?
-                # TODO: set boxSize=mm.Vec3(3.105, 3.105, 3.105) * unit.nanometers ?
-                modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
-            # Create system
-            self.system = forcefield.createSystem(  # Create system from forcefield
-                modeller.topology,
-                nonbondedMethod=app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometers,
-                constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
-                rigidWater=rigid_water,  # `False` for flexible H2O
-            )
+            
+            if self.boundary_condition == "droplet":
+                # Add solvent
+                if self.num_solvent_molecules > 0:
+                    modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
+                
+                # Create system
+                self.system = forcefield.createSystem(  # Create system from forcefield
+                    modeller.topology,
+                    nonbondedMethod=app.CutoffNonPeriodic,
+                    nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
+                    constraints=constraints_dict[self.internal_constraints],  # `"none"` for flexible H2O
+                    rigidWater=self.rigid_water,  # `False` for flexible H2O
+                )
+                # External constraints
+                if self.external_constraints:
+                    self._add_external_constraints()
+
+            elif self.boundary_condition == "pbc":
+                if self.box_length_nm is None:
+                    raise ValueError("box_length_nm must be set for PBC.")
+                if self.nonbonded_cutoff_nm > 0.5 * self.box_length_nm:
+                    raise ValueError("For PBC, require nonbonded_cutoff_nm <= box_length_nm/2.")
+
+                # Add solvent
+                L = self.box_length_nm
+                boxSize = mm.Vec3(L, L, L) * unit.nanometers
+                modeller.addSolvent(forcefield, model="tip3p", boxSize=boxSize)
+                
+                # Create system
+                self.system = forcefield.createSystem(
+                    modeller.topology,
+                    nonbondedMethod=app.PME,               
+                    nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
+                    constraints=constraints_dict[self.internal_constraints],
+                    rigidWater=self.rigid_water,
+                )
+            else:
+                raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
             # TODO: Not fully implemented!
             #  After adding solvent, the system can be created in two ways:
@@ -136,24 +167,26 @@ class TriatomicInWaterSys(TestSystem):
         else:
             raise ValueError("Must provide either a .pdb file with optional .xml file, or .inpcrd and .prmtop files.")
 
-        if external_constraints:
-            # This keeps the first atom around the origin.
-            center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
-            center.addGlobalParameter("k", 100000.0)
-            self.system.addForce(center)
-            center.addParticle(0, [])
-
-            # Add spherical restraint to hold the droplet
-            force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(constraint_radius))
-            force.addGlobalParameter("w", constraint_force)
-            self.system.addForce(force)
-            for i in range(self.system.getNumParticles()):
-                force.addParticle(i, [])
 
         self.topology, self.positions = modeller.getTopology(), modeller.getPositions()
         # self.topology.atoms() yields the atom order, which is OHH OHH OHH etc.
         # This is the order in which the coordinates are stored in the positions array.
         self.atoms = [atom.name for atom in self.topology.atoms()]
+    
+    def _add_external_constraints(self):
+        # This keeps the first atom around the origin.
+        center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
+        center.addGlobalParameter("k", 100000.0)
+        self.system.addForce(center)
+        center.addParticle(0, [])
+
+        # Add spherical restraint to hold the droplet
+        force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(self.constraint_radius))
+        force.addGlobalParameter("w", self.constraint_force)
+        self.system.addForce(force)
+        for i in range(self.system.getNumParticles()):
+            force.addParticle(i, [])
+        
 
 
 class SoluteInWater(nn.Module, TargetDistribution):
@@ -216,9 +249,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
         save_dir: Optional[str] = None,
         plot_MD_energies: bool = False,
         plot_marginal_hists: bool = False,
-        external_constraints: bool = True,
-        internal_constraints: str = "none",
+        boundary_condition: str = "droplet",
+        box_length_nm: float = 3.105,
+        nonbonded_cutoff_nm: float = 1.0,
         rigid_water: bool = False,
+        internal_constraints: str = "none",
+        external_constraint: bool = False,
         constraint_radius: float = 1.0,
         constraint_force: float = 10000.0,
         platform_name: str = "None",
@@ -254,21 +290,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
             train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
             self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            # with open(self.train_samples_path.with_suffix(".json"), "r") as f:
-            #     self.train_data_config = json.load(f)
+
         if val_samples_path:
             val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            # with open(self.val_samples_path.with_suffix(".json"), "r") as f:
-            #     self.val_data_config = json.load(f)
+
         if test_samples_path:
             test_samples_path = pathlib.Path(test_samples_path)
             self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            # with open(self.test_samples_path.with_suffix(".json"), "r") as f:
-            #     self.test_data_config = json.load(f)
+
 
         # Initialise system
         self.system = TriatomicInWaterSys(
@@ -277,9 +307,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
             solute_inpcrd_path,
             solute_prmtop_path,
             self.cartesian_dim,
-            external_constraints,
-            internal_constraints,
+            boundary_conditions,
+            box_length_nm,
+            nonbonded_cutoff_nm,
             rigid_water,
+            internal_constraints,
+            external_constraints,
             constraint_radius,
             constraint_force,
         )
