@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=prep_water_water
-#SBATCH --output=logs/prep-%j.out
-#SBATCH --error=logs/prep-%j.err
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 set -euo pipefail
 
-mkdir -p logs   # ensure prep logs dir exists
+mkdir -p logs   # ensure slurm logs dir exists
 
 PROJECT_NAME="fab-torch"
 BASE_DIR="${SCRATCH:-$HOME}"
