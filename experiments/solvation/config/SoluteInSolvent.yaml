@@ -23,12 +23,22 @@ target:                               # Properties of molecular system
   solute_xml_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.xml           # Filepath to solvent xml. Not needed for water solute, fill in null in that case.
   solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
   solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
-  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-  rigid_water: false                  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
-  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
-  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
-  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
 
+  boundary_condition: droplet                 # Boundary conditions to use: "pbc" or "droplet".
+  nonbonded_cutoff_nm: 1.0
+  internal_constraints: "none"            # "none" or "hbonds": "none" for non-rigid water molecules.
+  rigid_water: false                      # Rigid water molecules true/false.
+
+  # Only used for PBC simulations.
+  pbc:                        
+    box_length_nm: 3.105                  # Length of the box = (num_solvent_molecules / 33.4)^(1/3) (Liquid water density ≈ 33.4 water molecules / nm^3)
+    
+  # Only used for droplet simulations.
+  droplet:                     
+    external_constraints: true
+    constraint_radius: 0.3     #0.8        # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+    constraint_force: 10000.0             # Force constant of the spherical droplet constraint in kJ/mol/nm^2
+    
   # MD simulation parameters
   equi_steps: 1e4                         # Equilibration steps.
   burnin_steps: 1e5                       # Burn-in steps.
@@ -38,7 +48,7 @@ target:                               # Properties of molecular system
 
   # Filepaths to load samples from
   simulation_version: v1                                                              # Version name for the simulation; used in output filenames.
-  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.simulation_version}/      # Directory where MD data is stored.
+  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.boundary_condition}/${target.simulation_version}/      # Directory where MD data is stored.
   samples_file: traj_${target.solute_name}In${target.solvent_name}.h5
   train_samples_path: ${target.md_data_dir}/${target.samples_file}
   val_samples_path: ${target.md_data_dir}/${target.samples_file}

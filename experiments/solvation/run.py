@@ -383,9 +383,9 @@ def _run(cfg: DictConfig) -> None:
 def run(cfg: DictConfig) -> None:
     # "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
     MD_KEYS = [
-        "cartesian_dim", "temperature",
-        "external_constraints", "internal_constraints", "rigid_water",
-        "constraint_radius", "constraint_force"
+        "cartesian_dim", "temperature", "boundary_condition", "nonbonded_cutoff_nm", 
+        "internal_constraints", "rigid_water", "pbc.box_length_nm",
+        "droplet.external_constraints", "droplet.constraint_radius", "droplet.constraint_force"
     ]
     # Load MD data specifics from MD data JSON files if they exist.
     # Use the specific listed in the MD_KEYS

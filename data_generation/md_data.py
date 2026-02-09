@@ -53,11 +53,14 @@ def create_md_sim(cfg: DictConfig):
         cfg.solute_inpcrd_path,
         cfg.solute_prmtop_path,
         dim,
-        cfg.external_constraints,
-        cfg.internal_constraints,
+        cfg.boundary_condition,
+        cfg.pbc.box_length_nm,
+        cfg.nonbonded_cutoff_nm,
         cfg.rigid_water,
-        cfg.constraint_radius,
-        cfg.constraint_force,
+        cfg.internal_constraints,
+        cfg.droplet.external_constraints,
+        cfg.droplet.constraint_radius,
+        cfg.droplet.constraint_force,
     )
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
@@ -101,10 +104,15 @@ def create_md_sim(cfg: DictConfig):
     # first few steps to allow the system to reach equilibrium
     sim.step(cfg.burnin_steps)
     # Saving data
-    cnstrnts = (
-        f"_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_fc{cfg.constraint_force}_"
-        f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
-    )
+    if cfg.boundary_condition == "droplet":
+        cnstrnts = (
+            f"_{cfg.boundary_condition}_ec{cfg.droplet.external_constraints}_r{cfg.droplet.constraint_radius:.1f}_fc{cfg.droplet.constraint_force}_"
+            f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
+        )
+    elif cfg.boundary_condition == "pbc":
+        cnstrnts = (
+            f"_{cfg.boundary_condition}_box{cfg.pbc.box_length_nm}_ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
+        )
     filename = f"traj_{cfg.solute_name}In{cfg.solvent_name}.h5"
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict["cartesian_dim"] = dim
