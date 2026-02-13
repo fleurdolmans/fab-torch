@@ -345,6 +345,7 @@ def _run(cfg: DictConfig) -> None:
             solute_inpcrd_path=cfg.target.solute_inpcrd_path,
             solute_prmtop_path=cfg.target.solute_prmtop_path,
             dim=cfg.target.cartesian_dim,
+            num_solvent_molecules=cfg.target.num_solvent_molecules,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,
             energy_max=cfg.target.energy_max,
@@ -358,13 +359,17 @@ def _run(cfg: DictConfig) -> None:
             save_dir=SAVE_DIR,
             plot_MD_energies=cfg.evaluation.plot_MD_energies,
             plot_marginal_hists=cfg.evaluation.plot_marginal_hists,
-            external_constraints=cfg.target.external_constraints,
-            internal_constraints=cfg.target.internal_constraints,
+            boundary_condition = cfg.target.boundary_condition,
+            box_length_nm = cfg.target.box_length_nm,
+            nonbonded_cutoff_nm = cfg.target.nonbonded_cutoff_nm,
             rigid_water=cfg.target.rigid_water,
+            internal_constraints=cfg.target.internal_constraints,
+            external_constraints=cfg.target.external_constraints,
             constraint_radius=cfg.target.constraint_radius,
             constraint_force=cfg.target.constraint_force,
             platform_name=cfg.target.platform_name,
-            platform_properties=platform_properties
+            platform_properties=platform_properties 
+            
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
@@ -384,8 +389,8 @@ def run(cfg: DictConfig) -> None:
     # "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
     MD_KEYS = [
         "cartesian_dim", "temperature", "boundary_condition", "nonbonded_cutoff_nm", 
-        "internal_constraints", "rigid_water", "pbc.box_length_nm",
-        "droplet.external_constraints", "droplet.constraint_radius", "droplet.constraint_force"
+        "internal_constraints", "rigid_water", "box_length_nm", "num_solvent_molecules",
+        "external_constraints", "constraint_radius", "constraint_force"
     ]
     # Load MD data specifics from MD data JSON files if they exist.
     # Use the specific listed in the MD_KEYS

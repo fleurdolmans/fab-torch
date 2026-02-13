@@ -44,23 +44,32 @@ def create_md_sim(cfg: DictConfig):
     else:
         raise NotImplementedError(f"Platform {cfg.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'")
     
+    # Overwite number of solvent molecules based on density if using PBC (ignore user input for num_solvent_molecules in this case)
+    if cfg.boundary_condition == "pbc":
+        # Number of water molecules
+        V = (cfg.box_length_nm ** 3) * 1e-21               # Volume in cm^3
+        M = 18.01528                       # Water molar mass in g/mol
+        NA = 6.02214076e23                 # Avogadro’s number in 1/mol
+
+        cfg.num_solvent_molecules = int(cfg.solvent_density * V * NA / M)
+    
     # Initialize the TriatomicInWaterSys class with the necessary parameters:
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
-    dim = 3 * (3 + 3 * cfg.num_solvent_molecules)
+
     system = TriatomicInWaterSys(
-        cfg.solute_pdb_path,
-        cfg.solute_xml_path,
-        cfg.solute_inpcrd_path,
-        cfg.solute_prmtop_path,
-        dim,
-        cfg.boundary_condition,
-        cfg.pbc.box_length_nm,
-        cfg.nonbonded_cutoff_nm,
-        cfg.rigid_water,
-        cfg.internal_constraints,
-        cfg.droplet.external_constraints,
-        cfg.droplet.constraint_radius,
-        cfg.droplet.constraint_force,
+        solute_pdb_path=cfg.solute_pdb_path,
+        solute_xml_path=cfg.solute_xml_path,
+        solute_inpcrd_path=cfg.solute_inpcrd_path,
+        solute_prmtop_path=cfg.solute_prmtop_path,
+        num_solvent_molecules=cfg.num_solvent_molecules,
+        boundary_condition=cfg.boundary_condition,
+        box_length_nm=cfg.box_length_nm,
+        nonbonded_cutoff_nm=cfg.nonbonded_cutoff_nm,
+        rigid_water=cfg.rigid_water,
+        internal_constraints=cfg.internal_constraints,
+        external_constraints=cfg.external_constraints,
+        constraint_radius=cfg.constraint_radius,
+        constraint_force=cfg.constraint_force,
     )
 
     # Create a simulation object: Set up the simulation object with the system, integrator, and initial positions
@@ -106,16 +115,16 @@ def create_md_sim(cfg: DictConfig):
     # Saving data
     if cfg.boundary_condition == "droplet":
         cnstrnts = (
-            f"_{cfg.boundary_condition}_ec{cfg.droplet.external_constraints}_r{cfg.droplet.constraint_radius:.1f}_fc{cfg.droplet.constraint_force}_"
+            f"_{cfg.boundary_condition}_ec{cfg.external_constraints}_r{cfg.constraint_radius:.1f}_fc{cfg.constraint_force}_"
             f"ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
         )
     elif cfg.boundary_condition == "pbc":
         cnstrnts = (
-            f"_{cfg.boundary_condition}_box{cfg.pbc.box_length_nm}_ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
+            f"_{cfg.boundary_condition}_box{cfg.box_length_nm}_ic{cfg.internal_constraints}_rw{cfg.rigid_water}"
         )
     filename = f"traj_{cfg.solute_name}In{cfg.solvent_name}.h5"
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    cfg_dict["cartesian_dim"] = dim
+    cfg_dict["cartesian_dim"] = 3 * system.topology.getNumAtoms()
     with open((out_dir / filename).with_suffix(".json"), "w") as f:
         json.dump(cfg_dict, f, indent=4)
     
@@ -184,7 +193,7 @@ def plot_md_diagnostics(out_dir: str | pathlib.Path, diagnostics_filename: str ,
     
     plt.close(fig)
 
-def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_path: str | pathlib.Path) -> dict:
+def validate_md(cfg: DictConfig, project_name: str) -> dict:
     """ 
     Validate the MD simulation results for a triatomic solute in water solvent.
     Checks include:
@@ -195,13 +204,11 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
     Results are outputed in a validation report (JSON), saved in out_dir 
     """
 
-    out_dir = pathlib.Path(out_dir)
-    md_log = pathlib.Path(out_dir / diagnostics_filename)
+    out_dir = pathlib.Path(cfg.out_dir)
+    md_log = pathlib.Path(out_dir / cfg.diagnostics_filename)
 
-    # Where to save the validation result
-    file_name = pathlib.Path(traj_path).stem.split("_")
-    print(file_name)
-    validation_json = out_dir / f"validation_{file_name[1]}_{file_name[2]}.json"
+    # Output JSON report path
+    validation_json = pathlib.Path(out_dir / f"validation_{project_name}.json")
     print(validation_json)
 
     report: dict = {
@@ -283,11 +290,13 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
             )
 
         # Load trajectory 
-        if traj_path.suffix.lower() == ".h5":
-            traj = md.load_hdf5(str(traj_path))
+        traj_h5 = pathlib.Path(out_dir / f"traj_{project_name}.h5")
+        if traj_h5.exists():
+            traj = md.load_hdf5(str(traj_h5))
         else:
-            traj = md.load(str(traj_path))
-
+            raise FileNotFoundError(
+                f"No trajectory found. Expected {traj_h5.name} in {cfg.out_dir}."
+            )
         top = traj.topology
 
         report["trajectory_stats"] = {
@@ -295,12 +304,14 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
             "atoms": int(traj.n_atoms),
         }
 
-        # Store a small topology preview (like your printed table.head())
+        # Store a small topology preview 
         table, bonds_df = top.to_dataframe()
-        # Keep this compact (head only), and JSON-friendly
         report["topology_head"] = table.head(6).to_dict(orient="records")
 
-        # Solute selections 
+        
+        #----------------------------------------
+        # Test water solute geometry
+        #----------------------------------------
         if cfg.solute_name == "water":
             solute = top.select("resid 0")
             o_idx = top.select("resid 0 and element O")
@@ -326,7 +337,9 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
                         f"Water angle suspicious: {angle_deg:.2f}° (expected ~104.5°)"
                     )
             
-
+        #----------------------------------------
+        # Test so2 solute geometry
+        #----------------------------------------
         elif cfg.solute_name == "so2":
             solute = top.select("not water")
             s_idx = top.select("not water and element S")
@@ -359,7 +372,9 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
 
         solute_indices = set(map(int, solute)) if len(solute) > 0 else set()
 
-        # Bond length sanity (frame 0)
+        #----------------------------------------
+        # Bond lengths sanity
+        #----------------------------------------
         bond_pairs = []
         bond_labels = []
         for bond in top.bonds:
@@ -378,8 +393,9 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
                     {"atom1": f"{n1}({i})", "atom2": f"{n2}({j})", "distance_A": float(dist)}
                 )
 
-
+        #----------------------------------------
         # Anchor/centering sanity
+        #----------------------------------------
         a0 = list(top.atoms)[0]
         report["anchor_stats"]["atom0"] = {
             "index": int(a0.index),
@@ -388,7 +404,10 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
             "residue": str(a0.residue),
         }
 
-        if cfg.external_constraints:
+        #----------------------------------------
+        # Droplet sanity
+        #----------------------------------------
+        if cfg.boundary_condition == "droplet" and cfg.external_constraints:
             a0_xyz = traj.xyz[:, 0, :]
             r0 = np.linalg.norm(a0_xyz, axis=1)
             report["anchor_stats"]["distance_from_origin_nm"] = {
@@ -402,6 +421,44 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
                     "Anchoring check: atom0 is not staying near origin "
                     f"(max |r| = {r0.max():.3f} nm)."
                 )
+
+        #----------------------------------------
+        # PBC density sanity
+        #----------------------------------------
+        if cfg.boundary_condition == "pbc":
+            # Count water molecules
+            water_residues = [res for res in top.residues if res.is_water]
+            n_waters = len(water_residues)
+
+            if n_waters == 0:
+                report["errors"].append("PBC run has zero water molecules.")
+            else:
+                # Unit cell lengths in nm, shape (n_frames, 3)
+                if traj.unitcell_lengths is None:
+                    report["errors"].append("PBC expected but trajectory has no unit cell information.")
+                else:
+                    lengths_nm = traj.unitcell_lengths  # (n_frames, 3)
+                    volumes_nm3 = np.prod(lengths_nm, axis=1)
+
+                    # Average over frames (box is constant for NVT)
+                    mean_volume_nm3 = float(volumes_nm3.mean())
+                    mean_density = n_waters / mean_volume_nm3  # waters / nm^3
+
+                    report["pbc_density"] = {
+                        "n_waters": int(n_waters),
+                        "mean_volume_nm3": mean_volume_nm3,
+                        "water_density_per_nm3": mean_density,
+                    }
+
+                    # Reference: liquid water ~33.4 waters / nm^3
+                    rho_ref = 33.4
+                    rel_error = abs(mean_density - rho_ref) / rho_ref
+
+                    if rel_error > 0.10:  # >10% off
+                        report["warnings"].append(
+                            f"PBC density deviates from liquid water by {rel_error*100:.1f}% "
+                            f"(got {mean_density:.2f}, expected ~{rho_ref})."
+                        )
 
         # Decide pass/fail based on errors
         if report["errors"]:
@@ -418,6 +475,20 @@ def validate_md(out_dir: str | pathlib.Path, diagnostics_filename: str , traj_pa
         _finalize_and_save("error")
         raise
 
+def load_json(path):
+    """Load the JSON file if it exists; otherwise return None."""
+    # If no path provided, return None
+    if not path:
+        return None
+
+    p = pathlib.Path(path).with_suffix(".json")
+    # Check if the file exists before trying to load it
+    if not p.exists():
+        return None
+
+    with p.open("r") as f:
+        return json.load(f)
+
 
 
 @hydra.main(config_path="./config/", config_name="make_md_data", version_base="1.1")
@@ -431,17 +502,18 @@ def main(cfg: DictConfig):
     if cfg.plot.md_diagnostics:
         plot_md_diagnostics(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, show=cfg.plot.show)
     # Validate trajectory file
+    
     if cfg.validate_md:
-        traj_h5 = pathlib.Path(cfg.out_dir) / f"traj_{cfg.solute_name}In{cfg.solvent_name}.h5"
+        project_name = f"{cfg.solute_name}In{cfg.solvent_name}"
+        if not cfg.create_md:
+            cfg_from_json = load_json(pathlib.Path(cfg.out_dir) / f"traj_{project_name}.json")  # Just to check if config JSON exists and is loadable.
+            if cfg_from_json is None:
+                raise FileNotFoundError(f"Config JSON for project {project_name} not found in {cfg.out_dir}.")
+            cfg = OmegaConf.create(cfg_from_json)
+
+        validate_md(cfg, project_name)
         
-        if traj_h5.exists():
-            traj_path = traj_h5
-        else:
-            raise FileNotFoundError(
-                f"No trajectory found. Expected {traj_h5.name} in {cfg.out_dir}."
-            )
         
-        validate_md(out_dir=cfg.out_dir, diagnostics_filename=cfg.diagnostics_filename, traj_path=traj_path)
         print("MD data validation completed.")
 
 

@@ -60,7 +60,7 @@ class TriatomicInWaterSys(TestSystem):
             solute_xml_path: str,
             solute_inpcrd_path: str,
             solute_prmtop_path: str,
-            dim: int,
+            num_solvent_molecules: int,
             boundary_condition: str,
             box_length_nm: float,
             nonbonded_cutoff_nm: float,
@@ -77,7 +77,7 @@ class TriatomicInWaterSys(TestSystem):
         self.solute_xml_path = solute_xml_path
         self.solute_inpcrd_path = solute_inpcrd_path
         self.solute_prmtop_path = solute_prmtop_path
-        self.dim = dim
+        self.num_solvent_molecules = int(num_solvent_molecules)
         self.boundary_condition = boundary_condition
         self.box_length_nm = box_length_nm
         self.internal_constraints = internal_constraints
@@ -88,7 +88,6 @@ class TriatomicInWaterSys(TestSystem):
         self.nonbonded_cutoff_nm = nonbonded_cutoff_nm
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
-        self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
 
         # Steps to take:
         # 1. Load topology of solute.
@@ -102,18 +101,18 @@ class TriatomicInWaterSys(TestSystem):
         if solute_pdb_path is not None:
             pdb = app.PDBFile(solute_pdb_path)  # This can be any triatomic solute
             # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
-            modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
+            modeller = app.Modeller(pdb.topology, pdb.positions)  # In nanometers
             forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
             # forcefield = app.ForceField('amber19-all.xml', 'amber19/tip3pfb.xml')
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
             if solute_xml_path is not None:
                 forcefield.loadFile(solute_xml_path)
             
+            # Add solvent based on num_solvent_molecules
+            if self.num_solvent_molecules > 0:
+                modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
+
             if self.boundary_condition == "droplet":
-                # Add solvent
-                if self.num_solvent_molecules > 0:
-                    modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
-                
                 # Create system
                 self.system = forcefield.createSystem(  # Create system from forcefield
                     modeller.topology,
@@ -132,10 +131,12 @@ class TriatomicInWaterSys(TestSystem):
                 if self.nonbonded_cutoff_nm > 0.5 * self.box_length_nm:
                     raise ValueError("For PBC, require nonbonded_cutoff_nm <= box_length_nm/2.")
 
-                # Add solvent
+                # Add solvent based on num_solvent_molecules which is calculated with the density.
                 L = self.box_length_nm
-                boxSize = mm.Vec3(L, L, L) * unit.nanometers
-                modeller.addSolvent(forcefield, model="tip3p", boxSize=boxSize)
+                a = mm.Vec3(L, 0, 0)
+                b = mm.Vec3(0, L, 0)
+                c = mm.Vec3(0, 0, L)
+                modeller.topology.setPeriodicBoxVectors((a, b, c) * unit.nanometers)
                 
                 # Create system
                 self.system = forcefield.createSystem(
@@ -235,6 +236,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         solute_inpcrd_path: str,
         solute_prmtop_path: str,
         dim: int = 3 * (3 + 3 * 8),
+        num_solvent_molecules: int = 5,
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
         energy_max: float = 1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -254,13 +256,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
         nonbonded_cutoff_nm: float = 1.0,
         rigid_water: bool = False,
         internal_constraints: str = "none",
-        external_constraint: bool = False,
+        external_constraints: bool = False,
         constraint_radius: float = 1.0,
         constraint_force: float = 10000.0,
         platform_name: str = "None",
         platform_properties: Optional[Dict[str, str]] = None,
     ):
         super(SoluteInWater, self).__init__()
+
+        self.num_solvent_molecules = num_solvent_molecules
 
         self.cartesian_dim = dim
         self.internal_dim = dim - 6
@@ -306,8 +310,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
             solute_xml_path,
             solute_inpcrd_path,
             solute_prmtop_path,
-            self.cartesian_dim,
-            boundary_conditions,
+            self.num_solvent_molecules,
+            boundary_condition,
             box_length_nm,
             nonbonded_cutoff_nm,
             rigid_water,
