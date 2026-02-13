@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=prep_water_water
-#SBATCH --output=logs/prep-%j.out
-#SBATCH --error=logs/prep-%j.err
+#SBATCH --job-name=slurm_water_water
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
@@ -18,7 +18,7 @@ CONDA_ENV="bgsol"
 
 SOLUTE="water"
 SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="slurm_${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch
@@ -47,7 +47,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=18
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:10:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -69,8 +69,9 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
-  target.solute_xml_path=null target.simulation_version=v1\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=pbc\\
+  target.solute_xml_path=null target.simulation_version=v2\\
+  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 \\
   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\

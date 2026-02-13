@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=prep_water_water
-#SBATCH --output=logs/prep-%j.out
-#SBATCH --error=logs/prep-%j.err
+#SBATCH --job-name=slurm_water_water
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1

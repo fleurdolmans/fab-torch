@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:15:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -45,15 +45,18 @@ srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=water \
   solute_xml_path=null \
-  simulation_version=v1 \
-  num_solvent_molecules=1000 \
-  femtoseconds_per_timestep=2.0 \
-  equi_steps=250000 \
-  burnin_steps=250000 \
-  num_steps=2500000 \
-  report_interval=5000 \
-  save_interval=1000 \
+  simulation_version=v2 \
+  create_md=true \
+  validate_md=true \
   boundary_condition=pbc \
-  pbc.box_length_nm=3.105 \
+  solvent_density=1.0 \
+  box_length_nm=2.5 \
   internal_constraints=hbonds \
   rigid_water=true 
+  # num_solvent_molecules=1000 \
+  # femtoseconds_per_timestep=2.0 \
+  # equi_steps=1e4 \
+  # burnin_steps=1e5 \
+  # num_steps=1e7 \
+  # report_interval=1e4 \
+  # save_interval=1000 \

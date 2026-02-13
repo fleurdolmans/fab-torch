@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=prep_so2_water
-#SBATCH --output=logs/prep-%j.out
-#SBATCH --error=logs/prep-%j.err
+#SBATCH --job-name=slurm_so2_water
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
@@ -72,8 +72,8 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v1\\
-  fab.loss_type=forward_kl fab.use_ais=false \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v2\\
+  target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 \\
   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
   evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
