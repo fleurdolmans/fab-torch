@@ -18,7 +18,7 @@ CONDA_ENV="bgsol"
 
 SOLUTE="water"
 SOLVENT="water"
-JOB_NAME="slurm_${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch
@@ -46,7 +46,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
+#SBATCH --partition=gpu_h100
 #SBATCH --time=02:00:00
 
 module purge
@@ -75,7 +75,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 \\
   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
-  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  evaluation.n_eval=100 evaluation.n_plots=null evaluation.n_checkpoints=1
 
 EOF
 

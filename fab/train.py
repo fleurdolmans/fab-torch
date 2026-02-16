@@ -127,10 +127,16 @@ class Trainer:
 
         if n_eval is not None:  # Save any pre-training eval metrics
             self.perform_eval(0, eval_batch_size, batch_size)
+
         if n_plot is not None:  # Save any pre-training plots
             self.make_and_save_plots(0, save)
+        
+        target_dist.train_data_i = target_dist.train_data_i.reshape(-1, target_dist.internal_dim).contiguous()
+        target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
+
 
         for t in range(start_iter, n_iterations, 1):
+            print("Iteration {}/{}".format(t + 1, n_iterations))
             i = t + 1
             if self.model.loss_type == "forward_kl" and next_epoch:
                 print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
@@ -143,21 +149,39 @@ class Trainer:
                 # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
                 # 'i' here represents that the data has already been transformed to internal coordinates, rather than
                 #  Cartesian. This is what we feed into the flow.
-                train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
+
+                # No cloning necessary here, as we are not modifying the data, just slicing it.
+                train_data = target_dist.train_data_i
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
-                train_logdet_xi = target_dist.train_logdet_xi.clone()
-                # Shuffle train data if first iteration
+                train_logdet_xi = target_dist.train_logdet_xi
+
+                # shuffle indices once per epoch
                 if k == 0:
-                    permutation = torch.randperm(len(train_data))
-                    train_data = train_data[permutation]
-                    train_logdet_xi = train_logdet_xi[permutation]
-                i_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
-                # Loss (log likelihood slash forward KL divergence) on this batch
+                    perm = torch.randperm(train_data.shape[0], device=train_data.device)
+                # slice
+                idx = perm[k*batch_size:(k+1)*batch_size]
+                i_batch = train_data[idx].to(self.flow_device, non_blocking=True)
+                logdet_batch = train_logdet_xi[idx].to(self.flow_device, non_blocking=True)
+
                 flow_loss = self.model.loss(i_batch)
-                transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
-                # TODO: Maybe add a term for OH bond lengths and angles? Bit strange, because we will no longer be
-                #  doing likelihood minimisation exactly, but the optimum does not change, so it might be okay.
+                transform_loss = -logdet_batch.mean()
                 loss = flow_loss + transform_loss
+
+                # train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
+                # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
+                # train_logdet_xi = target_dist.train_logdet_xi.clone()
+                # Shuffle train data if first iteration
+                # if k == 0:
+                #     permutation = torch.randperm(len(train_data))
+                #     train_data = train_data[permutation]
+                #     train_logdet_xi = train_logdet_xi[permutation]
+                # i_batch = train_data[k * batch_size: (k + 1) * batch_size, ...].to(self.flow_device)
+                # # Loss (log likelihood slash forward KL divergence) on this batch
+                # flow_loss = self.model.loss(i_batch)
+                # transform_loss = -train_logdet_xi.mean()  # negative because loss is neg of p log q.
+                # # TODO: Maybe add a term for OH bond lengths and angles? Bit strange, because we will no longer be
+                # #  doing likelihood minimisation exactly, but the optimum does not change, so it might be okay.
+                # loss = flow_loss + transform_loss
                 if (k + 1) * batch_size >= len(train_data):
                     k = 0  # Restart epoch if current batch exceeds number of training data points
                     epoch += 1
