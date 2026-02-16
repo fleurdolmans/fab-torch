@@ -49,12 +49,14 @@ srun python "${MAIN_DIR}/data_generation/md_data.py" \
   create_md=true \
   validate_md=true \
   boundary_condition=pbc \
+  femtoseconds_per_timestep=2.0 \
   solvent_density=1.0 \
   box_length_nm=2.5 \
   internal_constraints=hbonds \
   rigid_water=true 
   # num_solvent_molecules=1000 \
-  # femtoseconds_per_timestep=2.0 \
+
+  # Speed up version for testing:
   # equi_steps=1e4 \
   # burnin_steps=1e5 \
   # num_steps=1e7 \

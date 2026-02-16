@@ -25,10 +25,14 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         figs = []
         R, T = 8.314e-3, target.temperature
 
+        print("Loading target data for plotting...")
+
         if target.eval_mode == "val":
             target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
         elif target.eval_mode == "test":
             target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
+        
+        print("Loaded")
 
         # Plot energies of the MD data as a sanity check if desired.
         if plot_dict["plot_md_energies"]:

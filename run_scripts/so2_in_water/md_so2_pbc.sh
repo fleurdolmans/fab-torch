@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 module purge
 module load 2025
@@ -48,6 +48,7 @@ srun python "${MAIN_DIR}/data_generation/md_data.py" \
   create_md=true \
   validate_md=true \
   boundary_condition=pbc \
+  femtoseconds_per_timestep=2.0 \
   solvent_density=1.0 \
   box_length_nm=2.5 \
   internal_constraints=hbonds \
@@ -55,7 +56,6 @@ srun python "${MAIN_DIR}/data_generation/md_data.py" \
   # num_solvent_molecules=1000 \
 
   # Speed up version for testing:
-  # femtoseconds_per_timestep=2.0 \
   # equi_steps=1e4 \
   # burnin_steps=1e5 \
   # num_steps=1e7 \
