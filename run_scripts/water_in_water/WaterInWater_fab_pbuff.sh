@@ -67,10 +67,10 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=droplet\\
   target.solute_xml_path=null target.simulation_version=v1\\
   flow.blocks=12 flow.hidden_units=512 flow.num_bins=8 \\
-  training.lr=5e-5 training.buffer.min_length=8192 training.buffer.maximum_length=131072 \\
+  training.lr=5e-5 training.max_grad_norm=0.5 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=3\\
   training.n_iterations=1000 evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 

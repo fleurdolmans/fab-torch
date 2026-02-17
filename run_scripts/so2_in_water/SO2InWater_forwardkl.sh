@@ -47,8 +47,8 @@ cat > "${SLURM}" <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=02:00:00
+#SBATCH --partition=gpu_h100
+#SBATCH --time=01:30:00
 
 module purge
 module load 2025
@@ -72,7 +72,7 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v2\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v5\\
   target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 \\
