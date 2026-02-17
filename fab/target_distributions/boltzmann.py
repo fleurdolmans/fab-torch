@@ -57,6 +57,10 @@ class TransformedBoltzmann(nn.Module):
         """
         z, log_det = self.transform(z)  # I --> X
         energy_term = -self.norm_energy(z)
+
+        if torch.rand(1).item() < 0.01:
+            U = (-energy_term).detach().cpu()
+            print("[Boltzmann] U(kBT) mean", U.mean().item(), "max", U.max().item(), "min", U.min().item())
         #  UNITS: We add logdetjac to energy, because energy is essentially log probability.
         #   Energy has units of kJ/mol by default (openMM). If we divide energy by N_A kBT = R * T,
         #   we get kJ/mol / (kJ/mol) = unitless!
@@ -86,7 +90,7 @@ class TransformedBoltzmannParallel(nn.Module):
     states in parallel
     """
 
-    def __init__(self, system, temperature, energy_cut, energy_max, transform, n_threads=None):
+    def __init__(self, system, temperature, energy_cut, energy_max, transform, platform_name="Reference", n_threads=None):
         """
         Constructor
         :param system: Molecular system
@@ -94,6 +98,7 @@ class TransformedBoltzmannParallel(nn.Module):
         :param energy_cut: Energy at which logarithm is applied
         :param energy_max: Maximum energy
         :param transform: Coordinate transformation
+        :param platform_name: OpenMM platform to use
         :param n_threads: Number of threads to use to process batches, set to the number of cpus if None
         """
         super().__init__()
@@ -105,7 +110,7 @@ class TransformedBoltzmannParallel(nn.Module):
         self.n_threads = mp.cpu_count() if n_threads is None else n_threads
 
         # Create pool for parallel processing
-        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init, (system, temperature))
+        self.pool = mp.Pool(self.n_threads, OpenMMEnergyInterfaceParallel.var_init, (system, temperature, platform_name))
 
         # Set up functions
         self.openmm_energy = OpenMMEnergyInterfaceParallel.apply
@@ -175,14 +180,13 @@ class OpenMMEnergyInterface(torch.autograd.Function):
         (forces,) = ctx.saved_tensors
         return forces * grad_output, None, None
 
-
 class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
     """
     Uses parallel processing to get the energies of the batch of states
     """
 
     @staticmethod
-    def var_init(sys, temp):
+    def var_init(sys, temp, platform_name):
         """
         Method to initialize temperature and openmm context for workers
         of multiprocessing pool
@@ -193,7 +197,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             sys.topology,
             sys.system,
             mm.LangevinMiddleIntegrator(temp * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-            platform=mm.Platform.getPlatformByName("Reference"),
+            platform=mm.Platform.getPlatformByName(platform_name),
         )
         openmm_context = sim.context
 
