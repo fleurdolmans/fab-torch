@@ -259,7 +259,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         external_constraints: bool = False,
         constraint_radius: float = 1.0,
         constraint_force: float = 10000.0,
-        platform_name: str = "None",
+        platform_name: str = None,
         platform_properties: Optional[Dict[str, str]] = None,
     ):
         super(SoluteInWater, self).__init__()
@@ -380,6 +380,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 energy_cut=energy_cut,
                 energy_max=energy_max,
                 transform=self.coordinate_transform,
+                platform_name=self.platform_name,
                 n_threads=n_threads,
             )
         else:
@@ -394,7 +395,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             )
             print("in n_threads")
 
-            print("OpenMM platform:", traj_sim.context.getPlatform().getName())
+            print("OpenMM platform:", sim.context.getPlatform().getName())
             
             self.p = TransformedBoltzmann(
                 sim.context,
