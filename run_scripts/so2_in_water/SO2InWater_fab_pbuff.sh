@@ -1,11 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_water_water
+#SBATCH --job-name=slurm_so2_water
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
+
 set -euo pipefail
 
 PROJECT_NAME="fab-torch"
@@ -16,12 +17,12 @@ MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
 
 CONDA_ENV="bgsol"
 
-SOLUTE="water"
+SOLUTE="so2"
 SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="fab_${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch
+LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
 
 # Create dir for specific experiment run
@@ -47,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_h100
-#SBATCH --time=01:30:00
+#SBATCH --time=04:00:00
 
 module purge
 module load 2025
@@ -65,18 +66,15 @@ export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
 
-# We are essentially just using the loss_type and use_ais arguments when doing forward KL training.
-
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=pbc\\
-  target.solute_xml_path=null target.simulation_version=v5\\
-  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=false \\
-  fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.blocks=12 flow.hidden_units=256 \\
-  training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
-  evaluation.n_eval=100 evaluation.n_plots=null evaluation.n_checkpoints=1
-
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
+  target.boundary_condition=pbc target.simulation_version=v4\\
+  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
+  flow.blocks=12 flow.hidden_units=512 flow.num_bins=8 \\
+  training.batch_size=512 training.buffer.maximum_length=262144 training.buffer.min_length=32768\\
+  training.lr=5e-5 training.max_grad_norm=0.5 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=3\\
+  training.n_iterations=1000 evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 
 chmod +x "${SLURM}"
@@ -84,3 +82,5 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
+
+# fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=16 fab.transition_operator.target_p_accept=0.8 \\
