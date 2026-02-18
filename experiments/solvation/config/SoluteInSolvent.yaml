@@ -13,38 +13,50 @@ hydra:
 
 target:                               # Properties of molecular system
   solute_name: water                  # Name of the solute molecule. Default is water.
-  solvent_name: water                      # Name of solvent molecules (currently only water is supported).
-  dim: 54                             # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  solvent_name: water                 # Name of solvent molecules (currently only water is supported).
+  cartesian_dim: 459                  # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
+  num_solvent_molecules: 50           # Number of solvent molecules to simulate. 
   temperature: 300                    # Double, temperature of the system
   energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
   energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 18                       # Int, number of threads to be used, number of cores if null
+  n_threads: 1                        # Int, number of threads to be used, number of cores if null (ONLY ON CPU/Reference))
   solute_pdb_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.pdb           # Filepath to solvent pdb
   solute_xml_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.xml           # Filepath to solvent xml. Not needed for water solute, fill in null in that case.
-  solute_inpcrd_path: null                                              # Filepath to solvent inpcrd; currently unused.
-  solute_prmtop_path: null                                              # Filepath to solvent prmtop; currently unused.
-  internal_constraints: "none"        # Internal constraints to use. E.g. "hbonds" (restricts hydrogen atom bond lengths) or "none".
-  rigid_water: false                  # Whether to use rigid water molecules: regardless of internal constraints, OpenMM will use fully rigid water molecules by default (bond length and angles).
-  external_constraints: true          # Whether to use external force constraints for keeping the system in place.
-  constraint_radius: 0.3              # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
-  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
+  solute_inpcrd_path: null            # Filepath to solvent inpcrd; currently unused.
+  solute_prmtop_path: null            # Filepath to solvent prmtop; currently unused.
 
+  boundary_condition: droplet         # Boundary conditions to use: "pbc" or "droplet".
+  internal_constraints: "none"        # "none" or "hbonds": "none" for non-rigid water molecules.
+  rigid_water: false                  # Rigid water molecules true/false.
+
+  # Only used for PBC simulations.     
+  nonbonded_cutoff_nm: 1.0            # Nonbonded cutoff in nm           
+  box_length_nm: 2.5                  # Length of the box = (num_solvent_molecules / 33.4)^(1/3) (Liquid water density ≈ 33.4 water molecules / nm^3)
+    
+  # Only used for droplet simulations.                   
+  external_constraints: true
+  constraint_radius: 0.3     #0.8     # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
+  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
+    
   # MD simulation parameters
-  equi_steps: 1e4                         # Equilibration steps.
-  burnin_steps: 1e5                       # Burn-in steps.
-  num_steps: 1e7                          # Total number of steps to simulate after equilibration and burn-in.
-  femtoseconds_per_timestep: 0.5          # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
-  save_interval: 10                       # Save every this many steps. Total frames saved is num_steps / save_interval.
+  equi_steps: 1e4                     # Equilibration steps.
+  burnin_steps: 1e5                   # Burn-in steps.
+  num_steps: 1e7                      # Total number of steps to simulate after equilibration and burn-in.
+  femtoseconds_per_timestep: 0.5      # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
+  save_interval: 10                   # Save every this many steps. Total frames saved is num_steps / save_interval.
 
   # Filepaths to load samples from
-  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}  # Directory where MD data is stored.
-  samples_file: ${target.solute_name}In${target.solvent_name}_dim${target.dim}_temp${target.temperature}_eq${target.equi_steps}_burn${target.burnin_steps}_steps${target.num_steps}_fpt${target.femtoseconds_per_timestep}_every${target.save_interval}_ec${target.external_constraints}_r${target.constraint_radius}_fc${target.constraint_force}_ic${target.internal_constraints}_rw${target.rigid_water}.h5
+  simulation_version: v1              # Version name for the simulation; used in output filenames.
+  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.boundary_condition}/${target.simulation_version}/      # Directory where MD data is stored.
+  samples_file: traj_${target.solute_name}In${target.solvent_name}.h5
   train_samples_path: ${target.md_data_dir}/${target.samples_file}
   val_samples_path: ${target.md_data_dir}/${target.samples_file}
   test_samples_path: null
+  platform_name: CUDA                 # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
-flow:                                  # Properties of the flow model
-  solvent_flow: true                   # Bool, specifies model: this should be `true` for solute-solvent settings.
+
+flow:                                 # Properties of the flow model
+  solvent_flow: true                  # Bool, specifies model: this should be `true` for solute-solvent settings.
   use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
   resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
   type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
@@ -98,15 +110,17 @@ training:                             # Properties of the training procedure
   warmup_iter: null                   # Int, number of iterations used for warmup
   max_grad_norm: 1                    # Double, limit for gradient clipping
   buffer:                             # Buffer args follow below here 
-    use: true                  # Whether to use a replay buffer during training.
-    prioritised: true          # If True then FAB loss WILL be used no matter what fab.loss_type is.
+    use: true                         # Whether to use a replay buffer during training.
+    prioritised: true                 # If True then FAB loss WILL be used no matter what fab.loss_type is.
+    
     # Only used when buffer.use is true:
-    maximum_length: 524288     # ALDP used 512 * 1024 (batch_size)
-    min_length: 65536          # ALDP used 64 * 1024 (batch_size); this means a long initial step where the buffer is filled to this number of samples!
-    n_batches_sampling: 8      # Number of updates (batches) to do after every buffer sampling step
-    w_adjust_max_clip: 10      # clipping of weight adjustment factor for prioritised replay
-    temp: 1.0                  # Rate that we weight new experience over old (for non-prioritised replay only)
-    log_w_clip_frac: null      # Null for no clipping, for non-prioritised replay only.
+    maximum_length: 524288            # ALDP used 512 * 1024 (batch_size)
+    min_length: 65536                 # ALDP used 64 * 1024 (batch_size); this means a long initial step where the buffer is filled to this number of samples!
+    n_batches_sampling: 8             # Number of updates (batches) to do after every buffer sampling step
+    w_adjust_max_clip: 10             # clipping of weight adjustment factor for prioritised replay
+    temp: 1.0                         # Rate that we weight new experience over old (for non-prioritised replay only)
+    log_w_clip_frac: null             # Null for no clipping, for non-prioritised replay only.
+  platform_name: "CUDA"               # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
 
 evaluation:
@@ -114,7 +128,7 @@ evaluation:
   print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
   plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging.
-  n_plots: 10                         # number of times we visualise the model throughout training.
+  n_plots: 10              # null     # number of times we visualise the model throughout training. For bulk water this should be set to null. 
   n_eval: 500                         # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
   n_checkpoints: 1                    # number of model checkpoints saved
@@ -122,8 +136,8 @@ evaluation:
 
 logger:
   wandb:
-    name: ${fab.loss_type}_dim${target.dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
-    project: ${target.solvent_name}_in_${target.solvent_name}
+    name: ${target.boundary_condition}_${target.simulation_version}_${fab.loss_type}_dim${target.cartesian_dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
+    project: ${target.boundary_condition}_${fab.loss_type}_${target.solute_name}_in_${target.solvent_name}
     entity: ${user.wandb.entity}
 #  pandas_logger:
-#    save_period: 100                  # how often to save the pandas dataframe as a csv
+#    save_period: 100                 # how often to save the pandas dataframe as a csv

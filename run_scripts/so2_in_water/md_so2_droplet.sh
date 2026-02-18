@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=01:40:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -40,6 +40,9 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export MAIN_DIR="${MAIN_DIR}"
 
 # Create MD data for SO2 in water and plot diagnostics
-srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
+srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
-  solute_name=so2 
+  solute_name=so2 \
+  simulation_version="v2" \
+  num_solvent_molecules=5 \
+  constraint_radius=0.3 

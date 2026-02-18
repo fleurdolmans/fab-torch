@@ -60,10 +60,13 @@ class TriatomicInWaterSys(TestSystem):
             solute_xml_path: str,
             solute_inpcrd_path: str,
             solute_prmtop_path: str,
-            dim: int,
-            external_constraints: bool,
-            internal_constraints: str,
+            num_solvent_molecules: int,
+            boundary_condition: str,
+            box_length_nm: float,
+            nonbonded_cutoff_nm: float,
             rigid_water: bool,
+            internal_constraints: str,
+            external_constraints: bool,
             constraint_radius: float,
             constraint_force: float,
             **kwargs,
@@ -74,16 +77,17 @@ class TriatomicInWaterSys(TestSystem):
         self.solute_xml_path = solute_xml_path
         self.solute_inpcrd_path = solute_inpcrd_path
         self.solute_prmtop_path = solute_prmtop_path
-        self.dim = dim
+        self.num_solvent_molecules = int(num_solvent_molecules)
+        self.boundary_condition = boundary_condition
+        self.box_length_nm = box_length_nm
         self.internal_constraints = internal_constraints
         self.rigid_water = rigid_water
         self.external_constraints = external_constraints
-        self.constrain_radius = constraint_radius
+        self.constraint_radius = constraint_radius
         self.constraint_force = constraint_force
-
+        self.nonbonded_cutoff_nm = nonbonded_cutoff_nm
         self.num_atoms_per_solute = 3  # Triatomic
         self.num_atoms_per_solvent = 3  # Water
-        self.num_solvent_molecules = (dim - self.num_atoms_per_solute) // (self.num_atoms_per_solvent * 3)
 
         # Steps to take:
         # 1. Load topology of solute.
@@ -97,25 +101,53 @@ class TriatomicInWaterSys(TestSystem):
         if solute_pdb_path is not None:
             pdb = app.PDBFile(solute_pdb_path)  # This can be any triatomic solute
             # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
-            modeller = app.modeller.Modeller(pdb.topology, pdb.positions)  # In nanometers
+            modeller = app.Modeller(pdb.topology, pdb.positions)  # In nanometers
             forcefield = app.ForceField("amber14/tip3p.xml")  # tip3pfb
             # forcefield = app.ForceField('amber19-all.xml', 'amber19/tip3pfb.xml')
             # ‘tip3p’, ‘spce’, ‘tip4pew’, ‘tip5p’, ‘swm4ndp’
             if solute_xml_path is not None:
                 forcefield.loadFile(solute_xml_path)
-            # Add solvent
+            
+            # Add solvent based on num_solvent_molecules
             if self.num_solvent_molecules > 0:
-                # TODO: set padding=1.0 * unit.nanometers ?
-                # TODO: set boxSize=mm.Vec3(3.105, 3.105, 3.105) * unit.nanometers ?
                 modeller.addSolvent(forcefield, model="tip3p", numAdded=self.num_solvent_molecules)
-            # Create system
-            self.system = forcefield.createSystem(  # Create system from forcefield
-                modeller.topology,
-                nonbondedMethod=app.CutoffNonPeriodic,
-                nonbondedCutoff=1.0 * unit.nanometers,
-                constraints=constraints_dict[internal_constraints],  # `"none"` for flexible H2O
-                rigidWater=rigid_water,  # `False` for flexible H2O
-            )
+
+            if self.boundary_condition == "droplet":
+                # Create system
+                self.system = forcefield.createSystem(  # Create system from forcefield
+                    modeller.topology,
+                    nonbondedMethod=app.CutoffNonPeriodic,
+                    nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
+                    constraints=constraints_dict[self.internal_constraints],  # `"none"` for flexible H2O
+                    rigidWater=self.rigid_water,  # `False` for flexible H2O
+                )
+                # External constraints
+                if self.external_constraints:
+                    self._add_external_constraints()
+
+            elif self.boundary_condition == "pbc":
+                if self.box_length_nm is None:
+                    raise ValueError("box_length_nm must be set for PBC.")
+                if self.nonbonded_cutoff_nm > 0.5 * self.box_length_nm:
+                    raise ValueError("For PBC, require nonbonded_cutoff_nm <= box_length_nm/2.")
+
+                # Add solvent based on num_solvent_molecules which is calculated with the density.
+                L = self.box_length_nm
+                a = mm.Vec3(L, 0, 0)
+                b = mm.Vec3(0, L, 0)
+                c = mm.Vec3(0, 0, L)
+                modeller.topology.setPeriodicBoxVectors((a, b, c) * unit.nanometers)
+                
+                # Create system
+                self.system = forcefield.createSystem(
+                    modeller.topology,
+                    nonbondedMethod=app.PME,               
+                    nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
+                    constraints=constraints_dict[self.internal_constraints],
+                    rigidWater=self.rigid_water,
+                )
+            else:
+                raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
             # TODO: Not fully implemented!
             #  After adding solvent, the system can be created in two ways:
@@ -136,24 +168,26 @@ class TriatomicInWaterSys(TestSystem):
         else:
             raise ValueError("Must provide either a .pdb file with optional .xml file, or .inpcrd and .prmtop files.")
 
-        if external_constraints:
-            # This keeps the first atom around the origin.
-            center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
-            center.addGlobalParameter("k", 100000.0)
-            self.system.addForce(center)
-            center.addParticle(0, [])
-
-            # Add spherical restraint to hold the droplet
-            force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(constraint_radius))
-            force.addGlobalParameter("w", constraint_force)
-            self.system.addForce(force)
-            for i in range(self.system.getNumParticles()):
-                force.addParticle(i, [])
 
         self.topology, self.positions = modeller.getTopology(), modeller.getPositions()
         # self.topology.atoms() yields the atom order, which is OHH OHH OHH etc.
         # This is the order in which the coordinates are stored in the positions array.
         self.atoms = [atom.name for atom in self.topology.atoms()]
+    
+    def _add_external_constraints(self):
+        # This keeps the first atom around the origin.
+        center = mm.CustomExternalForce('k*r^2; r=sqrt(x*x+y*y+z*z)')
+        center.addGlobalParameter("k", 100000.0)
+        self.system.addForce(center)
+        center.addParticle(0, [])
+
+        # Add spherical restraint to hold the droplet
+        force = mm.CustomExternalForce('w*max(0, r-{:.1f})^2; r=sqrt(x*x+y*y+z*z)'.format(self.constraint_radius))
+        force.addGlobalParameter("w", self.constraint_force)
+        self.system.addForce(force)
+        for i in range(self.system.getNumParticles()):
+            force.addParticle(i, [])
+        
 
 
 class SoluteInWater(nn.Module, TargetDistribution):
@@ -202,6 +236,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         solute_inpcrd_path: str,
         solute_prmtop_path: str,
         dim: int = 3 * (3 + 3 * 8),
+        num_solvent_molecules: int = 5,
         temperature: float = 300,
         energy_cut: float = 1.0e8,  # TODO: Does this still make sense? Originally for 1000K ALDP.
         energy_max: float = 1.0e20,  # TODO: Does this still make sense? Originally for 1000K ALDP.
@@ -216,13 +251,20 @@ class SoluteInWater(nn.Module, TargetDistribution):
         save_dir: Optional[str] = None,
         plot_MD_energies: bool = False,
         plot_marginal_hists: bool = False,
-        external_constraints: bool = True,
-        internal_constraints: str = "none",
+        boundary_condition: str = "droplet",
+        box_length_nm: float = 3.105,
+        nonbonded_cutoff_nm: float = 1.0,
         rigid_water: bool = False,
+        internal_constraints: str = "none",
+        external_constraints: bool = False,
         constraint_radius: float = 1.0,
-        constraint_force: float = 10000.0
+        constraint_force: float = 10000.0,
+        platform_name: str = None,
+        platform_properties: Optional[Dict[str, str]] = None,
     ):
         super(SoluteInWater, self).__init__()
+
+        self.num_solvent_molecules = num_solvent_molecules
 
         self.cartesian_dim = dim
         self.internal_dim = dim - 6
@@ -243,30 +285,32 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         # Load any MD data
         self.eval_mode = eval_mode
-        self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
+        # self.train_samples_path, self.val_samples_path, self.test_samples_path = None, None, None
         self.train_data_config, self.val_data_config, self.test_data_config = None, None, None
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
         self.train_data_i, self.val_data_i, self.test_data_i = None, None, None
         self.train_logdet_xi, self.val_logdet_xi, self.test_logdet_xi = None, None, None
         if train_samples_path:
-            self.train_samples_path = pathlib.Path(train_samples_path)
+            train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
-            self.train_data_x = self.load_target_data(self.train_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            with open(self.train_samples_path.with_suffix(".json"), "r") as f:
-                self.train_data_config = json.load(f)
+            self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim).double()
+
         if val_samples_path:
-            self.val_samples_path = pathlib.Path(val_samples_path)
-            self.val_data_x = self.load_target_data(self.val_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            with open(self.val_samples_path.with_suffix(".json"), "r") as f:
-                self.val_data_config = json.load(f)
+            val_samples_path = pathlib.Path(val_samples_path)
+            self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
+            try:
+                X = self.val_data_x[0].reshape(-1, 3)  # first frame
+                S, O1, O2 = X[0], X[1], X[2]           # assumes OHH order
+                d1 = torch.norm(O1 - S).item()
+                d2 = torch.norm(O2 - S).item()
+                print(f"[DEBUG] raw MD first water SO distances: {d1:.6f}, {d2:.6f} (stored units)", flush=True)
+            except Exception as e:
+                print("[DEBUG] raw MD SO distance check failed:", repr(e), flush=True)
+
         if test_samples_path:
-            self.test_samples_path = pathlib.Path(test_samples_path)
-            self.test_data_x = self.load_target_data(self.test_samples_path, self.cartesian_dim).double()
-            # Load associated config
-            with open(self.test_samples_path.with_suffix(".json"), "r") as f:
-                self.test_data_config = json.load(f)
+            test_samples_path = pathlib.Path(test_samples_path)
+            self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim).double()
+
 
         # Initialise system
         self.system = TriatomicInWaterSys(
@@ -274,23 +318,35 @@ class SoluteInWater(nn.Module, TargetDistribution):
             solute_xml_path,
             solute_inpcrd_path,
             solute_prmtop_path,
-            self.cartesian_dim,
-            external_constraints,
-            internal_constraints,
+            self.num_solvent_molecules,
+            boundary_condition,
+            box_length_nm,
+            nonbonded_cutoff_nm,
             rigid_water,
+            internal_constraints,
+            external_constraints,
             constraint_radius,
             constraint_force,
         )
 
+        # OpenMM platform
+        self.platform_name = platform_name
+        self.platform_properties = platform_properties
+
+
         # Generate trajectory for coordinate transform if no data path is specified
         integrator = mm.LangevinMiddleIntegrator
+        print(val_samples_path)
         if not val_samples_path or not use_val_data_for_transform:
             traj_sim = app.Simulation(
                 self.system.topology,
                 self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-                platform=mm.Platform.getPlatformByName("Reference"),
+                mm.Platform.getPlatformByName(self.platform_name),
+                self.platform_properties,
             )
+            print("OpenMM platform:", traj_sim.context.getPlatform().getName())
+   
             traj_sim.context.setPositions(self.system.positions)
             traj_sim.minimizeEnergy()
             state = traj_sim.context.getState(getPositions=True)
@@ -306,11 +362,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
             f"coordinates in current system ({self.cartesian_dim})."
         )
 
-        self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+        self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device), boundary_condition, box_length_nm)
 
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:
+
             # OH bonds are still ~0.1 nm apart
             self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                 self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
@@ -319,6 +376,18 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
                 self.val_data_x.reshape(-1, self.cartesian_dim)
             )
+        
+            # --- DEBUG: transform roundtrip x -> i -> x ---
+            with torch.no_grad():
+                X0 = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
+                I0, _ = self.coordinate_transform.inverse(X0)
+                X1, _ = self.coordinate_transform.forward(I0)
+
+                 # Get the canonical rotated-centered Cartesian that inverse uses internally
+                _, _, X0_coord, _ = self.coordinate_transform.cartesian_to_z(X0, setup=False)
+                diff = (X1 - X0_coord).abs().max()
+                print("[DEBUG] x_coord vs x_recon max abs diff (nm):", diff.max().item(), flush=True)
+                
         if self.test_data_x is not None:
             self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
                 self.test_data_x.reshape(-1, self.cartesian_dim)
@@ -331,6 +400,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 energy_cut=energy_cut,
                 energy_max=energy_max,
                 transform=self.coordinate_transform,
+                platform_name=self.platform_name,
                 n_threads=n_threads,
             )
         else:
@@ -340,8 +410,13 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.system.topology,
                 self.system.system,
                 integrator(temperature * unit.kelvin, 1.0 / unit.picosecond, 1.0 * unit.femtosecond),
-                mm.Platform.getPlatformByName("Reference"),
+                mm.Platform.getPlatformByName(self.platform_name),
+                self.platform_properties,
             )
+            print("in n_threads")
+
+            print("OpenMM platform:", sim.context.getPlatform().getName())
+            
             self.p = TransformedBoltzmann(
                 sim.context,
                 temperature,
@@ -349,6 +424,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 energy_max=energy_max,
                 transform=self.coordinate_transform,
             )
+            # --- DEBUG: direct OpenMM energy on raw MD Cartesian (bypass transform) ---
+            if self.val_data_x is not None:
+                with torch.no_grad():
+                    X = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
+                    lp_x = self.p.log_prob_x(X)   # direct Cartesian energy eval
+                    U = -lp_x
+                    print("[DEBUG] MD direct-X U(kBT):", U.detach().cpu().numpy(), flush=True)
+                    print("[DEBUG] MD direct-X U(kBT) mean/max/min:",
+                        U.mean().item(), U.max().item(), U.min().item(), flush=True)
 
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):
@@ -391,6 +475,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             log_w: Optional[Tensor] = None,
             log_q_fn: Callable = None,
             batch_size: int = 1000,
+            n_eval: int = 500,
             iteration: Optional[int] = None,
             flow: Optional[nn.Module] = None,
     ):
@@ -419,7 +504,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         # This function is typically called both with Flow (likelihood available for samples) and with Flow+AIS
         # samples (no likelihood available for Flow+AIS samples).
-        summary_dict = {}
+
         # Load MD data for evaluation
         if self.eval_mode == "val":  # TODO: batch this?
             # Note that x (Cartesian) data is NOT centered!
@@ -435,21 +520,46 @@ class SoluteInWater(nn.Module, TargetDistribution):
         else:
             raise ValueError("Invalid eval_mode. Must be 'val' or 'test'.")
 
+        # Subsample on CPU
+        N = target_data_i.shape[0]
+        n_use = min(n_eval, N)
+
+        # deterministic or random
+        idx = torch.randperm(N)[:n_use]
+
+        target_data_i_eval = target_data_i[idx]
+        target_logdet_xi_eval = target_logdet_xi[idx]
+
+
+        summary_dict = {}
+
         # Log_prob of flow given, so use this for evaluating the log probability of MD data.
-        if log_q_fn:
-            # Log_prob of target data under flow
+        if log_q_fn is not None:
             with torch.no_grad():
-                # log_q_fn is the log_prob function of the flow.
-                log_q_test = log_q_fn(target_data_i) + target_logdet_xi
-            test_mean_log_prob = torch.mean(log_q_test)
-            summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
+                s = 0.0
+                n = 0
+                for start in range(0, target_data_i_eval.shape[0], batch_size):
+                    end = start + batch_size
+                    v = log_q_fn(target_data_i_eval[start:end]) + target_logdet_xi_eval[start:end]
+                    s += v.sum().item()
+                    n += v.numel()
+    
+                summary_dict["flow_test_log_prob"] = s / n
+                summary_dict["flow_test_log_prob_per_dim"] = (s / n) / self.internal_dim
+            # Log_prob of target data under flow
+            # with torch.no_grad():
+            #     # log_q_fn is the log_prob function of the flow.
+            #     log_q_test = log_q_fn(target_data_i) + target_logdet_xi
+            # test_mean_log_prob = torch.mean(log_q_test)
+            # summary_dict.update({"flow_test_log_prob": test_mean_log_prob.cpu().item()})
 
         # Use flow samples for computing marginal KL estimates.
         if samples is None:  # No samples provided, so generate using flow.
             assert flow, (
                 "Flow model must be provided for generating evaluation samples if none are provided."
             )
-            num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
+            # num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
+            num_flow_samples = target_data_i_eval.shape[0]  # match n_eval
             with torch.no_grad():
                 flow_samples, _ = flow.sample_and_log_prob((num_flow_samples,))
         else:  # Samples provided (can be Flow or Flow+AIS samples).
@@ -460,8 +570,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
         # TODO: Possibly batch this if necessary?
         nbins = 200
         hist_range = [-5, 5]
-        target_data_kl = target_data_i.cpu().clone().numpy()
-        flow_samples_kl = flow_samples.cpu().clone().numpy()
+
+        target_data_kl = target_data_i_eval.detach().cpu().numpy()
+        flow_samples_kl = flow_samples.detach().cpu().numpy()
+
+        # target_data_kl = target_data_i.cpu().clone().numpy()
+        # flow_samples_kl = flow_samples.cpu().clone().numpy()
         hists_test = np.zeros((nbins, self.internal_dim))
         hists_flow = np.zeros((nbins, self.internal_dim))
         for dim in range(self.internal_dim):
@@ -494,3 +608,66 @@ class SoluteInWater(nn.Module, TargetDistribution):
             warnings.warn("No summary metrics were computed.")
 
         return summary_dict
+    
+    def find_bad_frames_bisect(
+        self,
+        X: torch.Tensor,
+        name: str,
+        chunk_size: int = 8192,
+        msg_substring: str = "Found rotation around axis with x=0 outside of coordinate setup.",
+        max_bad: int | None = None,
+        ):
+
+        """
+        Find indices of frames in X that cause coordinate_transform.inverse() to raise a specific ValueError.
+        Uses chunk testing + bisection to avoid O(N) per-frame calls.
+        """
+        assert X.ndim == 2, f"{name}: expected (n_frames, dim), got {tuple(X.shape)}"
+        if X.shape[1] != self.cartesian_dim:
+            raise ValueError(
+                f"{name}: dim mismatch: X.shape[1]={X.shape[1]} vs cartesian_dim={self.cartesian_dim}"
+            )
+
+        X = X.to(self.device)
+        n = X.shape[0]
+        bad = []
+
+        def fails(i0: int, i1: int) -> bool:
+            try:
+                with torch.no_grad():
+                    _ = self.coordinate_transform.inverse(X[i0:i1])
+                return False
+            except ValueError as e:
+                if msg_substring in str(e):
+                    return True
+                raise  # other errors should still surface
+
+        print("Finding bad frames via bisection...")
+        # 1) coarse scan
+        failing_ranges = []
+        for i0 in range(0, n, chunk_size):
+            i1 = min(n, i0 + chunk_size)
+            if fails(i0, i1):
+                failing_ranges.append((i0, i1))
+
+        # 2) bisect failing ranges to isolate failing frames
+        stack = failing_ranges[:]
+        while stack:
+            i0, i1 = stack.pop()
+            if i1 - i0 == 1:
+                bad.append(i0)
+                if max_bad is not None and len(bad) >= max_bad:
+                    break
+                continue
+            mid = (i0 + i1) // 2
+            if fails(i0, mid):
+                stack.append((i0, mid))
+            if fails(mid, i1):
+                stack.append((mid, i1))
+
+        bad = sorted(set(bad))
+        print(f"[{name}] total={n} bad={len(bad)} rate={len(bad)/max(1,n):.3e}")
+        if bad:
+            print(f"[{name}] first bad indices: {bad[:20]}")
+        return bad
+    

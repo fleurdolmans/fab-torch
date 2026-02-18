@@ -25,10 +25,14 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         figs = []
         R, T = 8.314e-3, target.temperature
 
+        print("Loading target data for plotting...")
+
         if target.eval_mode == "val":
             target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
         elif target.eval_mode == "test":
             target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
+        
+        print("Loaded")
 
         # Plot energies of the MD data as a sanity check if desired.
         if plot_dict["plot_md_energies"]:
@@ -247,6 +251,48 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         return figs
     return plot
 
+def pick_system_keys(d: dict, keys: list) -> dict:
+    """Keep only keys that define the physical system / target distribution."""
+    if d is None:
+        return None
+    # adjust these to match your JSON structure
+    # if your JSON is a full resolved hydra config, it'll likely have a "target" section
+    tgt = d.get("target", d)  # support either nested or flat
+    return {k: tgt.get(k) for k in keys if k in tgt}
+
+
+def load_json(path):
+    """Load the JSON file if it exists; otherwise return None."""
+    # If no path provided, return None
+    if not path:
+        return None
+
+    p = pathlib.Path(path).with_suffix(".json")
+    # Check if the file exists before trying to load it
+    if not p.exists():
+        return None
+
+    with p.open("r") as f:
+        return json.load(f)
+
+def overwrite_cfg(cfg, system_cfgs):
+    """Overwrite hydra cfg.target with the system config from the MD data JSON, 
+    if it exists, and check consistency if multiple JSONs exist. Only overwrite MD_KEYS."""
+    if not system_cfgs:
+        return cfg
+    else:
+        # Choose train as canonical if present, otherwise first available
+        base_name, base_system = next(((n, s) for (n, s) in system_cfgs if n == "train"), system_cfgs[0])
+
+        # Check all system configs match base
+        mismatches = [(n, s) for (n, s) in system_cfgs if s != base_system]
+        if mismatches:
+            raise ValueError(f"Train/val/test system configs differ. Base={base_name}, mismatches={[n for n,_ in mismatches]}")
+
+        # Overwrite hydra cfg.target with dataset physics config
+        cfg = OmegaConf.merge(cfg, OmegaConf.create({"target": base_system}))
+        return cfg
+
 
 def _run(cfg: DictConfig) -> None:
     # Seeds
@@ -281,7 +327,20 @@ def _run(cfg: DictConfig) -> None:
     # - wandb-metadata.json: JSON file containing metadata about the run.
     # - requirements.txt: Plaintext file of pip packages used.
     # - media: Directory containing any media files logged to Wandb, such as images.
-
+    
+    # Set platform properties based on the selected platform
+    platform_list = ["Reference", "CPU", "OpenCL", "CUDA", "None"]
+    if cfg.target.platform_name == "CUDA":
+        platform_properties = {
+        "Precision": "mixed",   # Best speed/accuracy tradeoff
+        "DeviceIndex": "0",         # Pick GPU 0
+    }
+    elif cfg.target.platform_name in platform_list:
+        platform_properties = None
+    else:
+        raise NotImplementedError(f"Platform {cfg.target.platform_name} not implemented. Either use 'Reference', 'CPU', 'CUDA', 'OpenCL' or 'None'.")
+    
+ 
     # Target distribution setup
     if cfg.target.solvent_name == "water":
         target = SoluteInWater(
@@ -289,7 +348,8 @@ def _run(cfg: DictConfig) -> None:
             solute_xml_path=cfg.target.solute_xml_path,
             solute_inpcrd_path=cfg.target.solute_inpcrd_path,
             solute_prmtop_path=cfg.target.solute_prmtop_path,
-            dim=cfg.target.dim,
+            dim=cfg.target.cartesian_dim,
+            num_solvent_molecules=cfg.target.num_solvent_molecules,
             temperature=cfg.target.temperature,
             energy_cut=cfg.target.energy_cut,
             energy_max=cfg.target.energy_max,
@@ -303,14 +363,28 @@ def _run(cfg: DictConfig) -> None:
             save_dir=SAVE_DIR,
             plot_MD_energies=cfg.evaluation.plot_MD_energies,
             plot_marginal_hists=cfg.evaluation.plot_marginal_hists,
-            external_constraints=cfg.target.external_constraints,
-            internal_constraints=cfg.target.internal_constraints,
+            boundary_condition = cfg.target.boundary_condition,
+            box_length_nm = cfg.target.box_length_nm,
+            nonbonded_cutoff_nm = cfg.target.nonbonded_cutoff_nm,
             rigid_water=cfg.target.rigid_water,
+            internal_constraints=cfg.target.internal_constraints,
+            external_constraints=cfg.target.external_constraints,
             constraint_radius=cfg.target.constraint_radius,
             constraint_force=cfg.target.constraint_force,
+            platform_name=cfg.target.platform_name,
+            platform_properties=platform_properties 
+            
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
+    
+    with torch.no_grad():
+        bs = 8
+        md_i = target.val_data_i[:bs].to(target.device)
+        lp, jac = target.p.log_prob_and_jac(md_i)
+        U = -(lp - jac)
+        print("[DEBUG] MD U(kBT):", U.cpu().numpy(), flush=True)
+    
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
         target = target.double()
@@ -323,7 +397,31 @@ def _run(cfg: DictConfig) -> None:
 # Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="SoluteInSolvent", version_base="1.1")
 def run(cfg: DictConfig) -> None:
+    # "solute_pdb_path", "solute_xml_path", "solute_inpcrd_path", "solute_prmtop_path",
+    MD_KEYS = [
+        "cartesian_dim", "temperature", "boundary_condition", "nonbonded_cutoff_nm", 
+        "internal_constraints", "rigid_water", "box_length_nm", "num_solvent_molecules",
+        "external_constraints", "constraint_radius", "constraint_force", "femtoseconds_per_timestep"
+    ]
+    # Load MD data specifics from MD data JSON files if they exist.
+    # Use the specific listed in the MD_KEYS
+    train_data_config = load_json(cfg.target.train_samples_path)
+    val_data_config   = load_json(cfg.target.val_samples_path)
+    test_data_config  = load_json(cfg.target.test_samples_path)
+
+    system_cfgs = []
+    for name, dc in [("train", train_data_config), ("val", val_data_config), ("test", test_data_config)]:
+        if dc is None:
+            continue
+        sys_part = pick_system_keys(dc, MD_KEYS)
+        if not sys_part:
+            raise ValueError(f"{name} config JSON exists but has none of the expected keys: {MD_KEYS}")
+        system_cfgs.append((name, sys_part))
+
+    # Overwrite hydra cfg.target with the system config from the MD data JSON, 
+    cfg = overwrite_cfg(cfg, system_cfgs)
     print(OmegaConf.to_yaml(cfg))
+
     _run(cfg)
 
 

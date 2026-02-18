@@ -95,7 +95,16 @@ def setup_buffer(
     if hasattr(fab_model.target_distribution, "internal_dim"):
         dim = fab_model.target_distribution.internal_dim  # Use internal dimension if provided
     else:
-        dim = cfg.target.dim  # applies to flow and target
+        dim = cfg.target.cartesian_dim  # applies to flow and target
+    
+    buffer_device = (
+        "cuda"
+        if torch.cuda.is_available() and cfg.training.use_gpu
+        else "cpu"
+    )
+    print("Buffer device:", buffer_device)
+    flow_device = next(fab_model.flow.parameters()).device 
+    print("Flow device:", flow_device)
     if cfg.training.buffer.prioritised is False:
         def initial_sampler():
             # used to fill the replay buffer up to its minimum size
@@ -114,9 +123,14 @@ def setup_buffer(
     else:
         # buffer
         def initial_sampler():
+            # Calls AIS
+            print("[buffer prefill] starting AIS...", flush=True)
+            t0 = time.time()
             point, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
                 cfg.training.batch_size, logging=False, purpose="init buffer fill"
             )
+            dt = time.time() - t0
+            print(f"[buffer prefill] AIS batch done in {dt:.2f}s", flush=True)
             return point.x.detach(), log_w, point.log_q.detach()
 
         buffer = PrioritisedReplayBuffer(
@@ -125,7 +139,9 @@ def setup_buffer(
             min_sample_length=cfg.training.buffer.min_length,
             initial_sampler=initial_sampler,
             fill_buffer_during_init=auto_fill_buffer,
+            device=buffer_device,
         )
+        print("Replay buffer device:", buffer.buffer.x.device)
     return buffer
 
 
@@ -156,7 +172,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         #  weights and the like in the AIS loss. Thus, we need the AIS samples to be in internal space.
         dim = target.internal_dim  # Use internal dimension if provided
     else:
-        dim = cfg.target.dim  # applies to flow and target
+        dim = cfg.target.cartesian_dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.buffer.prioritised
     if cfg.flow.solvent_flow:
         flow = make_wrapped_normflow_solvent_flow(
@@ -292,6 +308,12 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
+    with torch.no_grad():
+        bs = 8
+        flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
+        lp, jac = target.p.log_prob_and_jac(flow_i)
+        U = -(lp - jac)
+        print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
     print(f" Model with {num_model_params} parameters")
     print(fab_model.flow)
@@ -362,6 +384,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=chkpt_dir is None)
     else:
         buffer = None
+    
 
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
@@ -378,9 +401,11 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
         print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
 
+    print("Setting up plotter...")
     plot = setup_plotter(cfg, target, buffer)
 
     # Create trainer
+    print("Create trainer...")
     if buffer:
         trainer = PrioritisedBufferTrainer(
             model=fab_model,
@@ -411,7 +436,6 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             lr_step=lr_step,
             print_eval=cfg.evaluation.print_eval,
         )
-        
 
     print("Starting training...")
     trainer.run(

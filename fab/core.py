@@ -171,6 +171,7 @@ class FABModel(Model):
         log_w = point.log_p - log_q_x
         return torch.logsumexp(log_w_ais + log_w, dim=0)
 
+    # TO DO: fab_ub_alpha_div_loss_inner only takes 2 input but 3 given
     def fab_ub_alpha_div_loss(self, batch_size: int) -> torch.Tensor:
         """Compute the FAB loss based on lower-bound of alpha-divergence with alpha=2."""
         point_ais, log_w_ais = self.annealed_importance_sampler.sample_and_log_weights(batch_size)
