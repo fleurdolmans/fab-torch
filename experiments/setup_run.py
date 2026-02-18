@@ -124,12 +124,13 @@ def setup_buffer(
         # buffer
         def initial_sampler():
             # Calls AIS
+            print("[buffer prefill] starting AIS...", flush=True)
             t0 = time.time()
             point, log_w = fab_model.annealed_importance_sampler.sample_and_log_weights(
                 cfg.training.batch_size, logging=False, purpose="init buffer fill"
             )
             dt = time.time() - t0
-            print(f"[buffer prefill] AIS batch done in {dt:.2f}s")
+            print(f"[buffer prefill] AIS batch done in {dt:.2f}s", flush=True)
             return point.x.detach(), log_w, point.log_q.detach()
 
         buffer = PrioritisedReplayBuffer(
@@ -307,6 +308,12 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
+    with torch.no_grad():
+        bs = 8
+        flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
+        lp, jac = target.p.log_prob_and_jac(flow_i)
+        U = -(lp - jac)
+        print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
     print(f" Model with {num_model_params} parameters")
     print(fab_model.flow)

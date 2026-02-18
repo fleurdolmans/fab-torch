@@ -21,7 +21,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
     and differentiable.
     """
 
-    def __init__(self, system=None, transform_data=None):
+    def __init__(self, system=None, transform_data=None, boundary_condition="droplet", box_length_nm=None):
         """
         Constructor
         :param transform_data: Data used to set up coordinate scale for r. Must be a single frame of shape (1, ).
@@ -33,6 +33,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         else:
             print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
+
+        self.boundary_condition = boundary_condition
+        self.box_length_nm = box_length_nm
 
 
         self._stats = {
@@ -471,7 +474,20 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         :param x: Cartesian coordinates: n_batch x n_atoms x 3
         :return: Internal coordinates: n_batch x n_atoms x 3, and log det Jacobian of the initial transformation.
         """
-        x_centered = x - x[:, 0:1, :]  # Center x around the solute oxygen, which now has coordinates [0, 0, 0].
+        # reference atom (solute atom0)
+        x0 = x[:, 0:1, :]          # (B,1,3)
+        dx = x - x0                # (B,N,3)
+
+        if self.boundary_condition == "pbc":
+            print("Applying minimum image convention for PBC.")
+            L = self.box_length_nm             # scalar in nm (float)
+            print(L)
+            L = dx.new_tensor(L)                      # make tensor on correct device/dtype
+
+            dx = dx - L * torch.round(dx / L) # minimum image
+
+        x_centered = dx
+        x_centered[:, 0, :] = 0.0  
 
         solute_atom0 = x_centered[:, 0, :]  # e.g., oxygen atom: n_batch x 3 at [0, 0, 0], defines r.
         solute_atom1 = x_centered[:, 1, :]  # e.g., first hydrogen; will become [r, 0, 0], defines phi.
