@@ -298,6 +298,14 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if val_samples_path:
             val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
+            try:
+                X = self.val_data_x[0].reshape(-1, 3)  # first frame
+                S, O1, O2 = X[0], X[1], X[2]           # assumes OHH order
+                d1 = torch.norm(O1 - S).item()
+                d2 = torch.norm(O2 - S).item()
+                print(f"[DEBUG] raw MD first water SO distances: {d1:.6f}, {d2:.6f} (stored units)", flush=True)
+            except Exception as e:
+                print("[DEBUG] raw MD SO distance check failed:", repr(e), flush=True)
 
         if test_samples_path:
             test_samples_path = pathlib.Path(test_samples_path)
@@ -354,7 +362,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             f"coordinates in current system ({self.cartesian_dim})."
         )
 
-        self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+        self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device), boundary_condition, box_length_nm)
 
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
@@ -368,6 +376,18 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
                 self.val_data_x.reshape(-1, self.cartesian_dim)
             )
+        
+            # --- DEBUG: transform roundtrip x -> i -> x ---
+            with torch.no_grad():
+                X0 = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
+                I0, _ = self.coordinate_transform.inverse(X0)
+                X1, _ = self.coordinate_transform.forward(I0)
+
+                 # Get the canonical rotated-centered Cartesian that inverse uses internally
+                _, _, X0_coord, _ = self.coordinate_transform.cartesian_to_z(X0, setup=False)
+                diff = (X1 - X0_coord).abs().max()
+                print("[DEBUG] x_coord vs x_recon max abs diff (nm):", diff.max().item(), flush=True)
+                
         if self.test_data_x is not None:
             self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
                 self.test_data_x.reshape(-1, self.cartesian_dim)
@@ -404,6 +424,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 energy_max=energy_max,
                 transform=self.coordinate_transform,
             )
+            # --- DEBUG: direct OpenMM energy on raw MD Cartesian (bypass transform) ---
+            if self.val_data_x is not None:
+                with torch.no_grad():
+                    X = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
+                    lp_x = self.p.log_prob_x(X)   # direct Cartesian energy eval
+                    U = -lp_x
+                    print("[DEBUG] MD direct-X U(kBT):", U.detach().cpu().numpy(), flush=True)
+                    print("[DEBUG] MD direct-X U(kBT) mean/max/min:",
+                        U.mean().item(), U.max().item(), U.min().item(), flush=True)
 
     @staticmethod
     def load_target_data(data_path: pathlib.Path, dim: int):

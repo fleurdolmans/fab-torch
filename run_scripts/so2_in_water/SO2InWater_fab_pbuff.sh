@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_h100
-#SBATCH --time=04:00:00
+#SBATCH --time=00:05:00
 
 module purge
 module load 2025
@@ -71,8 +71,11 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
   target.boundary_condition=pbc target.simulation_version=v4\\
   target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
+  target.energy_cut=1e4 target.energy_max=1e5 \\
   flow.blocks=12 flow.hidden_units=512 flow.num_bins=8 \\
-  training.batch_size=512 training.buffer.maximum_length=262144 training.buffer.min_length=32768\\
+  fab.n_intermediate_distributions=2 fab.transition_operator.n_inner_steps=1 fab.transition_operator.init_step_size=0.01 \\
+  training.batch_size=64 evaluation.eval_batch_size=256 \\
+  training.buffer.maximum_length=32768 training.buffer.min_length=4096\\
   training.lr=5e-5 training.max_grad_norm=0.5 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=3\\
   training.n_iterations=1000 evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF

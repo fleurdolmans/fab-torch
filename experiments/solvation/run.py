@@ -378,6 +378,13 @@ def _run(cfg: DictConfig) -> None:
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
     
+    with torch.no_grad():
+        bs = 8
+        md_i = target.val_data_i[:bs].to(target.device)
+        lp, jac = target.p.log_prob_and_jac(md_i)
+        U = -(lp - jac)
+        print("[DEBUG] MD U(kBT):", U.cpu().numpy(), flush=True)
+    
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
         target = target.double()
@@ -394,7 +401,7 @@ def run(cfg: DictConfig) -> None:
     MD_KEYS = [
         "cartesian_dim", "temperature", "boundary_condition", "nonbonded_cutoff_nm", 
         "internal_constraints", "rigid_water", "box_length_nm", "num_solvent_molecules",
-        "external_constraints", "constraint_radius", "constraint_force"
+        "external_constraints", "constraint_radius", "constraint_force", "femtoseconds_per_timestep"
     ]
     # Load MD data specifics from MD data JSON files if they exist.
     # Use the specific listed in the MD_KEYS
