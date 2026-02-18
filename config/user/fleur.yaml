@@ -1,4 +1,7 @@
 name: fleur
-username: fdolmans
+username: 
+    snellius: fdolmans
+    snellius1: fdolmans1
+    carbon: fdolmans
 wandb:
     entity: fleur-dolmans-university-of-amsterdam

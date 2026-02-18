@@ -1,13 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=md-h2o-in-h2o
-#SBATCH --output=logs/slurm-h2o-%j.out
-#SBATCH --error=logs/slurm-h2o-%j.err
+#SBATCH --job-name=val_md-so2
+#SBATCH --output=logs/slurm-so2-%j.out
+#SBATCH --error=logs/slurm-so2-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
-#SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=01:40:00
+#SBATCH --partition=rome
+#SBATCH --time=00:01:00
 
 module purge
 module load 2025
@@ -31,8 +30,6 @@ cd "$WORKDIR"
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "${CONDA_ENV}"
 
-# Diagnostics
-srun nvidia-smi
 
 # Environment variables (no need to force CUDA_VISIBLE_DEVICES; Slurm sets GPU visibility)
 export PYTHONPATH="${MAIN_DIR}:${PYTHONPATH:-}"
@@ -40,7 +37,9 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export MAIN_DIR="${MAIN_DIR}"
 
 # Create MD data for SO2 in water and plot diagnostics
-srun python "${MAIN_DIR}/experiments/solvation/create_md_data.py" \
+srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=water \
-  solute_xml_path=null 
+  create_md=false \
+  simulation_version=v3 \
+  plot.md_diagnostics=false

@@ -1,4 +1,13 @@
-#!/bin/sh
+#!/bin/bash
+#SBATCH --job-name=slurm_so2_water
+#SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
+#SBATCH --partition=staging
+#SBATCH --time=00:05:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+
+set -euo pipefail
 
 PROJECT_NAME="fab-torch"
 
@@ -13,7 +22,7 @@ SOLVENT="water"
 JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch/
+LAUNCH_DIR=${MAIN_DIR}/launch
 mkdir -p "${LAUNCH_DIR}"
 
 # Create dir for specific experiment run
@@ -28,17 +37,18 @@ cd "${LOGS_DIR}/${PROJECT_NAME}"
 
 # Make SLURM file
 SLURM="${LOGS_DIR}/run.sh"
+mkdir -p "${LOGS_DIR}/logs"   # ensure GPU job logs dir exists
 cat > "${SLURM}" <<EOF
 #!/bin/bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=logs/slurm-${SOLUTE}-%j.out
-#SBATCH --error=logs/slurm-${SOLUTE}-%j.err
+#SBATCH --output=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.out
+#SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=00:05:00
+#SBATCH --partition=gpu_h100
+#SBATCH --time=01:30:00
 
 module purge
 module load 2025
@@ -47,10 +57,13 @@ module load Anaconda3/2025.06-1
 source \$(conda info --base)/etc/profile.d/conda.sh
 conda activate ${CONDA_ENV}
 
+python -c "import sys, hydra; print('PY', sys.executable, 'hydra', hydra.__version__)"
+python -c "import numpy; from openmm import app; print('numpy', numpy.__version__, 'openmm app OK')"
+
 export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
 export PYTHONUNBUFFERED=1
-export CUDA_VISIBLE_DEVICES=""
+export CUDA_VISIBLE_DEVICES=0
 export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
@@ -59,11 +72,17 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solvent_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
-  fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.blocks=12 flow.hidden_units=256 flow.num_bins=9 \\
-  training.n_iterations=500 training.buffer.use=true training.buffer.prioritised=true \\
-  evaluation.n_eval=50 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v5\\
+  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
+  target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
+  flow.blocks=12 flow.hidden_units=256 \\
+  training.batch_size=64 evaluation.eval_batch_size=64 \\
+  training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
+  evaluation.n_eval=100 evaluation.n_plots=null evaluation.n_checkpoints=1
 EOF
+
+chmod +x "${SLURM}"
+
+echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
