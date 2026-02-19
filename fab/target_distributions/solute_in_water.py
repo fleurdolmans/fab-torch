@@ -22,6 +22,7 @@ from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
+from fab.transforms.global_3point_spherical_transform_pbc import Global3PointSphericalTransformPBC
 
 
 constraints_dict = {
@@ -276,6 +277,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         self.plot_MD_energies = plot_MD_energies
         self.plot_marginal_hists = plot_marginal_hists
+        self.boundary_condition = boundary_condition
 
         self.logger = logger
         self.save_dir = save_dir
@@ -361,9 +363,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
             f"Data shape ({self.transform_data.shape}) does not match number of "
             f"coordinates in current system ({self.cartesian_dim})."
         )
-
-        self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device), boundary_condition, box_length_nm)
-
+        if self.boundary_condition == "droplet":
+            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+        elif self.boundary_condition == "pbc":
+            self.coordinate_transform = Global3PointSphericalTransformPBC(self.system, self.transform_data.to(device), box_length_nm)
+        else:
+            raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
         # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
         #  its output end.
         if self.train_data_x is not None:

@@ -8,20 +8,18 @@ def stable_inverse_softplus(x):
     return x + torch.log(-torch.expm1(-x))
 
 
-class Global3PointSphericalTransform(nf.flows.Flow):
-    """
-    See https://www.overleaf.com/read/tydmgmdzkzkh#fa4b70 for definitions of the transformation, and explanation of
-    the various symbols + Jacobian determinant.
-
-    This transform is used to transform Cartesian coordinates to internal coordinates and back. The reference frame
-    is determined by the first three atoms in the system (e.g., the solute). The first atom is placed at the origin,
-    the second atom is placed along the z-axis, and the third atom is placed in the yz-plane. All other atoms are
-    placed relative to these three atoms. Atoms are described in terms of distance from the origin r > 0, angle with
-    the z-axis phi in [0, 2pi], and angle with the yz-plane theta in [-pi/2, pi/2]. The transformation is invertible
-    and differentiable.
+class Global3PointSphericalTransformPBC(nf.flows.Flow):
     """
 
-    def __init__(self, system=None, transform_data=None):
+    This transform is used to transform Cartesian coordinates to internal coordinates and back for PBC MD data.
+    The reference frame is determined by the first three atoms in the system (e.g., the solute). The first atom is 
+    placed at the origin, the second atom is placed along the z-axis, and the third atom is placed in the yz-plane. 
+    All other atoms are placed relative to these three atoms. Atoms are described in terms of distance from the 
+    origin r > 0, angle with the z-axis phi in [0, 2pi], and angle with the yz-plane theta in [-pi/2, pi/2]. 
+    The transformation is invertible and differentiable.
+    """
+
+    def __init__(self, system=None, transform_data=None, box_length_nm=2.5):
         """
         Constructor
         :param transform_data: Data used to set up coordinate scale for r. Must be a single frame of shape (1, ).
@@ -33,6 +31,15 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         else:
             print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
+        
+        # box length in nm of the pbc cubic box
+        self.box_length_nm = box_length_nm
+
+
+
+        self.n_atoms = transform_data.shape[1] // 3
+        self.n_solute = 3
+        self.n_atoms_per_mol = 3    
 
 
         self._stats = {
@@ -46,11 +53,8 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # self.device = transform_data.device
         assert transform_data.shape[0] == 1, "Data used for setting up coordinate transform must be a single frame."
         with torch.no_grad():
-            z, _, _, _ = self.cartesian_to_z(transform_data, setup=True)
+            z, _, _, _= self.cartesian_to_z(transform_data, setup=True)
             self._setup_scale_r(z)
-            self._setup_scale_phi(z)
-            self._setup_offset_phi(z)
-            self._setup_scale_theta(z)
     
     def reset_stats(self):
         for k in self._stats:
@@ -133,6 +137,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         scale_theta = z.new_ones(1) / 2
         self.register_buffer("scale_theta", scale_theta)
 
+
     def setup_coordinate_system(self, x, setup=False):
         """
         Set up the global coordinate system. Essentially just
@@ -161,7 +166,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         x_coord = x.reshape(x.shape[0], -1)  # The original x coordinates in the new coordinate system, but flattened.
         return x, x_coord, z_axis, y_axis
-
+    
     def cartesian_to_z(self, x, setup=False):
         """
         Transform Cartesian coordinates to internal coordinates.
@@ -460,6 +465,64 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         return x, log_det_jac
 
+    def make_water_whole(self, x, L, n_solute=3):
+        """
+        Make each water molecule whole by MIC-wrapping H positions relative to O.
+        x: (B, N, 3)
+        L: (1,1,3) or (B,1,3)
+        """
+        xs = x[:, n_solute:, :]                 # solvent part (B, Ns, 3)
+        Ns = xs.shape[1]
+        assert Ns % self.n_atoms_per_mol == 0
+
+
+        # Reshape into (B, n_mol, atoms_per_mol, 3)
+        mols = xs.view(xs.shape[0], Ns // self.n_atoms_per_mol, self.n_atoms_per_mol, 3)
+
+        # Reference atom = first atom in each molecule
+        ref = mols[:, :, 0, :]                          # (B, n_mol, 3)
+
+        # All other atoms
+        others = mols[:, :, 1:, :]                      # (B, n_mol, atoms_per_mol-1, 3)
+
+        # Displacements relative to reference
+        d = others - ref.unsqueeze(2)
+
+        # MIC wrap relative to reference
+        d = d - L * torch.round(d / L)
+
+        # Rebuild molecule
+        mols[:, :, 1:, :] = ref.unsqueeze(2) + d
+
+        # Flatten back
+        xs_whole = mols.view(xs.shape[0], Ns, 3)
+
+        x_out = x.clone()
+        x_out[:, n_solute:, :] = xs_whole
+        return x_out
+    
+    def shift_waters_near_solute(self, x, L, n_solute=3):
+        x0 = x[:, 0:1, :]                         # (B,1,3)
+        xs = x[:, n_solute:, :]
+        Ns = xs.shape[1]
+
+        # Reshape into (B, n_mol, atoms_per_mol, 3)
+        mols = xs.view(xs.shape[0], Ns // self.n_atoms_per_mol, self.n_atoms_per_mol, 3)
+
+        O = mols[:, :, 0, :]                      # (B, n_mol, 3)
+        dO = O - x0                               # broadcast to (B, n_mol, 3)
+        shift = L * torch.round(dO / L)           # (B, n_mol, 3)
+
+        mols = mols - shift.unsqueeze(2)          # shift all 3 atoms together
+        xs_shifted = mols.view(xs.shape[0], Ns, 3)
+
+        x_out = x.clone()
+        x_out[:, n_solute:, :] = xs_shifted
+        return x_out
+
+
+
+
     def rotate_into_global_coordinate_system(self,x, z_axis, y_axis, setup=False):
         """
         Sets up the global coordinate system that we transform into 3D spherical coordinates.
@@ -471,10 +534,32 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         :param x: Cartesian coordinates: n_batch x n_atoms x 3
         :return: Internal coordinates: n_batch x n_atoms x 3, and log det Jacobian of the initial transformation.
         """
-        x_centered = x - x[:, 0:1, :]  # Center x around the solute oxygen, which now has coordinates [0, 0, 0].
 
-        solute_atom0 = x_centered[:, 0, :]  # e.g., oxygen atom: n_batch x 3 at [0, 0, 0], defines r.
-        solute_atom1 = x_centered[:, 1, :]  # e.g., first hydrogen; will become [r, 0, 0], defines phi.
+       
+        L = x.new_tensor([self.box_length_nm]*3).view(1, 1, 3)
+
+        x_solute = x[:, :self.n_solute, :]
+        ref = x_solute[:, 0:1, :]               # Reference atom = first atom in solute
+        d = x_solute[:, 1:, :] - ref            # Displacements relative to reference
+        d = d - L * torch.round(d / L)          # MIC wrap relative to reference
+        x_solute = x_solute.clone()
+        x_solute[:, 1:, :] = ref + d
+
+        x_out = x.clone()
+        x_out[:, :self.n_solute, :] = x_solute      
+
+        
+
+        # --- (1) Make solvent molecules whole (relative to each molecule’s first atom) ---
+        x_out = self.make_water_whole(x_out, L, n_solute=self.n_solute)
+
+        # --- (2) Shift solvent molecules near solute atom0 (by molecule) ---
+        x_out = self.shift_waters_near_solute(x_out, L, n_solute=self.n_solute)
+        # --- (3) Center on solute atom0 ---
+        x_centered = x_out - x_out[:, 0:1, :]
+
+        solute_atom0 = x_centered[:, 0, :]
+        solute_atom1 = x_centered[:, 1, :]
 
 
         # First define phi w.r.t. the z-axis. This means we rotate solute_atom1 to align with the z-axis.
@@ -600,69 +685,6 @@ def get_angle_and_normal(atom1, atom2, atom3, to_yz_plane=False, align_first_sol
     return rads, cross, seam, deg
 
 
-def get_theta(atom1, atom2, atom3, atom4, phi):
-    """
-    Returns the theta (3D spherical coordinates) between four atoms in radian.
-
-    Theta is defined as the rotation of atom4 around the (atom2 - atom1) vector (with z > 0),
-    with theta=0 in the plane defined by atom1, atom2 and atom3.
-
-    NOTE: We need phi to determine in which half-volume (e.g., y > 0 or y < 0 if phi is defined w.r.t. z > 0)
-     we find ourselves, as the rotation with theta rad is taken w.r.t. the opposite axis, depending (e.g.,
-     the y > 0 axis if phi in [0, pi], but the y < 0 axis if phi in [pi, 2pi]). This is a bit annoying, but
-     it's a result of doing the azimuthal angle first. In standard spherical coordinates phi is in [0, pi] and
-     theta is in [0, 2pi], but in our case the opposite is true. We cannot take theta in [0, 2pi], because
-     this will give a double cover of the r-sphere.
-    NOTE: In principle, we could determine phi from the angle_vector (atom4 - atom1) again, rather than passing it
-     as an argument.
-    """
-    # Rotation axis definition for theta (e.g., z-axis in our cases).
-    rotation_axis = unit_vector(atom2 - atom1)
-    # rotation_axis and plane_axis define the plane (e.g., O-H1 and O-H2)
-    plane_axis = unit_vector(atom3 - atom1)
-    # Get vector that lies in the theta=0 plane defined by the 3 atoms: plane_axis.
-    # Project this vector onto the plane defined by the rotation axis (e.g., onto xy-plane)
-    #  Equivalent to setting z = 0 for rotation around z-axis.
-    mag_along_normal = torch.sum(rotation_axis * plane_axis, dim=-1, keepdim=True)
-    # Note: the below is essentially the y-unit vector in our setting, but with sign depending on the position of atom3.
-    in_both_planes = unit_vector(plane_axis - unit_vector(rotation_axis) * mag_along_normal)
-    # Project the atom4 - atom1 vector onto the rotation_axis plane as well. We care about the
-    #  angle between this vector and the in_both_planes vector around the rotation_axis.
-    angle_vector = unit_vector(atom4 - atom1)
-    mag_along_normal = torch.sum(rotation_axis * angle_vector, dim=-1, keepdim=True)
-    in_rot_plane = angle_vector - unit_vector(rotation_axis) * mag_along_normal
-    # Find angle through inner product: this value being negative corresponds to phi > pi
-    inner = torch.sum(in_both_planes * unit_vector(in_rot_plane), dim=-1)
-    theta = torch.arccos(inner)
-
-    # NOTE: we define the rotation axis as (atom2 - atom1), which is orthogonal to the plane in which
-    #  in_both_planes and in_rot_plane live. The computed angle corresponds to a rotation around either this
-    #  axis, or its negation, depending on the relative orientation of in_both_planes and in_rot_plane. This
-    #  orientation can be determined with their cross-product, which is the actual axis of rotation!
-    # Since we want the axis of rotation to be (atom2 - atom1), we need to check whether the actual axis
-    #  aligns with this, and if not, change the rotation angle accordingly.
-    cross = torch.cross(in_both_planes, in_rot_plane, dim=-1)
-    # Does this axis align with the rotation_axis: +1 if aligned, -1 if opposite
-    norm_sign = torch.sum(unit_vector(rotation_axis) * unit_vector(cross), dim=-1)  # n_batch
-    #  This evaluates to: 2pi - theta if sign = -1, else: 0 + theta
-    theta = 2 * math.pi * (1 - norm_sign) / 2 + norm_sign * theta
-
-    # Now some sign magic to make the theta angle work out correctly. We need to treat every xy-quadrant separately.
-    # If y > 0, x < 0; we need: new_theta = theta
-    # If y > 0, x > 0; we need: new_theta = theta - 2pi
-    # If y < 0, x > 0; we need: new_theta = theta - pi
-    # If y < 0, x < 0; we need: new_theta = theta - pi
-    # phi in [0, pi] means y > 0, phi in [pi, 2pi] means y < 0.
-    if not ((phi > phi.new_ones(phi.shape) * math.pi).long() == (inner < 0)).all():
-        raise ValueError("Given angle phi does not match atom4 vector orientation.")
-    y_sign = -1 * torch.sign(phi - phi.new_ones(phi.shape) * math.pi)  # +1 if y > 0, -1 if y < 0
-    x_sign = torch.sign(atom4[:, 0])  # +1 if x > 0, -1 if x < 0
-    y_comp = (y_sign - 1) / 2 * math.pi  # -pi if y < 0
-    xy_comp = ((y_sign + 1) / 2) * ((x_sign + 1) / 2) * -2 * math.pi  # -2pi if y > 0 and x > 0
-    theta = theta + xy_comp + y_comp
-    return theta
-
-
 def rotation_matrix(rotation_axis, rotation_rad):
     # Euler-Rodrigues
     a = torch.cos(rotation_rad / 2)
@@ -690,16 +712,16 @@ if __name__ == "__main__":
     n_batch = 1024
     n_atoms = 27
     t_x = torch.randn(1, n_atoms * 3)
-    t = Global3PointSphericalTransform(transform_data=t_x)
+    t = Global3PointSphericalTransformPBC(transform_data=t_x, box_length_nm=2.5)
     print(
-        "\nScaling params for (r, phi, theta): ({:.3f}, {:.3f}, {:.3f})\n".format(
-            t.scale_r.item(), t.scale_phi.item(), t.scale_theta.item()
+        "\nScaling params for (r): ({:.3f})\n".format(
+            t.scale_r.item()
         )
     )
 
     x = torch.randn(n_batch, n_atoms * 3)
     print("Cartesian dim: {}".format(x.shape))
-    z, jac_xi, x_coord, _ = t.cartesian_to_z(x)
+    z, jac_xi, x_coord = t.cartesian_to_z(x)
     print("Internal dim: {}".format(z.shape))
     x_recon, jac_ix = t.z_to_cartesian(z)
     print("\nJacobian Cart --> Internal: {:.5f}".format(jac_xi.mean().item()))
