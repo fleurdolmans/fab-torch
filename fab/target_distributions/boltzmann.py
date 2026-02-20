@@ -155,6 +155,8 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
+                # Add constraints for pbc
+                # openmm_context.applyConstraints(1e-6)
                 state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
                 # get energy
                 energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
@@ -215,6 +217,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
             force = np.zeros_like(input)
         else:
             openmm_context.setPositions(input)
+            # openmm_context.applyConstraints(1e-6)
             state = openmm_context.getState(getForces=True, getEnergy=True)
             # get energy
             energy = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT

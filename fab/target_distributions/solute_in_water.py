@@ -22,7 +22,7 @@ from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
-from fab.transforms.global_3point_spherical_transform_pbc import Global3PointSphericalTransformPBC
+from fab.target_distributions.pbc_water_preprocess import preprocess_frame_batch, IdentityTransform
 
 
 constraints_dict = {
@@ -268,7 +268,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.num_solvent_molecules = num_solvent_molecules
 
         self.cartesian_dim = dim
-        self.internal_dim = dim - 6
         self.temperature = temperature
         self.energy_cut = energy_cut
         self.energy_max = energy_max
@@ -278,12 +277,22 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.plot_MD_energies = plot_MD_energies
         self.plot_marginal_hists = plot_marginal_hists
         self.boundary_condition = boundary_condition
+        self.box_length_nm = box_length_nm
+
+        if self.boundary_condition == "pbc":
+            self.internal_dim = self.cartesian_dim
+        else:
+            self.internal_dim = self.cartesian_dim - 6
 
         self.logger = logger
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")
         if not os.path.exists(self.metric_dir):
             os.makedirs(self.metric_dir)
+
+        # OpenMM platform
+        self.platform_name = platform_name
+        self.platform_properties = platform_properties
 
         # Load any MD data
         self.eval_mode = eval_mode
@@ -292,6 +301,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.train_data_x, self.val_data_x, self.test_data_x = None, None, None
         self.train_data_i, self.val_data_i, self.test_data_i = None, None, None
         self.train_logdet_xi, self.val_logdet_xi, self.test_logdet_xi = None, None, None
+        
+        print("Loading MD data...", flush=True)
         if train_samples_path:
             train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
@@ -300,19 +311,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if val_samples_path:
             val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
-            try:
-                X = self.val_data_x[0].reshape(-1, 3)  # first frame
-                S, O1, O2 = X[0], X[1], X[2]           # assumes OHH order
-                d1 = torch.norm(O1 - S).item()
-                d2 = torch.norm(O2 - S).item()
-                print(f"[DEBUG] raw MD first water SO distances: {d1:.6f}, {d2:.6f} (stored units)", flush=True)
-            except Exception as e:
-                print("[DEBUG] raw MD SO distance check failed:", repr(e), flush=True)
 
         if test_samples_path:
             test_samples_path = pathlib.Path(test_samples_path)
             self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim).double()
-
 
         # Initialise system
         self.system = TriatomicInWaterSys(
@@ -330,10 +332,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
             constraint_radius,
             constraint_force,
         )
-
-        # OpenMM platform
-        self.platform_name = platform_name
-        self.platform_properties = platform_properties
 
 
         # Generate trajectory for coordinate transform if no data path is specified
@@ -366,45 +364,48 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if self.boundary_condition == "droplet":
             self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.boundary_condition == "pbc":
-            self.coordinate_transform = Global3PointSphericalTransformPBC(self.system, self.transform_data.to(device), box_length_nm)
+            print("For pbc we dont use a transform, so we load an identity transform.")
+            self.coordinate_transform = IdentityTransform()
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
-        # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
-        #  its output end.
-        if self.train_data_x is not None:
-
-            # OH bonds are still ~0.1 nm apart
-            self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
-                self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
-            )
-        if self.val_data_x is not None:
-            self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
-                self.val_data_x.reshape(-1, self.cartesian_dim)
-            )
         
-            # --- DEBUG: transform roundtrip x -> i -> x ---
-            with torch.no_grad():
-                X0 = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
-                I0, _ = self.coordinate_transform.inverse(X0)
-                X1, _ = self.coordinate_transform.forward(I0)
-
-                 # Get the canonical rotated-centered Cartesian that inverse uses internally
-                _, _, X0_coord, _ = self.coordinate_transform.cartesian_to_z(X0, setup=False)
-                diff = (X1 - X0_coord).abs().max()
-                print("[DEBUG] x_coord vs x_recon max abs diff (nm):", diff.max().item(), flush=True)
+        if self.boundary_condition == "droplet":
+            # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
+            #  its output end.
+            if self.train_data_x is not None:
+                # OH bonds are still ~0.1 nm apart
+                self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
+                    self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
+                )
+            if self.val_data_x is not None:
+                self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
+                    self.val_data_x.reshape(-1, self.cartesian_dim)
+                )
                 
-        if self.test_data_x is not None:
-            self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
-                self.test_data_x.reshape(-1, self.cartesian_dim)
-            )
+            if self.test_data_x is not None:
+                self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
+                    self.test_data_x.reshape(-1, self.cartesian_dim)
+                )
+        else:
+            # PBC: I == X, logdet == 0
+            if self.train_data_x is not None:
+                self.train_data_i = self.train_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+                self.train_logdet_xi = torch.zeros(self.train_data_i.shape[0], device=self.device, dtype=self.train_data_i.dtype)
+            if self.val_data_x is not None:
+                self.val_data_i = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+                self.val_logdet_xi = torch.zeros(self.val_data_i.shape[0], device=self.device, dtype=self.val_data_i.dtype)
+            if self.test_data_x is not None:
+                self.test_data_i = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+                self.test_logdet_xi = torch.zeros(self.test_data_i.shape[0], device=self.device, dtype=self.test_data_i.dtype)
 
+        # Target distribution wrapper
         if n_threads > 1:
             self.p = TransformedBoltzmannParallel(
                 self.system,
                 temperature,
                 energy_cut=energy_cut,
                 energy_max=energy_max,
-                transform=self.coordinate_transform,
+                transform=self.coordinate_transform,            # For PBC this is IdentityTransform()
                 platform_name=self.platform_name,
                 n_threads=n_threads,
             )
@@ -418,7 +419,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 mm.Platform.getPlatformByName(self.platform_name),
                 self.platform_properties,
             )
-            print("in n_threads")
 
             print("OpenMM platform:", sim.context.getPlatform().getName())
             
@@ -427,20 +427,11 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 temperature,
                 energy_cut=energy_cut,
                 energy_max=energy_max,
-                transform=self.coordinate_transform,
+                transform=self.coordinate_transform,            # For PBC this is IdentityTransform()
             )
-            # --- DEBUG: direct OpenMM energy on raw MD Cartesian (bypass transform) ---
-            if self.val_data_x is not None:
-                with torch.no_grad():
-                    X = self.val_data_x[:8].reshape(-1, self.cartesian_dim).to(self.device)
-                    lp_x = self.p.log_prob_x(X)   # direct Cartesian energy eval
-                    U = -lp_x
-                    print("[DEBUG] MD direct-X U(kBT):", U.detach().cpu().numpy(), flush=True)
-                    print("[DEBUG] MD direct-X U(kBT) mean/max/min:",
-                        U.mean().item(), U.max().item(), U.min().item(), flush=True)
 
-    @staticmethod
-    def load_target_data(data_path: pathlib.Path, dim: int):
+    # @staticmethod
+    def load_target_data(self, data_path: pathlib.Path, dim: int):
         """
         Load MD samples from file.
         """
@@ -463,6 +454,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
             raise ValueError(
                 "Cannot load MD samples file with suffix: {}. Must be .pt or .pdb".format(data_path.suffix)
             )
+        if self.boundary_condition == "pbc":
+            target_data = preprocess_frame_batch(
+                target_data.reshape(-1, self.cartesian_dim).to(self.device),
+                L=self.box_length_nm,
+                n_solute=3,
+                n_waters=self.num_solvent_molecules,
+                anchor_idx=0, 
+                debug=False,
+            ).cpu().reshape_as(target_data)
         return target_data
 
     def log_prob(self, i: Tensor):
