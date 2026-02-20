@@ -1,0 +1,3 @@
+name: desktop
+data_dir: /Users/${user.username.desktop}/Documents/UvA/Master_AI/Thesis/HDD/data
+output_dir: /Users/${user.username.desktop}/Documents/UvA/Master_AI/Thesis/HDD/results/fab
