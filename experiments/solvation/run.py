@@ -16,6 +16,7 @@ from fab import FABModel
 from fab.target_distributions.solute_in_water import SoluteInWater
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
+from experiments.solvation.test_run import run_transform_test_droplet, run_test_pbc
 
 SAVE_DIR = None
 
@@ -401,7 +402,8 @@ def run(cfg: DictConfig) -> None:
     MD_KEYS = [
         "cartesian_dim", "temperature", "boundary_condition", "nonbonded_cutoff_nm", 
         "internal_constraints", "rigid_water", "box_length_nm", "num_solvent_molecules",
-        "external_constraints", "constraint_radius", "constraint_force", "femtoseconds_per_timestep"
+         "femtoseconds_per_timestep"
+        #  "external_constraints", "constraint_radius", "constraint_force",
     ]
     # Load MD data specifics from MD data JSON files if they exist.
     # Use the specific listed in the MD_KEYS
@@ -421,6 +423,15 @@ def run(cfg: DictConfig) -> None:
     # Overwrite hydra cfg.target with the system config from the MD data JSON, 
     cfg = overwrite_cfg(cfg, system_cfgs)
     print(OmegaConf.to_yaml(cfg))
+
+    if cfg.training.only_test_run:
+        print("When test=True, only run a test run and then return")
+        if cfg.target.boundary_condition == "droplet":
+            run_transform_test_droplet(cfg)
+        else:
+            run_test_pbc(cfg)
+    
+        return
 
     _run(cfg)
 

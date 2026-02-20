@@ -91,6 +91,7 @@ fab:
 
 
 training:                             # Properties of the training procedure
+  only_test_run: false                # Bool, whether to only run a test run (for debugging) and then return, or to run the full training procedure.
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4                      # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
@@ -120,8 +121,6 @@ training:                             # Properties of the training procedure
     w_adjust_max_clip: 10             # clipping of weight adjustment factor for prioritised replay
     temp: 1.0                         # Rate that we weight new experience over old (for non-prioritised replay only)
     log_w_clip_frac: null             # Null for no clipping, for non-prioritised replay only.
-  platform_name: "CUDA"               # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
-
 
 evaluation:
   eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
