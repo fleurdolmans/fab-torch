@@ -34,6 +34,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
             print("No molecular system specified: presumably testing...?")
         self.transform_data = transform_data  # shape = 1 x n_atoms . 3 = 1 x ndim
 
+        self.n_atoms = transform_data.shape[1] // 3
+        self.n_solute = 3
+        self.n_atoms_per_mol = 3   
 
         self._stats = {
             "seam_x": 0,
