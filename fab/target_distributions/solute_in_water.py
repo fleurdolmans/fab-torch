@@ -292,10 +292,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
-        
-        print("internal_dim  in solute in water:", self.internal_dim)
-        
-
+        print(f"Internal dim: {self.internal_dim}")
         self.logger = logger
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")

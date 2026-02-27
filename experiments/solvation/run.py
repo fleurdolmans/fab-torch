@@ -258,14 +258,15 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
     def plot_pbc(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
         figs = []
         R, T = 8.314e-3, target.temperature
-        device = target.device
         L = float(target.box_length_nm)
 
         # triatomic solute + waters (O,H,H)
         n_solute = 3
         n_waters = int(target.num_solvent_molecules)
 
-        # local MIC helper (avoids relying on transform having matching signature)
+        kBT = R * T  # kJ/mol
+
+        # local MIC helper
         def mic(dx: torch.Tensor, L: float) -> torch.Tensor:
             L_t = torch.as_tensor(float(L), device=dx.device, dtype=dx.dtype)
             return dx - L_t * torch.round(dx / L_t)
@@ -283,15 +284,15 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             N = D // 3
             X = Xp_flat.view(B, N, 3).clone()  # (B,N,3)
 
-            def mic(dx: torch.Tensor) -> torch.Tensor:
+            def mic_local(dx: torch.Tensor) -> torch.Tensor:
                 return dx - L_t * torch.round(dx / L_t)
 
-            # ---- unwrap solute relative to solute atom0 ----
+            # unwrap solute relative to atom0
             a0 = X[:, 0, :]
             for a in range(1, min(n_solute, N)):
-                X[:, a, :] = a0 + mic(X[:, a, :] - a0)
+                X[:, a, :] = a0 + mic_local(X[:, a, :] - a0)
 
-            # ---- unwrap each water locally: H relative to its O ----
+            # unwrap each water: H relative to its O
             start = n_solute
             for w in range(n_waters):
                 i = start + 3 * w
@@ -300,33 +301,39 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
                 O = X[:, i + 0, :]
                 H1 = X[:, i + 1, :]
                 H2 = X[:, i + 2, :]
-                X[:, i + 1, :] = O + mic(H1 - O)
-                X[:, i + 2, :] = O + mic(H2 - O)
+                X[:, i + 1, :] = O + mic_local(H1 - O)
+                X[:, i + 2, :] = O + mic_local(H2 - O)
 
-            # center solute atom0 at the origin
+            # center solute atom0 at origin
             X = X - X[:, 0:1, :]
 
             # wrap into [-L/2, L/2]
             X = X - L_t * torch.round(X / L_t)
-
             return X  # (B,N,3)
 
-        # ----------------------------
-        # Load MD Cartesian data and wrap it to PBC via coordinate_transform.forward
-        # ----------------------------
+        # Load internal MD data
         if target.eval_mode == "val":
             target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
         elif target.eval_mode == "test":
             target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
+        else:
+            raise ValueError(f"Unknown eval_mode: {target.eval_mode}")
 
-        # RDF and energies of flow samples vs MD samples
+        # Sample from flow in internal space
         num_flow_samples = 10000
-
         with torch.no_grad():
-            flow_samples = fab_model.flow.sample((num_flow_samples,)) # shape (B, internal_dim)
+            flow_i = fab_model.flow.sample((num_flow_samples,))  # (B, internal_dim)
+
+        # Map both MD-i and flow-i into Cartesian (wrapped to [0,L) by your transform)
+        with torch.no_grad():
+            flowXp, _ = target.coordinate_transform.forward(flow_i)         # (B, 3N)
+            print("flowXp std", flowXp.std().item(), "min", flowXp.min().item(), "max", flowXp.max().item())
+            print("max pairwise diff in batch",
+                (flowXp[:8] - flowXp[0:1]).abs().max().item())
+            mdXp, _ = target.coordinate_transform.forward(target_data_i)    # (B, 3N)
 
         # ----------------------------
-        # RDF proxy + energy histogram
+        # RDF: solute atom0 -> solvent oxygens (PBC MIC)
         # ----------------------------
         def rdf_solute0_to_solventO_pbc(Xp_flat: torch.Tensor, L: float, n_solute: int, n_waters: int, dr: float = 0.005):
             B, D = Xp_flat.shape
@@ -334,11 +341,11 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             X = Xp_flat.view(B, N, 3)
             sol0 = X[:, 0, :]  # (B,3)
 
-            # solvent oxygen positions: indices n_solute + 3*w
-            Oxyz = X[:, n_solute::3, :]
+            # oxygen indices: n_solute + 3*w, for w in [0, n_waters)
+            Oxyz = X[:, n_solute : n_solute + 3 * n_waters : 3, :]  # (B, n_waters, 3)
 
             d = mic(Oxyz - sol0[:, None, :], L)
-            r = torch.linalg.norm(d, dim=-1).reshape(-1).detach().cpu().numpy()  # (B*n_waters,)
+            r = torch.linalg.norm(d, dim=-1).reshape(-1).detach().cpu().numpy()
 
             r_max = 0.5 * L
             nbins = int(np.floor(r_max / dr))
@@ -350,17 +357,13 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             V = L**3
             rho = n_waters / V
             expected = (B * n_waters) * rho * shell_vol
+
             g_r = counts / np.maximum(expected, 1e-12)
             g_r[0] = 0.0
             return r_centers, g_r
 
-        with torch.no_grad():
-            flowXp, _ = target.coordinate_transform.forward(flow_samples)
-            mdXp, _ = target.coordinate_transform.forward(target_data_i)
-
-        
-        r_md, g_md = rdf_solute0_to_solventO_pbc(mdXp, L, n_solute=3, n_waters=n_waters, dr=0.005)
-        r_fl, g_fl = rdf_solute0_to_solventO_pbc(flowXp, L, n_solute=3, n_waters=n_waters, dr=0.005)
+        r_md, g_md = rdf_solute0_to_solventO_pbc(mdXp, L, n_solute=n_solute, n_waters=n_waters, dr=0.005)
+        r_fl, g_fl = rdf_solute0_to_solventO_pbc(flowXp, L, n_solute=n_solute, n_waters=n_waters, dr=0.005)
 
         fig = plt.figure(figsize=(12, 4))
         plt.subplot(1, 2, 1)
@@ -373,91 +376,73 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.legend()
         figs.append(fig)
 
-        # Potential energy evaluation of flow samples vs MD samples.
-        # To obtain energy of Cartesian system: subtract log det jacobian from logprob.
+        # ----------------------------
+        # Energies: compute from CARTESIAN density only
+        #   U(x) [kT] = -log p_X(x)
+        #   U(x) [kJ/mol] = -log p_X(x) * kBT
+        # ----------------------------
+        with torch.no_grad():
+            md_U_kT = (-target.p.log_prob_x(mdXp)).detach().cpu().numpy()
+            fl_U_kT = (-target.p.log_prob_x(flowXp)).detach().cpu().numpy()
 
-        kBT = R * T
-        
-        Uflow = -target.p.log_prob_x(flowXp)
-        Umd = -target.p.log_prob_x(mdXp)
-        
-        flow_samples_boltz_logprob, flow_jac = target.p.log_prob_and_jac(flow_samples)
-        flow_samples_energy = -1 * (flow_samples_boltz_logprob - flow_jac).detach().cpu().numpy() * kBT
-        
-        md_samples_boltz_logprob, md_jac = target.p.log_prob_and_jac(target_data_i)
-        md_samples_energy = -1 * (md_samples_boltz_logprob - md_jac).detach().cpu().numpy() * kBT
+        md_U_kJ = md_U_kT * kBT
+        fl_U_kJ = fl_U_kT * kBT
 
-        print("energie flow", Uflow * kBT, flow_samples_energy)
-        print("energie md", Umd * kBT, md_samples_energy)
 
         plt.subplot(1, 2, 2)
-        e_lo, e_hi = np.percentile(md_samples_energy, [0.5, 99.5])
-        plt.hist(md_samples_energy, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
-        plt.hist(flow_samples_energy, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
+        e_lo, e_hi = np.percentile(md_U_kJ, [0.5, 99.5])
+        plt.hist(md_U_kJ, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(fl_U_kJ, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
         plt.xlabel("Potential energy (kJ/mol)")
         plt.ylabel("density")
-        plt.title("Energy histogram (PBC, preprocessed)")
+        plt.title("Energy histogram (truncated to MD percentiles)")
         plt.legend()
         plt.tight_layout()
         figs.append(fig)
 
-        # Plot some of the molecular states in Cartesian space.
-        # Plots MD samples, and lowest + highest energy states from the flow samples.
-        sorted_energy = flow_samples_energy.argsort()
-        high_energy_inds = sorted_energy[-2:]
-        low_energy_inds = sorted_energy[:2]
+        # ----------------------------
+        # Visualize: MD + lowest/highest energy FLOW samples (by Cartesian energy)
+        # ----------------------------
+        sorted_inds = np.argsort(fl_U_kJ)
+        low_energy_inds = sorted_inds[:2]
+        high_energy_inds = sorted_inds[-2:]
 
         high_positions = flowXp[high_energy_inds, ...]
         low_positions = flowXp[low_energy_inds, ...]
-        high_energies = flow_samples_energy[high_energy_inds]
-        low_energies = flow_samples_energy[low_energy_inds]
-        md_inds = [0, -1]
+        high_energies = fl_U_kJ[high_energy_inds]
+        low_energies = fl_U_kJ[low_energy_inds]
 
+        md_inds = [0, -1]
         md_positions = mdXp[md_inds]
-        md_energies = md_samples_energy[md_inds]
+        md_energies = md_U_kJ[md_inds]
 
         with torch.no_grad():
-            md_viz = make_whole_for_viz(md_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
-            low_viz = make_whole_for_viz(low_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
-            high_viz = make_whole_for_viz(high_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
-
+            md_viz = make_whole_for_viz(md_positions, L, n_solute=n_solute, n_waters=n_waters).cpu().numpy()
+            low_viz = make_whole_for_viz(low_positions, L, n_solute=n_solute, n_waters=n_waters).cpu().numpy()
+            high_viz = make_whole_for_viz(high_positions, L, n_solute=n_solute, n_waters=n_waters).cpu().numpy()
 
         fig = plt.figure(figsize=(12, 10))
-        # Setting up the color map based on atom type
-        colours = {'S': 'blue', 'O': 'red', 'H': 'black'}  # Define more colors if you have more atom types
-        atom_types = [a[:1] for a in target.system.atoms]  # Take indices off the atom names
-        color_list = [colours[atype] for atype in atom_types]
+        colours = {'S': 'blue', 'O': 'red', 'H': 'black'}
+        atom_types = [a[:1] for a in target.system.atoms]
+        color_list = [colours.get(atype, 'grey') for atype in atom_types]
 
-        # Get plot limits from MD data
         md_reshaped = md_viz.reshape(-1, md_viz.shape[1], 3)
         x_lim = (np.floor(md_reshaped[:, :, 0].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 0].max() * 10) / 10.0)
         y_lim = (np.floor(md_reshaped[:, :, 1].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 1].max() * 10) / 10.0)
         z_lim = (np.floor(md_reshaped[:, :, 2].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 2].max() * 10) / 10.0)
 
-
         def subplot_molecular_system(ax, pos, energy, title_str):
-            # print("H2 coords:", pos[2, :])
-            ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=color_list, label=atom_types)
-            for i in range(0, len(pos) - 2, 3):  # Draw bond lines
-                if i + 2 < len(pos):  # Ensure we don't go out of bounds
-                    # Draw line from atom i to i+1
-                    ax.plot([pos[i][0], pos[i + 1][0]],
-                            [pos[i][1], pos[i + 1][1]],
-                            [pos[i][2], pos[i + 1][2]], color='grey')
-                    # Draw line from atom i to i+2
-                    ax.plot([pos[i][0], pos[i + 2][0]],
-                            [pos[i][1], pos[i + 2][1]],
-                            [pos[i][2], pos[i + 2][2]], color='grey')
+            ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=color_list)
+            for i in range(0, len(pos) - 2, 3):
+                if i + 2 < len(pos):
+                    ax.plot([pos[i][0], pos[i + 1][0]], [pos[i][1], pos[i + 1][1]], [pos[i][2], pos[i + 1][2]], color='grey')
+                    ax.plot([pos[i][0], pos[i + 2][0]], [pos[i][1], pos[i + 2][1]], [pos[i][2], pos[i + 2][2]], color='grey')
 
-            # Adding labels
-            ax.set_xlabel('x (nm)')
-            ax.set_ylabel('y (nm)')
-            ax.set_zlabel('z (nm)')
-            ax.set_xlim(x_lim)
-            ax.set_ylim(y_lim)
-            ax.set_zlim(z_lim)
+            ax.set_xlabel('x (nm)'); ax.set_ylabel('y (nm)'); ax.set_zlabel('z (nm)')
+            ax.set_xlim(x_lim); ax.set_ylim(y_lim); ax.set_zlim(z_lim)
             ax.set_title(f"{title_str}: {energy:.3g} kJ/mol")
-            ax.view_init(elev=30, azim=45)  # Rotate 90 degrees around the z-axis
+            ax.view_init(elev=30, azim=45)
+
             legend_elements = [
                 Patch(facecolor=colours[atype], edgecolor=colours[atype], label=atype)
                 for atype in colours if atype in atom_types
@@ -467,15 +452,15 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         ax = fig.add_subplot(2, 3, 1, projection='3d')
         subplot_molecular_system(ax, md_viz[0], md_energies[0], "First MD frame")
         ax = fig.add_subplot(2, 3, 2, projection='3d')
-        subplot_molecular_system(ax, low_viz[0], low_energies[0], "Lowest energy")
+        subplot_molecular_system(ax, low_viz[0], low_energies[0], "Lowest energy (flow)")
         ax = fig.add_subplot(2, 3, 3, projection='3d')
-        subplot_molecular_system(ax, high_viz[0], high_energies[-1], "Highest energy")
+        subplot_molecular_system(ax, high_viz[0], high_energies[-1], "Highest energy (flow)")
         ax = fig.add_subplot(2, 3, 4, projection='3d')
         subplot_molecular_system(ax, md_viz[1], md_energies[1], "Last MD frame")
         ax = fig.add_subplot(2, 3, 5, projection='3d')
-        subplot_molecular_system(ax, low_viz[1], low_energies[1], "Second lowest energy")
+        subplot_molecular_system(ax, low_viz[1], low_energies[1], "2nd lowest energy (flow)")
         ax = fig.add_subplot(2, 3, 6, projection='3d')
-        subplot_molecular_system(ax, high_viz[1], high_energies[0], "Second highest energy")
+        subplot_molecular_system(ax, high_viz[1], high_energies[0], "2nd highest energy (flow)")
         plt.tight_layout()
         figs.append(fig)
 

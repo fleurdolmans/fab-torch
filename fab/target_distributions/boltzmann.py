@@ -248,6 +248,7 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
 
 def regularize_energy(energy, energy_cut, energy_max):
     # Cast inputs to same type
+    print("Before reg:", energy)
     energy_cut = energy_cut.type(energy.type())
     energy_max = energy_max.type(energy.type())
     # Check whether energy finite
