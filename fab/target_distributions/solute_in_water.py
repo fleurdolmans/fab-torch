@@ -22,7 +22,10 @@ from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
-from fab.target_distributions.pbc_water_preprocess import preprocess_frame_batch, IdentityTransform
+from fab.transforms.global_3point_spherical_transform_pbc import PBCGlobal3PointSphericalTransform
+from fab.transforms.global_3point_spherical_transform_pbc2 import PBCGlobal3PointSphericalTransform2
+from fab.transforms.transform_pbc import PBCPreprocessTransform
+
 
 
 constraints_dict = {
@@ -147,6 +150,11 @@ class TriatomicInWaterSys(TestSystem):
                     constraints=constraints_dict[self.internal_constraints],
                     rigidWater=self.rigid_water,
                 )
+                for force in self.system.getForces():
+                    if isinstance(force, mm.HarmonicBondForce):
+                        force.setUsesPeriodicBoundaryConditions(True)
+                    if isinstance(force, mm.NonbondedForce):
+                        force.setExceptionsUsePeriodicBoundaryConditions(True)
             else:
                 raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
@@ -280,9 +288,13 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.box_length_nm = box_length_nm
 
         if self.boundary_condition == "pbc":
-            self.internal_dim = self.cartesian_dim
+            # self.internal_dim = self.cartesian_dim                    # for cartesian flow
+            self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
+        
+        print("internal_dim  in solute in water:", self.internal_dim)
+        
 
         self.logger = logger
         self.save_dir = save_dir
@@ -364,39 +376,49 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if self.boundary_condition == "droplet":
             self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.boundary_condition == "pbc":
-            print("For pbc we dont use a transform, so we load an identity transform.")
-            self.coordinate_transform = IdentityTransform()
+            # self.coordinate_transform = PBCPreprocessTransform(
+            #     L=self.box_length_nm,
+            #     n_solute=3,
+            #     n_waters=self.num_solvent_molecules,
+            #     anchor_idx=0,
+            #     do_center=False,
+            # )
+            self.coordinate_transform = PBCGlobal3PointSphericalTransform2(
+                L=self.box_length_nm,
+                system=self.system,
+                transform_data=self.transform_data.to(device),
+            )
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
         
-        if self.boundary_condition == "droplet":
-            # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
-            #  its output end.
-            if self.train_data_x is not None:
-                # OH bonds are still ~0.1 nm apart
-                self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
-                    self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
-                )
-            if self.val_data_x is not None:
-                self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
-                    self.val_data_x.reshape(-1, self.cartesian_dim)
-                )
-                
-            if self.test_data_x is not None:
-                self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
-                    self.test_data_x.reshape(-1, self.cartesian_dim)
-                )
-        else:
-            # PBC: I == X, logdet == 0
-            if self.train_data_x is not None:
-                self.train_data_i = self.train_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                self.train_logdet_xi = torch.zeros(self.train_data_i.shape[0], device=self.device, dtype=self.train_data_i.dtype)
-            if self.val_data_x is not None:
-                self.val_data_i = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                self.val_logdet_xi = torch.zeros(self.val_data_i.shape[0], device=self.device, dtype=self.val_data_i.dtype)
-            if self.test_data_x is not None:
-                self.test_data_i = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-                self.test_logdet_xi = torch.zeros(self.test_data_i.shape[0], device=self.device, dtype=self.test_data_i.dtype)
+        # if self.boundary_condition == "droplet":
+        # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
+        #  its output end.
+        if self.train_data_x is not None:
+            # OH bonds are still ~0.1 nm apart
+            self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
+                self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
+            )
+        if self.val_data_x is not None:
+            self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
+                self.val_data_x.reshape(-1, self.cartesian_dim)
+            )
+            
+        if self.test_data_x is not None:
+            self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
+                self.test_data_x.reshape(-1, self.cartesian_dim)
+            )
+        # else:
+        #     # PBC: I == X, logdet == 0
+        #     if self.train_data_x is not None:
+        #         self.train_data_i = self.train_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+        #         self.train_logdet_xi = torch.zeros(self.train_data_i.shape[0], device=self.device, dtype=self.train_data_i.dtype)
+        #     if self.val_data_x is not None:
+        #         self.val_data_i = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+        #         self.val_logdet_xi = torch.zeros(self.val_data_i.shape[0], device=self.device, dtype=self.val_data_i.dtype)
+        #     if self.test_data_x is not None:
+        #         self.test_data_i = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
+        #         self.test_logdet_xi = torch.zeros(self.test_data_i.shape[0], device=self.device, dtype=self.test_data_i.dtype)
 
         # Target distribution wrapper
         if n_threads > 1:
@@ -405,7 +427,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 temperature,
                 energy_cut=energy_cut,
                 energy_max=energy_max,
-                transform=self.coordinate_transform,            # For PBC this is IdentityTransform()
+                transform=self.coordinate_transform,
                 platform_name=self.platform_name,
                 n_threads=n_threads,
             )
@@ -427,7 +449,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 temperature,
                 energy_cut=energy_cut,
                 energy_max=energy_max,
-                transform=self.coordinate_transform,            # For PBC this is IdentityTransform()
+                transform=self.coordinate_transform,           
             )
 
     # @staticmethod
@@ -454,15 +476,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             raise ValueError(
                 "Cannot load MD samples file with suffix: {}. Must be .pt or .pdb".format(data_path.suffix)
             )
-        if self.boundary_condition == "pbc":
-            target_data = preprocess_frame_batch(
-                target_data.reshape(-1, self.cartesian_dim).to(self.device),
-                L=self.box_length_nm,
-                n_solute=3,
-                n_waters=self.num_solvent_molecules,
-                anchor_idx=0, 
-                debug=False,
-            ).cpu().reshape_as(target_data)
+
         return target_data
 
     def log_prob(self, i: Tensor):
@@ -614,65 +628,65 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         return summary_dict
     
-    def find_bad_frames_bisect(
-        self,
-        X: torch.Tensor,
-        name: str,
-        chunk_size: int = 8192,
-        msg_substring: str = "Found rotation around axis with x=0 outside of coordinate setup.",
-        max_bad: int | None = None,
-        ):
+    # def find_bad_frames_bisect(
+    #     self,
+    #     X: torch.Tensor,
+    #     name: str,
+    #     chunk_size: int = 8192,
+    #     msg_substring: str = "Found rotation around axis with x=0 outside of coordinate setup.",
+    #     max_bad: int | None = None,
+    #     ):
 
-        """
-        Find indices of frames in X that cause coordinate_transform.inverse() to raise a specific ValueError.
-        Uses chunk testing + bisection to avoid O(N) per-frame calls.
-        """
-        assert X.ndim == 2, f"{name}: expected (n_frames, dim), got {tuple(X.shape)}"
-        if X.shape[1] != self.cartesian_dim:
-            raise ValueError(
-                f"{name}: dim mismatch: X.shape[1]={X.shape[1]} vs cartesian_dim={self.cartesian_dim}"
-            )
+    #     """
+    #     Find indices of frames in X that cause coordinate_transform.inverse() to raise a specific ValueError.
+    #     Uses chunk testing + bisection to avoid O(N) per-frame calls.
+    #     """
+    #     assert X.ndim == 2, f"{name}: expected (n_frames, dim), got {tuple(X.shape)}"
+    #     if X.shape[1] != self.cartesian_dim:
+    #         raise ValueError(
+    #             f"{name}: dim mismatch: X.shape[1]={X.shape[1]} vs cartesian_dim={self.cartesian_dim}"
+    #         )
 
-        X = X.to(self.device)
-        n = X.shape[0]
-        bad = []
+    #     X = X.to(self.device)
+    #     n = X.shape[0]
+    #     bad = []
 
-        def fails(i0: int, i1: int) -> bool:
-            try:
-                with torch.no_grad():
-                    _ = self.coordinate_transform.inverse(X[i0:i1])
-                return False
-            except ValueError as e:
-                if msg_substring in str(e):
-                    return True
-                raise  # other errors should still surface
+    #     def fails(i0: int, i1: int) -> bool:
+    #         try:
+    #             with torch.no_grad():
+    #                 _ = self.coordinate_transform.inverse(X[i0:i1])
+    #             return False
+    #         except ValueError as e:
+    #             if msg_substring in str(e):
+    #                 return True
+    #             raise  # other errors should still surface
 
-        print("Finding bad frames via bisection...")
-        # 1) coarse scan
-        failing_ranges = []
-        for i0 in range(0, n, chunk_size):
-            i1 = min(n, i0 + chunk_size)
-            if fails(i0, i1):
-                failing_ranges.append((i0, i1))
+    #     print("Finding bad frames via bisection...")
+    #     # 1) coarse scan
+    #     failing_ranges = []
+    #     for i0 in range(0, n, chunk_size):
+    #         i1 = min(n, i0 + chunk_size)
+    #         if fails(i0, i1):
+    #             failing_ranges.append((i0, i1))
 
-        # 2) bisect failing ranges to isolate failing frames
-        stack = failing_ranges[:]
-        while stack:
-            i0, i1 = stack.pop()
-            if i1 - i0 == 1:
-                bad.append(i0)
-                if max_bad is not None and len(bad) >= max_bad:
-                    break
-                continue
-            mid = (i0 + i1) // 2
-            if fails(i0, mid):
-                stack.append((i0, mid))
-            if fails(mid, i1):
-                stack.append((mid, i1))
+    #     # 2) bisect failing ranges to isolate failing frames
+    #     stack = failing_ranges[:]
+    #     while stack:
+    #         i0, i1 = stack.pop()
+    #         if i1 - i0 == 1:
+    #             bad.append(i0)
+    #             if max_bad is not None and len(bad) >= max_bad:
+    #                 break
+    #             continue
+    #         mid = (i0 + i1) // 2
+    #         if fails(i0, mid):
+    #             stack.append((i0, mid))
+    #         if fails(mid, i1):
+    #             stack.append((mid, i1))
 
-        bad = sorted(set(bad))
-        print(f"[{name}] total={n} bad={len(bad)} rate={len(bad)/max(1,n):.3e}")
-        if bad:
-            print(f"[{name}] first bad indices: {bad[:20]}")
-        return bad
+    #     bad = sorted(set(bad))
+    #     print(f"[{name}] total={n} bad={len(bad)} rate={len(bad)/max(1,n):.3e}")
+    #     if bad:
+    #         print(f"[{name}] first bad indices: {bad[:20]}")
+    #     return bad
     
