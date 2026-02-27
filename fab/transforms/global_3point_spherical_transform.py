@@ -307,6 +307,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
                 z[:, atom_num, 0] = fr
                 z[:, atom_num, 1] = fphi
                 z[:, atom_num, 2] = ftheta
+        
+        if not setup and z.shape[0] == 1:
+            print("unnorm_z first 30 dims:", unnorm_z.reshape(1,-1)[0,:30])
 
         # Reshape z from n_batch x n_atoms x 3 to n_batch x n_dim
         z = z.reshape(z.shape[0], -1)
@@ -322,7 +325,6 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         assert z.shape[1] == len(x[0].flatten()) - 6, (
             "Expected internal coordinates to have 6 fewer dofs than Cartesian."
         )
-
         return z, log_det_jac, x_coord, unnorm_z
 
     def z_to_cartesian(self, z):
@@ -461,6 +463,9 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # Reshape to n_batch x n_atoms . 3
         x = x.reshape(x.shape[0], -1)
 
+        if z.shape[0] == 1:
+            print("z (after reinserting dofs) atom2 coords:", z[:,2,:])
+
         return x, log_det_jac
 
     def rotate_into_global_coordinate_system(self,x, z_axis, y_axis, setup=False):
@@ -515,6 +520,7 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         theta_rotation = rotation_matrix(z_axis, theta_rad)
         # x rotated into the yz plane
         x = torch.einsum("bij,bnj -> bni", theta_rotation, x_phi)
+
 
         return x
 

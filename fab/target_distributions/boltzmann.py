@@ -124,8 +124,7 @@ class TransformedBoltzmannParallel(nn.Module):
 
     def log_prob(self, z):
         z, log_det = self.transform(z)  # I --> X
-        energy_term = -self.norm_energy(z)
-        return energy_term + log_det
+        return -self.norm_energy(z) + log_det
 
     def log_prob_and_jac(self, z):
         z, log_det = self.transform(z)  # I --> X
@@ -155,11 +154,11 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
-                # Add constraints for pbc
-                openmm_context.applyConstraints(1e-6)
                 state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
                 # get energy
-                energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
+                # energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
+                energy_kj = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole)
+                energies[i, 0] = energy_kj / kBT
 
                 # Printing energy components for debugging:
                 # for j, frc in enumerate(openmm_context.getSystem().getForces()):
