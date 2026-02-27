@@ -4,6 +4,7 @@ import pathlib
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from typing import List
+from openmm import unit
 
 import torch
 import torch.nn.functional as F
@@ -17,12 +18,15 @@ from fab.target_distributions.solute_in_water import SoluteInWater
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 from experiments.solvation.test_run import run_transform_test_droplet, run_test_pbc
+from fab.transforms.transform_pbc import PBCPreprocessTransform
+from matplotlib.patches import Patch
 
 SAVE_DIR = None
 
 
 def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffer=None) -> Plotter:
-    def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
+    
+    def plot_droplet(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
         figs = []
         R, T = 8.314e-3, target.temperature
 
@@ -250,6 +254,240 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         figs.append(fig)
 
         return figs
+
+    def plot_pbc(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
+        figs = []
+        R, T = 8.314e-3, target.temperature
+        device = target.device
+        L = float(target.box_length_nm)
+
+        # triatomic solute + waters (O,H,H)
+        n_solute = 3
+        n_waters = int(target.num_solvent_molecules)
+
+        # local MIC helper (avoids relying on transform having matching signature)
+        def mic(dx: torch.Tensor, L: float) -> torch.Tensor:
+            L_t = torch.as_tensor(float(L), device=dx.device, dtype=dx.dtype)
+            return dx - L_t * torch.round(dx / L_t)
+
+        # visualization helper: locally "unwrap" bonds for plotting and center solute atom0
+        def make_whole_for_viz(Xp_flat: torch.Tensor, L: float, n_solute: int = 3, n_waters: int = 0) -> torch.Tensor:
+            if Xp_flat.ndim != 2 or (Xp_flat.shape[1] % 3 != 0):
+                raise ValueError(f"Expected Xp_flat (B,3N), got {tuple(Xp_flat.shape)}")
+
+            device = Xp_flat.device
+            dtype = Xp_flat.dtype
+            L_t = torch.as_tensor(float(L), device=device, dtype=dtype)
+
+            B, D = Xp_flat.shape
+            N = D // 3
+            X = Xp_flat.view(B, N, 3).clone()  # (B,N,3)
+
+            def mic(dx: torch.Tensor) -> torch.Tensor:
+                return dx - L_t * torch.round(dx / L_t)
+
+            # ---- unwrap solute relative to solute atom0 ----
+            a0 = X[:, 0, :]
+            for a in range(1, min(n_solute, N)):
+                X[:, a, :] = a0 + mic(X[:, a, :] - a0)
+
+            # ---- unwrap each water locally: H relative to its O ----
+            start = n_solute
+            for w in range(n_waters):
+                i = start + 3 * w
+                if i + 2 >= N:
+                    break
+                O = X[:, i + 0, :]
+                H1 = X[:, i + 1, :]
+                H2 = X[:, i + 2, :]
+                X[:, i + 1, :] = O + mic(H1 - O)
+                X[:, i + 2, :] = O + mic(H2 - O)
+
+            # center solute atom0 at the origin
+            X = X - X[:, 0:1, :]
+
+            # wrap into [-L/2, L/2]
+            X = X - L_t * torch.round(X / L_t)
+
+            return X  # (B,N,3)
+
+        # ----------------------------
+        # Load MD Cartesian data and wrap it to PBC via coordinate_transform.forward
+        # ----------------------------
+        if target.eval_mode == "val":
+            target_data_i = target.val_data_i.reshape(-1, target.internal_dim).to(target.device)
+        elif target.eval_mode == "test":
+            target_data_i = target.test_data_i.reshape(-1, target.internal_dim).to(target.device)
+
+        # RDF and energies of flow samples vs MD samples
+        num_flow_samples = 10000
+
+        with torch.no_grad():
+            flow_samples = fab_model.flow.sample((num_flow_samples,)) # shape (B, internal_dim)
+
+        # ----------------------------
+        # RDF proxy + energy histogram
+        # ----------------------------
+        def rdf_solute0_to_solventO_pbc(Xp_flat: torch.Tensor, L: float, n_solute: int, n_waters: int, dr: float = 0.005):
+            B, D = Xp_flat.shape
+            N = D // 3
+            X = Xp_flat.view(B, N, 3)
+            sol0 = X[:, 0, :]  # (B,3)
+
+            # solvent oxygen positions: indices n_solute + 3*w
+            Oxyz = X[:, n_solute::3, :]
+
+            d = mic(Oxyz - sol0[:, None, :], L)
+            r = torch.linalg.norm(d, dim=-1).reshape(-1).detach().cpu().numpy()  # (B*n_waters,)
+
+            r_max = 0.5 * L
+            nbins = int(np.floor(r_max / dr))
+            edges = np.linspace(0.0, nbins * dr, nbins + 1)
+            counts, _ = np.histogram(r, bins=edges)
+
+            r_centers = 0.5 * (edges[:-1] + edges[1:])
+            shell_vol = 4.0 * np.pi * (r_centers**2) * dr
+            V = L**3
+            rho = n_waters / V
+            expected = (B * n_waters) * rho * shell_vol
+            g_r = counts / np.maximum(expected, 1e-12)
+            g_r[0] = 0.0
+            return r_centers, g_r
+
+        with torch.no_grad():
+            flowXp, _ = target.coordinate_transform.forward(flow_samples)
+            mdXp, _ = target.coordinate_transform.forward(target_data_i)
+
+        
+        r_md, g_md = rdf_solute0_to_solventO_pbc(mdXp, L, n_solute=3, n_waters=n_waters, dr=0.005)
+        r_fl, g_fl = rdf_solute0_to_solventO_pbc(flowXp, L, n_solute=3, n_waters=n_waters, dr=0.005)
+
+        fig = plt.figure(figsize=(12, 4))
+        plt.subplot(1, 2, 1)
+        plt.plot(r_md, g_md, label="MD")
+        plt.plot(r_fl, g_fl, label="Flow")
+        plt.xlim(0, L / 2)
+        plt.xlabel("r (nm)")
+        plt.ylabel("g(r)")
+        plt.title("RDF: solute atom0 → solvent O")
+        plt.legend()
+        figs.append(fig)
+
+        # Potential energy evaluation of flow samples vs MD samples.
+        # To obtain energy of Cartesian system: subtract log det jacobian from logprob.
+
+        kBT = R * T
+        
+        Uflow = -target.p.log_prob_x(flowXp)
+        Umd = -target.p.log_prob_x(mdXp)
+        
+        flow_samples_boltz_logprob, flow_jac = target.p.log_prob_and_jac(flow_samples)
+        flow_samples_energy = -1 * (flow_samples_boltz_logprob - flow_jac).detach().cpu().numpy() * kBT
+        
+        md_samples_boltz_logprob, md_jac = target.p.log_prob_and_jac(target_data_i)
+        md_samples_energy = -1 * (md_samples_boltz_logprob - md_jac).detach().cpu().numpy() * kBT
+
+        print("energie flow", Uflow * kBT, flow_samples_energy)
+        print("energie md", Umd * kBT, md_samples_energy)
+
+        plt.subplot(1, 2, 2)
+        e_lo, e_hi = np.percentile(md_samples_energy, [0.5, 99.5])
+        plt.hist(md_samples_energy, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(flow_samples_energy, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
+        plt.xlabel("Potential energy (kJ/mol)")
+        plt.ylabel("density")
+        plt.title("Energy histogram (PBC, preprocessed)")
+        plt.legend()
+        plt.tight_layout()
+        figs.append(fig)
+
+        # Plot some of the molecular states in Cartesian space.
+        # Plots MD samples, and lowest + highest energy states from the flow samples.
+        sorted_energy = flow_samples_energy.argsort()
+        high_energy_inds = sorted_energy[-2:]
+        low_energy_inds = sorted_energy[:2]
+
+        high_positions = flowXp[high_energy_inds, ...]
+        low_positions = flowXp[low_energy_inds, ...]
+        high_energies = flow_samples_energy[high_energy_inds]
+        low_energies = flow_samples_energy[low_energy_inds]
+        md_inds = [0, -1]
+
+        md_positions = mdXp[md_inds]
+        md_energies = md_samples_energy[md_inds]
+
+        with torch.no_grad():
+            md_viz = make_whole_for_viz(md_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
+            low_viz = make_whole_for_viz(low_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
+            high_viz = make_whole_for_viz(high_positions, L, n_solute=3, n_waters=n_waters).cpu().numpy()
+
+
+        fig = plt.figure(figsize=(12, 10))
+        # Setting up the color map based on atom type
+        colours = {'S': 'blue', 'O': 'red', 'H': 'black'}  # Define more colors if you have more atom types
+        atom_types = [a[:1] for a in target.system.atoms]  # Take indices off the atom names
+        color_list = [colours[atype] for atype in atom_types]
+
+        # Get plot limits from MD data
+        md_reshaped = md_viz.reshape(-1, md_viz.shape[1], 3)
+        x_lim = (np.floor(md_reshaped[:, :, 0].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 0].max() * 10) / 10.0)
+        y_lim = (np.floor(md_reshaped[:, :, 1].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 1].max() * 10) / 10.0)
+        z_lim = (np.floor(md_reshaped[:, :, 2].min() * 10) / 10.0, np.ceil(md_reshaped[:, :, 2].max() * 10) / 10.0)
+
+
+        def subplot_molecular_system(ax, pos, energy, title_str):
+            # print("H2 coords:", pos[2, :])
+            ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=color_list, label=atom_types)
+            for i in range(0, len(pos) - 2, 3):  # Draw bond lines
+                if i + 2 < len(pos):  # Ensure we don't go out of bounds
+                    # Draw line from atom i to i+1
+                    ax.plot([pos[i][0], pos[i + 1][0]],
+                            [pos[i][1], pos[i + 1][1]],
+                            [pos[i][2], pos[i + 1][2]], color='grey')
+                    # Draw line from atom i to i+2
+                    ax.plot([pos[i][0], pos[i + 2][0]],
+                            [pos[i][1], pos[i + 2][1]],
+                            [pos[i][2], pos[i + 2][2]], color='grey')
+
+            # Adding labels
+            ax.set_xlabel('x (nm)')
+            ax.set_ylabel('y (nm)')
+            ax.set_zlabel('z (nm)')
+            ax.set_xlim(x_lim)
+            ax.set_ylim(y_lim)
+            ax.set_zlim(z_lim)
+            ax.set_title(f"{title_str}: {energy:.3g} kJ/mol")
+            ax.view_init(elev=30, azim=45)  # Rotate 90 degrees around the z-axis
+            legend_elements = [
+                Patch(facecolor=colours[atype], edgecolor=colours[atype], label=atype)
+                for atype in colours if atype in atom_types
+            ]
+            ax.legend(handles=legend_elements, loc='upper right')
+
+        ax = fig.add_subplot(2, 3, 1, projection='3d')
+        subplot_molecular_system(ax, md_viz[0], md_energies[0], "First MD frame")
+        ax = fig.add_subplot(2, 3, 2, projection='3d')
+        subplot_molecular_system(ax, low_viz[0], low_energies[0], "Lowest energy")
+        ax = fig.add_subplot(2, 3, 3, projection='3d')
+        subplot_molecular_system(ax, high_viz[0], high_energies[-1], "Highest energy")
+        ax = fig.add_subplot(2, 3, 4, projection='3d')
+        subplot_molecular_system(ax, md_viz[1], md_energies[1], "Last MD frame")
+        ax = fig.add_subplot(2, 3, 5, projection='3d')
+        subplot_molecular_system(ax, low_viz[1], low_energies[1], "Second lowest energy")
+        ax = fig.add_subplot(2, 3, 6, projection='3d')
+        subplot_molecular_system(ax, high_viz[1], high_energies[0], "Second highest energy")
+        plt.tight_layout()
+        figs.append(fig)
+
+        return figs
+
+    def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
+        # return plot_droplet(fab_model, plot_dict)
+        if cfg.target.boundary_condition == "droplet":
+            return plot_droplet(fab_model, plot_dict)
+        else:
+            return plot_pbc(fab_model, plot_dict)
+
     return plot
 
 def pick_system_keys(d: dict, keys: list) -> dict:
@@ -379,12 +617,191 @@ def _run(cfg: DictConfig) -> None:
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
     
-    with torch.no_grad():
-        bs = 8
-        md_i = target.val_data_i[:bs].to(target.device)
-        lp, jac = target.p.log_prob_and_jac(md_i)
-        U = -(lp - jac)
-        print("[DEBUG] MD U(kBT):", U.cpu().numpy(), flush=True)
+    if cfg.target.boundary_condition == "pbc":
+        L = float(target.box_length_nm)
+
+        def mic(dx, L):
+            return dx - L * torch.round(dx / L)
+
+        def wrap(x, L):
+            return torch.remainder(x, L)
+
+        def dist_pbc(p, q, L):
+            return torch.linalg.norm(mic(p - q, L), dim=-1)
+
+        def angle(a, b, c, L):
+            # angle ABC at B using MIC vectors BA and BC
+            ba = mic(a - b, L)
+            bc = mic(c - b, L)
+            ba_n = ba / ba.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            bc_n = bc / bc.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            cosang = (ba_n * bc_n).sum(dim=-1).clamp(-1.0, 1.0)
+            return torch.acos(cosang)
+
+        @torch.no_grad()
+        def min_mic_OO_distance(x_flat, L, n_solute, n_waters):
+            """
+            Returns min MIC O-O distance between waters per frame.
+            x_flat: (B, 3N)
+            """
+            B = x_flat.shape[0]
+            x = x_flat.view(B, -1, 3)
+            O = []
+            for k in range(n_waters):
+                O_idx = n_solute + 3 * k
+                O.append(x[:, O_idx, :])
+            O = torch.stack(O, dim=1)  # (B, n_waters, 3)
+
+            # pairwise distances
+            dmin = torch.full((B,), float("inf"), device=x.device, dtype=x.dtype)
+            for i in range(n_waters):
+                for j in range(i + 1, n_waters):
+                    dij = torch.linalg.norm(mic(O[:, i, :] - O[:, j, :], L), dim=-1)
+                    dmin = torch.minimum(dmin, dij)
+            return dmin
+        
+        def energy_by_force(context, system, x_flat, L_nm=None):
+            """
+            Returns a list of (force_index, force_name, energy_kJmol).
+            """
+            x = x_flat.view(-1, 3).detach().cpu().numpy()
+            context.setPositions(x * unit.nanometer)
+
+            # Make sure box vectors are set (optional if already correct)
+            if L_nm is not None:
+                import openmm as mm
+                context.setPeriodicBoxVectors(
+                    mm.Vec3(L_nm,0,0)*unit.nanometer,
+                    mm.Vec3(0,L_nm,0)*unit.nanometer,
+                    mm.Vec3(0,0,L_nm)*unit.nanometer,
+                )
+
+            out = []
+            for j, frc in enumerate(system.getForces()):
+                st = context.getState(getEnergy=True, groups={j})
+                Ej = st.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+                out.append((j, frc.getName(), Ej))
+            return out
+
+
+        with torch.no_grad():
+            print("INITIAL TEST (NEW TRANSFORM)!")
+
+            bs = 8
+            md_x = target.val_data_x[:bs].to(target.device).reshape(bs, -1)  # (B, 3N)
+
+            # # --- 1) Transform inverse ---
+            # md_x_can = canonicalize_x_for_pbc(md_x, L, 3, target.num_solvent_molecules)
+
+            # md_i, _ = target.coordinate_transform.inverse(md_x_can)
+            md_i, _ = target.coordinate_transform.inverse(md_x)  # (B, internal_dim), (B,)
+            print("md_x shape:", tuple(md_x.shape), "md_i shape:", tuple(md_i.shape))
+
+            # --- 2) Energy consistency ---
+            # U(x) from direct Cartesian energy
+            md_x0 = md_x
+            md_x = torch.remainder(md_x, L)
+            U_from_x = -target.log_prob_x(md_x)
+
+            # U(i): compute log_prob(i) and jac from the TransformedBoltzmann wrapper
+            lp_i, jac_i = target.log_prob_and_jac(md_i)
+            # In your earlier code you used: U = -(lp - jac)
+            U_from_i = -(lp_i - jac_i)
+
+            print("U_from_x (kT units):", U_from_x.detach().cpu().numpy())
+            print("U_from_i (kT units):", U_from_i.detach().cpu().numpy())
+            print("max |diff|:", (U_from_x - U_from_i).abs().max().item())
+
+            # --- 3) Round-trip x reconstruction (gauge-invariant) ---
+            x_from_i, _ = target.coordinate_transform.forward(md_i)  # (B, 3N)
+
+
+            N = md_x.shape[1] // 3
+
+            mdX = md_x.view(bs, N, 3)
+            recX = x_from_i.view(bs, N, 3)
+
+            # Compare everything RELATIVE to solute atom 0 using MIC (translation-invariant)
+            d_md  = mic(mdX - mdX[:, 0:1, :], L)
+            d_rec = mic(recX - recX[:, 0:1, :], L)
+
+            rel_err = torch.linalg.norm(d_md - d_rec, dim=-1)  # (B,N)
+            print("[DEBUG] max rel-to-sol0 MIC err (nm):", rel_err.max().item())
+            print("[DEBUG] mean rel-to-sol0 MIC err (nm):", rel_err.mean().item())
+
+            worst = rel_err.view(-1).argmax().item()
+            b = worst // rel_err.shape[1]
+            a = worst %  rel_err.shape[1]
+            print("[DEBUG] worst frame", b, "atom", a, "err", rel_err[b, a].item())
+
+            # Example usage inside your test:
+            b = 0
+            x_from_i, _ = target.coordinate_transform.forward(md_i)
+
+            E_md  = energy_by_force(target.p.sim_context, target.system.system, md_x[b], L_nm=target.box_length_nm)
+            E_rec = energy_by_force(target.p.sim_context, target.system.system, x_from_i[b],  L_nm=target.box_length_nm)
+
+            print("Per-force energy differences (kJ/mol):")
+            for (j, name, e0), (_, _, e1) in zip(E_md, E_rec):
+                diff = e1 - e0
+                if abs(diff) > 1e-3:  # threshold
+                    print(f"{j:2d} {name:30s}  md={e0: .6f}  rec={e1: .6f}  diff={diff: .6f}")
+
+            
+
+            # --- 4) Rigid water bond lengths + angle checks ---
+            mdXw  = wrap(mdX, L)
+            recXw = wrap(recX, L)
+
+            oh_md = []
+            oh_rec = []
+            hoh_md = []
+            hoh_rec = []
+
+            for k in range(target.num_solvent_molecules):
+                O_idx = 3 + 3 * k
+                H1_idx = O_idx + 1
+                H2_idx = O_idx + 2
+
+                # distances
+                oh1_md = dist_pbc(mdXw[:, H1_idx, :], mdXw[:, O_idx, :], L)
+                oh2_md = dist_pbc(mdXw[:, H2_idx, :], mdXw[:, O_idx, :], L)
+                oh1_rc = dist_pbc(recXw[:, H1_idx, :], recXw[:, O_idx, :], L)
+                oh2_rc = dist_pbc(recXw[:, H2_idx, :], recXw[:, O_idx, :], L)
+
+                # angle H-O-H
+                ang_md = angle(mdXw[:, H1_idx, :], mdXw[:, O_idx, :], mdXw[:, H2_idx, :], L)
+                ang_rc = angle(recXw[:, H1_idx, :], recXw[:, O_idx, :], recXw[:, H2_idx, :], L)
+
+                oh_md.append(torch.stack([oh1_md, oh2_md], dim=1))   # (B,2)
+                oh_rec.append(torch.stack([oh1_rc, oh2_rc], dim=1))
+                hoh_md.append(ang_md)   # (B,)
+                hoh_rec.append(ang_rc)
+
+            oh_md = torch.cat(oh_md, dim=0)       # (B*n_waters, 2)
+            oh_rec = torch.cat(oh_rec, dim=0)
+            hoh_md = torch.cat(hoh_md, dim=0)     # (B*n_waters,)
+            hoh_rec = torch.cat(hoh_rec, dim=0)
+
+            print("[BONDS] MD OH mean (nm):", oh_md.mean().item(), "std:", oh_md.std(unbiased=False).item())
+            print("[BONDS] REC OH mean (nm):", oh_rec.mean().item(), "std:", oh_rec.std(unbiased=False).item())
+            print("[ANGLE] MD HOH mean (deg):", (hoh_md.mean() * 180 / np.pi).item())
+            print("[ANGLE] REC HOH mean (deg):", (hoh_rec.mean() * 180 / np.pi).item())
+            print("[ANGLE] max |ΔHOH| (deg):", ((hoh_rec - hoh_md).abs().max() * 180 / np.pi).item())
+
+            # --- 5) Overlap / clash check: min MIC O-O distance ---
+            x_from_i_wrapped = wrap(x_from_i, L)
+            min_oo = min_mic_OO_distance(x_from_i_wrapped, L, n_solute=3, n_waters=target.num_solvent_molecules)
+            print("[CLASH] X(from i) min MIC O-O distance (nm): mean", min_oo.mean().item(), "min", min_oo.min().item())
+               
+    else:
+        with torch.no_grad():
+            bs = 8
+            md_i = target.val_data_i[:bs].to(target.device)
+            lp, jac = target.log_prob_and_jac(md_i)
+            U = -(lp - jac)
+            print("[DEBUG] MD U(kBT):", U.cpu().numpy(), flush=True)
+
     
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
@@ -394,6 +811,57 @@ def _run(cfg: DictConfig) -> None:
     # TODO: Plotter assumes a triatomic solute in water solvent. Also that the transformation from flow output coords to
     #  internal coordinates is the same as in the target distribution (e.g., for r it's just a softplus).
     setup_trainer_and_run_flow(cfg, setup_triatomic_in_h2o_plotter, target)
+
+def min_mic_OO_distance(
+    Xp_flat: torch.Tensor,
+    L: float,
+    n_solute: int,
+    n_waters: int,
+    chunk: int = 64,
+) -> torch.Tensor:
+    """
+    Per-frame minimum MIC O-O distance among solvent waters.
+    Memory-safe: O(B*chunk*W) not O(B*W^2).
+    Xp_flat: (B, 3N) wrapped
+    Returns: (B,)
+    """
+    # Accept (B,3N) or (B,N,3)
+    if Xp_flat.ndim == 3:
+        # (B,N,3) -> (B,3N)
+        Xp_flat = Xp_flat.reshape(Xp_flat.shape[0], -1)
+    elif Xp_flat.ndim != 2:
+        raise ValueError
+
+    B, D = Xp_flat.shape
+    N = D // 3
+    X = Xp_flat.view(B, N, 3)
+
+    start = n_solute
+    O = torch.stack([X[:, start + 3*w, :] for w in range(n_waters)], dim=1)  # (B,W,3)
+
+    L_t = torch.as_tensor(L, device=Xp_flat.device, dtype=Xp_flat.dtype)
+    
+    def mic(dx: torch.Tensor, L: float) -> torch.Tensor:
+        return dx - L * torch.round(dx / L)
+
+
+    min_d2 = torch.full((B,), float("inf"), device=Xp_flat.device, dtype=Xp_flat.dtype)
+
+    for i0 in range(0, n_waters, chunk):
+        i1 = min(n_waters, i0 + chunk)
+        Oi = O[:, i0:i1, :]  # (B,ci,3)
+
+        dx = mic(Oi[:, :, None, :] - O[:, None, :, :], L_t)  # (B,ci,W,3)
+        d2 = (dx * dx).sum(dim=-1)                      # (B,ci,W)
+
+        # mask self-distances where they occur
+        for k in range(i1 - i0):
+            d2[:, k, i0 + k] = float("inf")
+
+        block_min = d2.amin(dim=(1, 2))  # (B,)
+        min_d2 = torch.minimum(min_d2, block_min)
+
+    return torch.sqrt(min_d2)
 
 # Run with hydra configuration.
 @hydra.main(config_path="./config/", config_name="SoluteInSolvent", version_base="1.1")

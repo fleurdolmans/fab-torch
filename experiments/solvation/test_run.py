@@ -23,8 +23,6 @@ import json
 
 from experiments.logger_setup import setup_logger
 from fab.target_distributions.solute_in_water import SoluteInWater
-from fab.target_distributions.pbc_water_preprocess import mic, preprocess_frame_batch, wrap  # uses your module
-
 
 def run_transform_test_droplet(cfg):
     """
@@ -244,10 +242,10 @@ def run_test_pbc(cfg: DictConfig) -> None:
     # ------------------------------------------------
     try:
         with torch.no_grad():
-            Xp = preprocess_frame_batch(X, L=L, n_solute=n_solute, n_waters=n_waters, anchor_idx=0)
-        print("✓ preprocess_frame_batch() ran successfully", flush=True)
+            Xp = target.coordinate_transform.forward(X)
+        print("✓ coordinate_transform.forward() ran successfully", flush=True)
     except Exception as e:
-        print("✗ preprocess_frame_batch() FAILED", flush=True)
+        print("✗ coordinate_transform.forward() FAILED", flush=True)
         print(e, flush=True)
         return
 
@@ -274,8 +272,8 @@ def run_test_pbc(cfg: DictConfig) -> None:
             O = Xp3[:, i + 0, :]
             H1 = Xp3[:, i + 1, :]
             H2 = Xp3[:, i + 2, :]
-            d1 = torch.norm(mic(H1 - O, L), dim=-1)
-            d2 = torch.norm(mic(H2 - O, L), dim=-1)
+            d1 = torch.norm(target.coordinate_transform.mic(H1 - O, L), dim=-1)
+            d2 = torch.norm(target.coordinate_transform.mic(H2 - O, L), dim=-1)
             dists.append(d1)
             dists.append(d2)
         d = torch.cat(dists, dim=0)  # (2 * B * n_waters,)
@@ -304,9 +302,9 @@ def run_test_pbc(cfg: DictConfig) -> None:
         N = D // 3
         X3 = X.view(B, N, 3)
         shift = torch.rand((B, 1, 3), device=X.device, dtype=X.dtype) * L
-        Xshift = wrap(X3 + shift, L).view(B, D)
+        Xshift = target.coordinate_transform.wrap(X3 + shift, L).view(B, D)
 
-        Xp_shift = preprocess_frame_batch(Xshift, L, n_solute, n_waters, anchor_idx=0)
+        Xp_shift = target.coordinate_transform.forward(Xshift)
         U1 = -target.p.log_prob_x(Xp_shift)
 
         dU = (U1 - U0).abs()

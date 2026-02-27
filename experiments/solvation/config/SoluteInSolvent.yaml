@@ -56,14 +56,16 @@ target:                               # Properties of molecular system
 
 
 flow:                                 # Properties of the flow model
-  solvent_flow: true                  # Bool, specifies model: this should be `true` for solute-solvent settings.
-  use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
-  resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
-  type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
+  # solvent_flow: true                  # Bool, specifies model: this should be `true` for solute-solvent settings.
+  # use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
+  # resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
+  # type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
+  type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf", "coupled-spline-nf"
   base:
     type: gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
+  layers: 36                          # Int, number of layers of the flow; only used if blocks_per_layer is not specified.
   blocks: 36  # 12                    # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
                                       #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
   blocks_per_layer: 1                 # Int, number of blocks per layer
@@ -75,6 +77,8 @@ flow:                                 # Properties of the flow model
   circ_shift: random                  # String, whether to shift circular coordinates, can be none, constant, or random
   actnorm: False                      # Bool, flag whether to include an ActNorm layers
   mixing: null                        # String, how features are mixed
+  tail_bound: 4.0                     # Float, tail bound for spline flows; assumes data is roughly standardized to unit variance.
+  group_size: 6                       # Int, size of groups for coupling layers; should be 6 for solvent flows (corresponding to xyz of each molecule)
 
 
 fab:  
@@ -127,7 +131,7 @@ evaluation:
   print_eval: true                    # Bool, flag whether to print evaluation results to stdout.
   plot_MD_energies: false             # Bool, flag whether to plot MD energies as a sanity check.
   plot_marginal_hists: false          # Bool, flag whether to plot the marginal histograms of the MD data vs Flow data. Mostly used for debugging.
-  n_plots: 10              # null     # number of times we visualise the model throughout training. For bulk water this should be set to null. 
+  n_plots: 10              # null     # number of times we visualise the model throughout training.
   n_eval: 500                         # for calculating metrics of flow w.r.t target.
   eval_batch_size: 1024               # For AIS-type evaluation, must be a multiple of inner batch size (`batch_size`)
   n_checkpoints: 1                    # number of model checkpoints saved

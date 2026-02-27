@@ -27,6 +27,7 @@ from experiments.make_flow import (
     make_wrapped_normflow_resampled_flow,
     make_wrapped_normflow_snf_model,
     make_wrapped_normflow_solvent_flow,
+    make_coupled_spline_flow_nf,
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -174,38 +175,56 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         dim = cfg.target.cartesian_dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.buffer.prioritised
-    if cfg.flow.solvent_flow:
-        flow = make_wrapped_normflow_solvent_flow(
-            cfg,
-            target,
-        )
-    elif cfg.flow.resampled_base:
-        flow = make_wrapped_normflow_resampled_flow(
-            dim,
-            n_flow_layers=cfg.flow.n_layers,
-            layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
-            act_norm=cfg.flow.act_norm,
-        )
-    elif cfg.flow.use_snf:
-        flow = make_wrapped_normflow_snf_model(
-            dim,
-            n_flow_layers=cfg.flow.n_layers,
-            layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
-            act_norm=cfg.flow.act_norm,
-            target=target,
-            mh_prop_scale=cfg.flow.snf.step_size,
-            it_snf_layer=cfg.flow.snf.it_snf_layer,
-            mh_steps=cfg.flow.snf.num_steps,
-            transition_operator_type=cfg.flow.snf.transition_operator_type,
-            hmc_n_leapfrog_steps=cfg.flow.snf.num_steps,
-        )
+
+    if cfg.flow.type == "coupled-spline-nf":
+        flow = make_coupled_spline_flow_nf(cfg, target)
     else:
-        flow = make_wrapped_normflow_realnvp(
-            dim,
-            n_flow_layers=cfg.flow.n_layers,
-            layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
-            act_norm=cfg.flow.act_norm,
-        )
+        raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
+    # elif cfg.flow.type == "circ-coup-nsf":
+    #     flow = make_wrapped_normflow_circ_coup_nsf(cfg, target)
+    # elif cfg.flow.type == "circ-ar-nsf":
+    #     flow = make_wrapped_normflow_circ_ar_nsf(cfg, target)
+    # if cfg.flow.solvent_flow:
+    #     flow = make_wrapped_normflow_solvent_flow(
+    #             cfg,
+    #             target,
+    #         )
+        # if cfg.target.boundary_condition == "droplet":
+        #     flow = make_wrapped_normflow_solvent_flow(
+        #         cfg,
+        #         target,
+        #     )
+        # elif cfg.target.boundary_condition == "pbc":
+        #     flow = make_wrapped_normflow_pbc_cartesian(cfg)
+        # else:
+        #     raise NotImplementedError(f"Boundary condition {cfg.target.boundary_condition} not implemented for solvent flow.")
+    # elif cfg.flow.resampled_base:
+    #     flow = make_wrapped_normflow_resampled_flow(
+    #         dim,
+    #         n_flow_layers=cfg.flow.n_layers,
+    #         layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
+    #         act_norm=cfg.flow.act_norm,
+    #     )
+    # elif cfg.flow.use_snf:
+    #     flow = make_wrapped_normflow_snf_model(
+    #         dim,
+    #         n_flow_layers=cfg.flow.n_layers,
+    #         layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
+    #         act_norm=cfg.flow.act_norm,
+    #         target=target,
+    #         mh_prop_scale=cfg.flow.snf.step_size,
+    #         it_snf_layer=cfg.flow.snf.it_snf_layer,
+    #         mh_steps=cfg.flow.snf.num_steps,
+    #         transition_operator_type=cfg.flow.snf.transition_operator_type,
+    #         hmc_n_leapfrog_steps=cfg.flow.snf.num_steps,
+    #     )
+    # else:
+    #     flow = make_wrapped_normflow_realnvp(
+    #         dim,
+    #         n_flow_layers=cfg.flow.n_layers,
+    #         layer_nodes_per_dim=cfg.flow.layer_nodes_per_dim,
+    #         act_norm=cfg.flow.act_norm,
+    #     )
 
     if cfg.fab.transition_operator.type == "hmc":
         # very lightweight HMC.
@@ -238,7 +257,6 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     else:
         transition_operator = None
 
-    print("GPU available:",torch.cuda.is_available())
     # use GPU if available
     if torch.cuda.is_available() and cfg.training.use_gpu:
         flow.cuda()
@@ -262,7 +280,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
 def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, target: TargetDistribution):
     """Setup model and train."""
     print("Starting setup...")
-    start_time = time.time()  # Just always track time?
+    start_time = time.time()
 
     if cfg.training.checkpoint_load_dir is not None:
         if not os.path.exists(cfg.training.checkpoint_load_dir):
@@ -308,12 +326,28 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
+    # if cfg.target.boundary_condition == "pbc":
+    #     with torch.no_grad():
+    #         bs = 8
+    #         flow_x, _ = fab_model.flow.sample_and_log_prob((bs,))
+    #         Xp, _ = target.coordinate_transform.forward(flow_x,)
+    #         U = -target.log_prob_x(Xp)
+    #         print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
+    # else: 
+    #     with torch.no_grad():
+    #         bs = 8
+    #         flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
+    #         lp, jac = target.log_prob_and_jac(flow_i)
+    #         U = -(lp - jac)
+    #         print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
+
     with torch.no_grad():
         bs = 8
         flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
-        lp, jac = target.p.log_prob_and_jac(flow_i)
+        lp, jac = target.log_prob_and_jac(flow_i)
         U = -(lp - jac)
         print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
+
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
     print(f" Model with {num_model_params} parameters")
     print(fab_model.flow)
@@ -396,7 +430,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             assert buffer.can_sample, (
                 "If a buffer is loaded, it is expected to contain enough samples to sample from."
             )
-        print(f"\n\n****************loaded checkpoint: {chkpt_dir}*******************\n\n")
+        print(f"\n\n**************** Loaded checkpoint: {chkpt_dir}*******************\n\n")
     if buffer is not None:
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
         print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
