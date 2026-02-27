@@ -223,9 +223,9 @@ def make_wrapped_normflow_solvent_flow(config, target):
             dropout = config["flow"]["dropout"]
             layers.append(
                 nf.flows.AutoregressiveRationalQuadraticSpline(
-                    dim,
-                    bl,
-                    hu,
+                    num_input_channels=dim,
+                    num_blocks=bl,
+                    num_hidden_channels=hu,
                     tail_bound=tail_bound,
                     num_bins=nb,
                     permute_mask=True,
@@ -240,9 +240,9 @@ def make_wrapped_normflow_solvent_flow(config, target):
             dropout = config["flow"]["dropout"]
             layers.append(
                 nf.flows.CoupledRationalQuadraticSpline(
-                    dim,
-                    bl,
-                    hu,
+                    num_input_channels=dim,
+                    num_blocks=bl,
+                    num_hidden_channels=hu,
                     tail_bound=tail_bound,
                     num_bins=nb,
                     dropout_probability=dropout,
@@ -256,10 +256,10 @@ def make_wrapped_normflow_solvent_flow(config, target):
             dropout = config["flow"]["dropout"]
             layers.append(
                 nf.flows.CircularAutoregressiveRationalQuadraticSpline(
-                    dim,
-                    bl,
-                    hu,
-                    periodic_inds,
+                    num_input_channels=dim,
+                    num_blocks=bl,
+                    num_hidden_channels=hu,
+                    ind_circ=periodic_inds,
                     tail_bound=tail_bound,
                     num_bins=nb,
                     permute_mask=True,
@@ -279,10 +279,10 @@ def make_wrapped_normflow_solvent_flow(config, target):
                 mask = 1 - mask
             layers.append(
                 nf.flows.CircularCoupledRationalQuadraticSpline(
-                    dim,
-                    bl,
-                    hu,
-                    periodic_inds,
+                    num_input_channels=dim,
+                    num_blocks=bl,
+                    num_hidden_channels=hu,
+                    ind_circ=periodic_inds,
                     tail_bound=tail_bound,
                     num_bins=nb,
                     init_identity=ii,
@@ -368,7 +368,10 @@ def make_wrapped_normflow_pbc_cartesian(config):
         # use the *circular* spline versions
         layers.append(
             nf.flows.CircularCoupledRationalQuadraticSpline(
-                dim, bl, hu, periodic_inds,
+                num_input_channels=dim, 
+                num_blocks=bl, 
+                num_hidden_channels=hu, 
+                ind_circ=periodic_inds,
                 tail_bound=tail_bound,
                 num_bins=nb,
                 init_identity=ii,
@@ -389,31 +392,40 @@ def make_wrapped_normflow_pbc_cartesian(config):
     flow = nf.NormalizingFlow(base, layers)
     return WrappedNormFlowModel(flow)
 
-
-def group_mask(dim: int, group_size: int = 6, seed: int | None = None, pattern: str = "alternating"):
-    """
-    Returns a {0,1} mask of shape (dim,) that selects whole groups of size `group_size`.
-    mask==1 dims are transformed; mask==0 dims are identity (conditioning part).
-    """
+def group_permutation(dim: int, group_size: int, seed: int) -> torch.Tensor:
+    """Return permutation of length dim that permutes whole groups, keeps within-group order."""
     assert dim % group_size == 0
     n_groups = dim // group_size
+    rng = np.random.RandomState(seed)
+    gperm = rng.permutation(n_groups)
 
-    if pattern == "alternating":
-        gmask = torch.zeros(n_groups, dtype=torch.float32)
-        gmask[0::2] = 1.0
-    elif pattern == "random":
-        assert seed is not None
-        rng = np.random.RandomState(seed)
-        gmask = torch.from_numpy(rng.randint(0, 2, size=n_groups)).float()
-        # avoid all-zeros or all-ones
-        if gmask.sum() == 0:
-            gmask[0] = 1.0
-        if gmask.sum() == n_groups:
-            gmask[0] = 0.0
-    else:
-        raise ValueError("pattern must be 'alternating' or 'random'")
+    perm = []
+    for g in gperm:
+        start = g * group_size
+        perm.extend(range(start, start + group_size))
+    return torch.tensor(perm, dtype=torch.long)
 
-    return gmask.repeat_interleave(group_size)  # (dim,)
+
+class PermuteFixed(nf.flows.Flow):
+    """A fixed permutation flow (so we can permute groups, not individual dims)."""
+    def __init__(self, perm: torch.Tensor):
+        super().__init__()
+        self.register_buffer("perm", perm)
+        inv = torch.empty_like(perm)
+        inv[perm] = torch.arange(perm.numel(), device=perm.device)
+        self.register_buffer("inv_perm", inv)
+
+    def forward(self, z):
+        z = z[:, self.perm]
+        log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
+        return z, log_det
+
+    def inverse(self, z):
+        z = z[:, self.inv_perm]
+        log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
+        return z, log_det
+
+
 
 
 def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> nf.NormalizingFlow:
@@ -425,42 +437,38 @@ def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> 
     dim = target.internal_dim
     # Base distribution
     if cfg.flow.base.type == "gauss":
-        base = nf.distributions.DiagGaussian(dim, trainable=cfg.flow.learn_mean_var)
+        base = nf.distributions.DiagGaussian(dim, trainable=cfg.flow.base.learn_mean_var)
     else:
         raise NotImplementedError("Only base_type='gauss' is recommended for your current i-space.")
     
     
 
     # Tail bounds per-dimension (vector accepted by normflows spline flows)
-    tb = cfg.flow.tail_bound * torch.ones(dim)
+    tail_bound = cfg.flow.tail_bound * torch.ones(dim)
 
     flows = []
-    mask = group_mask(dim, group_size=cfg.flow.group_size, seed=cfg.training.seed, pattern="alternating")
 
     for k in range(cfg.flow.layers):
-        # Alternate masks to mix information between groups
-        if k % 2 == 1:
-            mask = 1.0 - mask
-
         flows.append(
             nf.flows.CoupledRationalQuadraticSpline(
-                dim=dim,
+                num_input_channels=dim,
                 num_blocks=cfg.flow.blocks_per_layer,
-                hidden_channels=cfg.flow.hidden_units,
-                tail_bound=tb,
+                num_hidden_channels=cfg.flow.hidden_units,
+                tail_bound=tail_bound,
                 num_bins=cfg.flow.num_bins,
-                init_identity=cfg.flow.init_identity,
-                mask=mask,
+                dropout_probability=cfg.flow.dropout,
+                reverse_mask=bool(k % 2),
             )
         )
+        # Group-wise mixing (keeps 6D water blocks intact)
+        perm = group_permutation(dim, cfg.flow.group_size, seed=cfg.training.seed + k)
+        flows.append(PermuteFixed(perm))
 
         # Mixing layer
         if cfg.flow.mixing == "affine":
             flows.append(nf.flows.InvertibleAffine(dim, use_lu=True))
         elif cfg.flow.mixing == "permute":
             flows.append(nf.flows.Permute(dim))
-        else:
-            raise ValueError("mixing must be 'affine' or 'permute'")
 
         if cfg.flow.actnorm:
             flows.append(nf.flows.ActNorm(dim))
@@ -471,4 +479,6 @@ def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> 
         #     flows.append(nf.flows.Permute(dim))
 
     flow = nf.NormalizingFlow(base, flows)
-    return flow
+    wrapped_flow = WrappedNormFlowModel(flow)
+
+    return wrapped_flow

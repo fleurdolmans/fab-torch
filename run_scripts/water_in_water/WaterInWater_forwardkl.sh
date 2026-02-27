@@ -47,7 +47,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_h100
-#SBATCH --time=01:30:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -75,7 +75,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.blocks=12 flow.hidden_units=256 \\
   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
-  evaluation.n_eval=100 evaluation.n_plots=null evaluation.n_checkpoints=1
+  evaluation.n_eval=100 evaluation.n_plots=100 evaluation.n_checkpoints=1
 
 EOF
 

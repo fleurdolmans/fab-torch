@@ -326,28 +326,6 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
 
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
-    # if cfg.target.boundary_condition == "pbc":
-    #     with torch.no_grad():
-    #         bs = 8
-    #         flow_x, _ = fab_model.flow.sample_and_log_prob((bs,))
-    #         Xp, _ = target.coordinate_transform.forward(flow_x,)
-    #         U = -target.log_prob_x(Xp)
-    #         print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
-    # else: 
-    #     with torch.no_grad():
-    #         bs = 8
-    #         flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
-    #         lp, jac = target.log_prob_and_jac(flow_i)
-    #         U = -(lp - jac)
-    #         print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
-
-    with torch.no_grad():
-        bs = 8
-        flow_i, _ = fab_model.flow.sample_and_log_prob((bs,))
-        lp, jac = target.log_prob_and_jac(flow_i)
-        U = -(lp - jac)
-        print("[DEBUG] FLOW U(kBT):", U.cpu().numpy(), flush=True)
-
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
     print(f" Model with {num_model_params} parameters")
     print(fab_model.flow)
@@ -367,40 +345,44 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         raise NotImplementedError("The optimizer " + optimizer_name + " is not implemented.")
     
     # Scheduler
-    if "lr_scheduler" in cfg.training:
-        if cfg.training.lr_scheduler.type == "exponential":
-            scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer=optimizer,
-                gamma=cfg.training.lr_scheduler.rate_decay,
-            )
-            # scheduler.step() is run every lr_step iterations. Thus every lr_step iterations we decay the lr by gamma.
-            lr_step = cfg.training.lr_scheduler.decay_iter
-        elif cfg.training.lr_scheduler.type == "cosine":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer=optimizer,
-                T_max=cfg.training.n_iterations,
-            )
-            lr_step = 1
-        elif cfg.training.lr_scheduler.type == "cosine_restart":
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                optimizer=optimizer,
-                T_0=cfg.training.lr_scheduler.decay_iter,
-            )
-            lr_step = 1
-        elif cfg.training.lr_scheduler.type == "step":
-            scheduler = torch.optim.lr_scheduler.StepLR(
-                optimizer=optimizer,
-                step_size=cfg.training.lr_scheduler.decay_iter,
-                gamma=cfg.training.lr_scheduler.rate_decay,
-            )
-            # scheduler.step() is run every lr_step iterations. step_size in StepLR says how many iterations before
-            #  a decay step of gamma.
-            lr_step = 1
-        else:
-            raise NotImplementedError("The scheduler " + cfg.training.lr_scheduler.type + " is not implemented.")
-    else:
+    scheduler = None
+    lr_step = 1
+
+    has_sched = ("lr_scheduler" in cfg.training) and (cfg.training.lr_scheduler is not None)
+    sched_type = None
+    if has_sched:
+        sched_type = cfg.training.lr_scheduler.type
+
+    if (not has_sched) or (sched_type is None) or (str(sched_type).lower() in ["none", "null", "off", "disable", "disabled"]):
         scheduler = None
         lr_step = 1
+    elif sched_type == "exponential":
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            optimizer=optimizer,
+            gamma=cfg.training.lr_scheduler.rate_decay,
+        )
+        lr_step = cfg.training.lr_scheduler.decay_iter
+    elif sched_type == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer=optimizer,
+            T_max=cfg.training.n_iterations,
+        )
+        lr_step = 1
+    elif sched_type == "cosine_restart":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer=optimizer,
+            T_0=cfg.training.lr_scheduler.decay_iter,
+        )
+        lr_step = 1
+    elif sched_type == "step":
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer=optimizer,
+            step_size=cfg.training.lr_scheduler.decay_iter,
+            gamma=cfg.training.lr_scheduler.rate_decay,
+        )
+        lr_step = 1
+    else:
+        raise NotImplementedError(f"The scheduler {sched_type} is not implemented.")
 
     # Scheduler warmup
     lr_warmup = "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None
