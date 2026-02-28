@@ -67,15 +67,31 @@ nvidia-smi
 
 # We are essentially just using the loss_type and use_ais arguments when doing forward KL training.
 
+# python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
+#   --config-name SoluteInSolvent \\
+#   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=pbc\\
+#   target.solute_xml_path=null target.simulation_version=v4\\
+#   target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
+#   fab.loss_type=forward_kl fab.use_ais=false \\
+#   flow.blocks=12 flow.hidden_units=256 \\
+#   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
+#   evaluation.n_eval=100 evaluation.n_plots=100 evaluation.n_checkpoints=1
+
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=pbc\\
   target.solute_xml_path=null target.simulation_version=v4\\
-  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
-  fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.blocks=12 flow.hidden_units=256 \\
-  training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
-  evaluation.n_eval=100 evaluation.n_plots=100 evaluation.n_checkpoints=1
+  target.box_length_nm=2.5 target.num_solvent_molecules=522 \\
+  target.internal_constraints=hbonds target.rigid_water=true \\
+  target.energy_cut=1e6 target.energy_max=1e9 \\
+  target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
+  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf\\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=6\\
+  training.lr=5e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
+  training.max_grad_norm=10 \\
+  training.n_iterations=20000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=20000\\
+  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
+EOF
 
 EOF
 
