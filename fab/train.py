@@ -28,6 +28,8 @@ class Trainer:
         plot: Optional[Plotter] = None,
         max_gradient_norm: Optional[float] = 5.0,
         lr_step=1,
+        warmup_scheduler: Optional[lr_scheduler] = None,
+        warmup_iters: int = 0,
         print_eval: bool = False,
     ):
         self.model = model
@@ -43,6 +45,8 @@ class Trainer:
         self.print_eval = print_eval
         self.plots_dir = os.path.join(self.save_dir, f"plots")
         self.checkpoints_dir = os.path.join(self.save_dir, f"model_checkpoints")
+        self.warmup_scheduler = warmup_scheduler
+        self.warmup_iters = warmup_iters
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -51,6 +55,9 @@ class Trainer:
         torch.save(self.optimizer.state_dict(), os.path.join(checkpoint_path, "optimizer.pt"))
         if self.optim_scheduler:
             torch.save(self.optim_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "scheduler.pt"))
+        if self.warmup_scheduler:
+            torch.save(self.warmup_scheduler.state_dict(), os.path.join(self.checkpoints_dir, "warmup_scheduler.pt"))
+
 
     def make_and_save_plots(self, i, save):
         if hasattr(self.model.target_distribution, "plot_marginal_hists"):
@@ -134,7 +141,7 @@ class Trainer:
         target_dist.train_data_i = target_dist.train_data_i.reshape(-1, target_dist.internal_dim).contiguous()
         target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
 
-
+        global_step = 0
         for t in range(start_iter, n_iterations, 1):
             print("Iteration {}/{}".format(t + 1, n_iterations))
             i = t + 1
@@ -203,6 +210,16 @@ class Trainer:
                 grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
                 if torch.isfinite(grad_norm):
                     self.optimizer.step()
+                    global_step += 1
+                    # Step schedulers after optimizer update
+                    if self.warmup_scheduler is not None and global_step <= self.warmup_iters:
+                        # warmup steps every optimizer step
+                        self.warmup_scheduler.step()
+
+                    else:
+                        # Normal scheduler uses your existing lr_step cadence
+                        if self.optim_scheduler is not None and (global_step % self.lr_step == 0):
+                            self.optim_scheduler.step()
                 else:
                     warnings.warn("Encountered inf grad norm!")
                 if self.optim_scheduler and (i + 1) % self.lr_step == 0:

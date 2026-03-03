@@ -400,6 +400,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.tight_layout()
         figs.append(fig)
 
+
         # ----------------------------
         # Visualize: MD + lowest/highest energy FLOW samples (by Cartesian energy)
         # ----------------------------

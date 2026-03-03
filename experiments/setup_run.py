@@ -385,11 +385,11 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         raise NotImplementedError(f"The scheduler {sched_type} is not implemented.")
 
     # Scheduler warmup
-    lr_warmup = "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None
+    warmup_iters = cfg.training.warmup_iter if "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None else 0
     warmup_scheduler = None
-    if lr_warmup:
+    if warmup_iters > 0:
         warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer, lambda s: min(1.0, s / cfg.training.warmup_iter)
+            optimizer, lambda s: min(1.0, s / warmup_iters)
         )
 
     # Create buffer if needed
@@ -437,6 +437,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             alpha=cfg.fab.alpha,
             lr_step=lr_step,
             warmup_scheduler=warmup_scheduler,
+            warmup_iters=warmup_iters
         )
     else:
         # TODO: Implement this for forward KL training with MD data!
@@ -451,6 +452,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             max_gradient_norm=cfg.training.max_grad_norm,
             lr_step=lr_step,
             print_eval=cfg.evaluation.print_eval,
+            warmup_scheduler=warmup_scheduler,
+            warmup_iters=warmup_iters
         )
 
     print("Starting training...")
