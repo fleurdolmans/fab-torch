@@ -36,6 +36,7 @@ class PrioritisedBufferTrainer:
         save_path: str = "",
         lr_step=1,
         warmup_scheduler: Optional[lr_scheduler] = None,
+        warmup_iters: int = 0,
         print_eval: bool = False,
     ):
         self.model = model
@@ -61,7 +62,8 @@ class PrioritisedBufferTrainer:
         self.flow_device = next(model.flow.parameters()).device
         self.max_adjust_w_clip = w_adjust_max_clip
         self.w_adjust_in_buffer_after_update = w_adjust_in_buffer_after_update
-        self.warmup_scheduler = warmup_scheduler  # TODO: currently not used (also not used in original)
+        self.warmup_scheduler = warmup_scheduler
+        self.warmup_iters = warmup_iters
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -164,6 +166,7 @@ class PrioritisedBufferTrainer:
             raise Exception("Not running training as start_iter >= total training iterations")
 
         max_it_time = 0.0
+        global_step = 0
         # pbar = tqdm(range(n_iterations - start_iter))
         # for pbar_iter in pbar:
         #     i = pbar_iter + start_iter + 1
@@ -218,10 +221,18 @@ class PrioritisedBufferTrainer:
                     grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)
                     if torch.isfinite(grad_norm):
                         self.optimizer.step()
+                        global_step += 1
+                        # Step schedulers after optimizer update
+                        if self.warmup_scheduler is not None and global_step <= self.warmup_iters:
+                            # warmup steps every optimizer step
+                            self.warmup_scheduler.step()
+
+                        else:
+                            # Normal scheduler uses your existing lr_step cadence
+                            if self.optim_scheduler is not None and (global_step % self.lr_step == 0):
+                                self.optim_scheduler.step()
                     else:
                         print(f"nan grad norm in replay step (batch size: {batch_size}")
-                    if self.optim_scheduler and (i + 1) % self.lr_step == 0:
-                        self.optim_scheduler.step()
                 else:
                     print(f"nan loss in replay step (batch size: {batch_size}")
 
