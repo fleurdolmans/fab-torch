@@ -1,0 +1,3 @@
+name: snellius2
+data_dir: /home/${user.username.snellius2}/HDD/data
+output_dir: /home/${user.username.snellius2}/HDD/results/fab
