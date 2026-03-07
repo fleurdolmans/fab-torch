@@ -6,6 +6,8 @@ import openmm as mm
 from openmm import unit
 from openmm import app
 
+import torch.nn.functional as F
+
 import multiprocessing as mp
 
 """
@@ -245,17 +247,28 @@ class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
         (forces,) = ctx.saved_tensors
         return forces * grad_output, None, None
 
+def smooth_min(u, cap, beta=1e-3):
+    # smooth approximation of min(u, cap)
+    return cap - F.softplus(beta * (cap - u)) / beta
 
 def regularize_energy(energy, energy_cut, energy_max):
     # Cast inputs to same type
-    print("Before reg:", energy)
+    # print("Energy before reg:", energy)
     energy_cut = energy_cut.type(energy.type())
     energy_max = energy_max.type(energy.type())
     # Check whether energy finite
     energy_finite = torch.isfinite(energy)
-    # Cap the energy at energy_max
-    energy = torch.where(energy < energy_max, energy, energy_max)
-    # Make it logarithmic above energy cut and linear below
-    energy = torch.where(energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut)
-    energy = torch.where(energy_finite, energy, torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
+
+    
+    ## Cap the energy at energy_max
+    # energy = torch.where(energy < energy_max, energy, energy_max)
+    ## Make it logarithmic above energy cut and linear below
+    # energy = torch.where(energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut)
+    # energy = torch.where(energy_finite, energy, torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
+
+    # Soft cap
+    energy = smooth_min(energy, energy_max)
+    energy = torch.where(energy < energy_cut, energy, energy_cut + torch.log1p((energy - energy_cut).clamp_min(0.0)))
+    
+    energy = torch.where(energy_finite, energy, torch.full_like(energy, float("nan")))
     return energy

@@ -40,22 +40,22 @@ export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH:-}"
 export MAIN_DIR="${MAIN_DIR}"
 
 
-# Create MD data for water in water (PBC bulk) and plot diagnostics
+# Create MD data for water in water (PBC) and plot diagnostics
 srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=so2 \
-  simulation_version="v6" \
+  simulation_version="v7" \
   create_md=true \
   validate_md=true \
   boundary_condition=pbc \
+  nonbonded_cutoff_nm=0.8 \
   femtoseconds_per_timestep=2.0 \
   solvent_density=1.0 \
-  box_length_nm=2.5 \
+  box_length_nm=1.8 \
   internal_constraints=hbonds \
-  rigid_water=false \
+  rigid_water=true \
   report_interval=1e4 \
   save_interval=100 \
-  # num_solvent_molecules=1000 \
 
   # Speed up version for testing:
   # equi_steps=1e4 \

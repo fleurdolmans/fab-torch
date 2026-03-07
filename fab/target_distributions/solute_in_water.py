@@ -148,6 +148,7 @@ class TriatomicInWaterSys(TestSystem):
                     nonbondedMethod=app.PME,               
                     nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
                     constraints=constraints_dict[self.internal_constraints],
+
                     rigidWater=self.rigid_water,
                 )
                 for force in self.system.getForces():
@@ -155,6 +156,10 @@ class TriatomicInWaterSys(TestSystem):
                         force.setUsesPeriodicBoundaryConditions(True)
                     if isinstance(force, mm.NonbondedForce):
                         force.setExceptionsUsePeriodicBoundaryConditions(True)
+                
+                for j, force in enumerate(self.system.getForces()):
+                    force.setForceGroup(j)
+                    print(f"[ForceGroup] group={j} type={type(force).__name__} name={force.getName()}")
             else:
                 raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
@@ -289,7 +294,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         if self.boundary_condition == "pbc":
             # self.internal_dim = self.cartesian_dim                    # for cartesian flow
-            self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            # self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
         print(f"Internal dim: {self.internal_dim}")
@@ -384,6 +390,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 L=self.box_length_nm,
                 system=self.system,
                 transform_data=self.transform_data.to(device),
+                internal_dim=self.internal_dim
             )
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")

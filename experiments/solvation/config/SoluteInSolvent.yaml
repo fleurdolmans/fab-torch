@@ -112,8 +112,10 @@ training:                             # Properties of the training procedure
     type: cosine                      # String, kind of LR scheduler, can be step, exponential, cosine, cosine_restart
     rate_decay: 1                     # Double, rate of decay for exponential scheduler or LRStep.
     decay_iter: 1                     # Int, number of iterations before decay for exponential scheduler or LRStep.
-  warmup_iter: null                   # Int, number of iterations used for warmup
+  warmup_iter: 0                   # Int, number of iterations used for warmup
   max_grad_norm: 1                    # Double, limit for gradient clipping
+  rate_flow_samples: 0                # Percentage of flow sample to include into the loss with reverse KL
+  overlap_penalty: 0                  # Rate to which we penalize overlap in the data.
   buffer:                             # Buffer args follow below here 
     use: true                         # Whether to use a replay buffer during training.
     prioritised: true                 # If True then FAB loss WILL be used no matter what fab.loss_type is.

@@ -48,7 +48,7 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
             self.ref_water_kabsch = (ref_rel - ref_cent).clone()  # (3,3)
 
         # Internal dimension: solute(6) + waters(6 each)
-        self.internal_dim = 6 + 6 * self.n_waters
+        self.internal_dim = internal_dim
         print("internal_dim  in transform:", self.internal_dim )
 
     # ---------- PBC helpers ----------
@@ -140,7 +140,6 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
             axis = torch.stack([wx, wy, wz], dim=1)
             w[big] = axis * th.unsqueeze(1)
 
-        # Optional: keep theta in [0, pi] already guaranteed by acos.
         return w
 
     def so3_logdet_exp(self, w: torch.Tensor) -> torch.Tensor:
@@ -175,8 +174,20 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
 
         R = V @ D @ Ut
         return R
+    
+    def angle_abc(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        """
+        Angle ABC in radians.
+        a,b,c: (B,3)
+        returns: (B,)
+        """
+        ba = a - b
+        bc = c - b
+        ba = ba / ba.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        bc = bc / bc.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        cosang = (ba * bc).sum(dim=-1).clamp(-1.0, 1.0)
+        return torch.acos(cosang)
 
-    # ---------- nf API ----------
     def inverse(self, x: torch.Tensor):
         """
         x: (B, 3*N) flattened Cartesian
@@ -192,11 +203,21 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         origin = sol[:, 0:1, :]                    # (B,1,3)
         x_rel = self.mic(x - origin, self.L)       # (B,N,3) relative to solute atom0
 
-        # Solute internal: two MIC bond vectors from atom0
-        v1 = x_rel[:, 1, :]  # already mic-wrapped
-        v2 = x_rel[:, 2, :]
+        # # Solute internal: two MIC bond vectors from atom0
+        # v1 = x_rel[:, 1, :]  # already mic-wrapped
+        # v2 = x_rel[:, 2, :]
 
-        pieces = [v1, v2]
+        # pieces = [v1, v2]
+
+        # Solute internal shape: r1, r2, theta
+        v1 = x_rel[:, 1, :]                      # S -> O1
+        v2 = x_rel[:, 2, :]                      # S -> O2
+
+        r1 = torch.linalg.norm(v1, dim=-1, keepdim=True)   # (B,1)
+        r2 = torch.linalg.norm(v2, dim=-1, keepdim=True)   # (B,1)
+        theta = self.angle_abc(x_rel[:, 1, :], x_rel[:, 0, :], x_rel[:, 2, :]).unsqueeze(1)  # (B,1)
+
+        pieces = [r1, r2, theta]
 
         logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
 
@@ -235,19 +256,41 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         B = i.shape[0]
         assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
 
-        # Unpack solute
-        v1 = i[:, 0:3]
-        v2 = i[:, 3:6]
+        # # Unpack solute
+        # v1 = i[:, 0:3]
+        # v2 = i[:, 3:6]
 
-        # Place solute atom0 at box center (nice gauge choice for OpenMM)
+        # # Place solute atom0 at box center
+        # center = 0.5 * self.L
+        # x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
+        # x[:, 0, :] = center
+        # x[:, 1, :] = center + v1
+        # x[:, 2, :] = center + v2
+
+        # Unpack solute shape
+        r1 = i[:, 0:1].clamp_min(1e-6)          # (B,1)
+        r2 = i[:, 1:2].clamp_min(1e-6)          # (B,1)
+        theta = i[:, 2:3].clamp(1e-3, math.pi - 1e-3)   # (B,1)
+
         center = 0.5 * self.L
         x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
+
+        # S at center
         x[:, 0, :] = center
-        x[:, 1, :] = center + v1
-        x[:, 2, :] = center + v2
+
+        # O1 on +x
+        x[:, 1, 0] = center + r1[:, 0]
+        x[:, 1, 1] = center
+        x[:, 1, 2] = center
+
+        # O2 in xy-plane
+        x[:, 2, 0] = center + r2[:, 0] * torch.cos(theta[:, 0])
+        x[:, 2, 1] = center + r2[:, 0] * torch.sin(theta[:, 0])
+        x[:, 2, 2] = center
 
         # Waters
-        idx = 6
+        # idx = 6
+        idx = 3
         logdet = torch.zeros((B,), device=i.device, dtype=i.dtype)
 
         H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)  # (1,3,1)
