@@ -78,7 +78,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.energy_cut=1e6 target.energy_max=1e9 \\
   target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
   flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=5 flow.tail_bound=3\\
   training.lr=2e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
   training.max_grad_norm=5 training.warmup_iter=0 \\
   training.overlap_penalty=0 training.rate_flow_samples=0\\
