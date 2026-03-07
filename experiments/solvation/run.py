@@ -1144,6 +1144,31 @@ def _run(cfg: DictConfig) -> None:
             print("[ANGLE] REC HOH mean (deg):", (hoh_rec.mean() * 180 / np.pi).item())
             print("[ANGLE] max |ΔHOH| (deg):", ((hoh_rec - hoh_md).abs().max() * 180 / np.pi).item())
 
+            #  Solute bond lengths + angle checks
+            # first 3 atoms are solute: [X0, X1, X2]
+            X0_idx = 0
+            X1_idx = 1
+            X2_idx = 2
+
+            r1_md = dist_pbc(mdXw[:, X1_idx, :], mdXw[:, X0_idx, :], L)
+            r2_md = dist_pbc(mdXw[:, X2_idx, :], mdXw[:, X0_idx, :], L)
+            r1_rec = dist_pbc(recXw[:, X1_idx, :], recXw[:, X0_idx, :], L)
+            r2_rec = dist_pbc(recXw[:, X2_idx, :], recXw[:, X0_idx, :], L)
+
+            ang_sol_md = angle(mdXw[:, X1_idx, :], mdX[:, X0_idx, :], mdXw[:, X2_idx, :], L)
+            ang_sol_rec = angle(recXw[:, X1_idx, :], recXw[:, X0_idx, :], recXw[:, X2_idx, :], L)
+
+            print("[SOLUTE BONDS] MD S-O mean (nm):", torch.cat([r1_md, r2_md]).mean().item(),
+                "std:", torch.cat([r1_md, r2_md]).std(unbiased=False).item(),
+                "max:", torch.cat([r1_md, r2_md]).max().item())
+
+            print("[SOLUTE BONDS] FLOW S-O mean (nm):", torch.cat([r1_rec, r2_rec]).mean().item(),
+                "std:", torch.cat([r1_rec, r2_rec]).std(unbiased=False).item(),
+                "max:", torch.cat([r1_rec, r2_rec]).max().item())
+
+            print("[SOLUTE ANGLE] MD O-S-O mean (deg):", (ang_sol_md.mean() * 180 / np.pi).item())
+            print("[SOLUTE ANGLE] FLOW O-S-O mean (deg):", (ang_sol_rec.mean() * 180 / np.pi).item())
+
             # --- 5) Overlap / clash check: min MIC O-O distance ---
             x_from_i_wrapped = wrap(x_from_i, L)
             min_oo = min_mic_OO_distance(x_from_i_wrapped, L, n_solute=3, n_waters=target.num_solvent_molecules)
