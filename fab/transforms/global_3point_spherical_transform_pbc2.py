@@ -16,7 +16,7 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
     forward(i)  : i -> Cartesian x (flattened)
     inverse(x)  : Cartesian x -> i
     """
-    def __init__(self, L: float, system=None, transform_data=None):
+    def __init__(self, L: float, system=None, transform_data=None, internal_dim=None):
         super().__init__()
         self.L = float(L)
         self.system = system
