@@ -427,7 +427,6 @@ class PermuteFixed(nf.flows.Flow):
 
 
 
-
 def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> nf.NormalizingFlow:
     """
     Coupled RQS spline flow using normflows (nf.flows.*), with 6D-group masks.

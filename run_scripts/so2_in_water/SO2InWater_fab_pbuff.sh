@@ -47,8 +47,8 @@ cat > "${SLURM}" <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_h100
-#SBATCH --time=00:05:00
+#SBATCH --partition=gpu_a100
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -69,15 +69,17 @@ nvidia-smi
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
-  target.boundary_condition=pbc target.simulation_version=v4\\
+  target.boundary_condition=pbc target.simulation_version=v5\\
   target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e4 target.energy_max=1e5 \\
-  flow.blocks=12 flow.hidden_units=512 flow.num_bins=8 \\
-  fab.n_intermediate_distributions=2 fab.transition_operator.n_inner_steps=1 fab.transition_operator.init_step_size=0.01 \\
-  training.batch_size=64 evaluation.eval_batch_size=256 \\
+  target.energy_cut=1e6 target.energy_max=1e9 \\
+  flow.hidden_units=128 flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=6\\
+  flow.base.type=gauss flow.type=coupled-spline-nf\\
+  fab.n_intermediate_distributions=8 fab.transition_operator.n_inner_steps=4 fab.transition_operator.init_step_size=0.02 \\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
   training.buffer.maximum_length=32768 training.buffer.min_length=4096\\
-  training.lr=5e-5 training.max_grad_norm=0.5 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=3\\
-  training.n_iterations=1000 evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  training.max_grad_norm=10 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=5\\
+  training.warmup_iter=500 training.n_iterations=10000 training.lr_scheduler.decay_iter=10000\\
+  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 
 chmod +x "${SLURM}"

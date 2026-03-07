@@ -13,6 +13,9 @@ from fab.utils.logging import Logger, ListLogger, WandbLogger
 from fab.types_ import Model
 from fab.core import FABModel
 
+import torch
+import torch.nn.functional as F
+
 lr_scheduler = Any  # a learning rate scheduler from torch.optim.lr_scheduler
 Plotter = Callable[[Model], List[plt.Figure]]
 
@@ -31,6 +34,8 @@ class Trainer:
         warmup_scheduler: Optional[lr_scheduler] = None,
         warmup_iters: int = 0,
         print_eval: bool = False,
+        overlap_penalty: Optional[float] = 0.2,
+        rate_flow_samples: Optional[float] = 0.2
     ):
         self.model = model
         self.optimizer = optimizer
@@ -47,6 +52,8 @@ class Trainer:
         self.checkpoints_dir = os.path.join(self.save_dir, f"model_checkpoints")
         self.warmup_scheduler = warmup_scheduler
         self.warmup_iters = warmup_iters
+        self.overlap_penalty = overlap_penalty
+        self.rate_flow_samples = rate_flow_samples
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -92,6 +99,119 @@ class Trainer:
                 "   Eval metrics: " +
                 str({key: "{:.4f}".format(value) for key, value in eval_info.items() if key != "step"})
             )
+    def mic(self, dx: torch.Tensor, L: float) -> torch.Tensor:
+        return dx - L * torch.round(dx / L)
+
+    def solute_water_clash_penalty(
+        self,
+        x_flat: torch.Tensor,   # (B, 3N)
+        L: float,
+        n_solute: int,
+        n_waters: int,
+        r0_SO: float = 0.26,
+        r0_OO: float = 0.25,
+        r0_SH: float = 0.18,
+        r0_OH: float = 0.18,
+        k: float = 200.0,
+        include_H: bool = False,
+    ) -> torch.Tensor:
+        """
+        Clash penalty between solute atoms and water atoms.
+        Assumes solute atoms are [S, O, O] and waters are [O,H,H].
+        """
+        B, D = x_flat.shape
+        X = x_flat.view(B, -1, 3)
+
+        # solute atoms
+        S  = X[:, 0:1, :]   # (B,1,3)
+        Os = X[:, 1:3, :]   # (B,2,3)
+
+        # water atoms
+        O_idx  = [n_solute + 3*w for w in range(n_waters)]
+        H1_idx = [n_solute + 3*w + 1 for w in range(n_waters)]
+        H2_idx = [n_solute + 3*w + 2 for w in range(n_waters)]
+
+        Owat = X[:, O_idx, :]    # (B,n_waters,3)
+
+        pen = 0.0
+        pen = pen + self.pair_clash_penalty(S,  Owat, L=L, r0=r0_SO, k=k)
+        pen = pen + self.pair_clash_penalty(Os, Owat, L=L, r0=r0_OO, k=k)
+
+        if include_H:
+            H1 = X[:, H1_idx, :]
+            H2 = X[:, H2_idx, :]
+            pen = pen + self.pair_clash_penalty(S,  H1, L=L, r0=r0_SH, k=k)
+            pen = pen + self.pair_clash_penalty(S,  H2, L=L, r0=r0_SH, k=k)
+            pen = pen + self.pair_clash_penalty(Os, H1, L=L, r0=r0_OH, k=k)
+            pen = pen + self.pair_clash_penalty(Os, H2, L=L, r0=r0_OH, k=k)
+
+        return pen
+
+    def pair_clash_penalty(
+        self,
+        A: torch.Tensor,   # (B, NA, 3)
+        B: torch.Tensor,   # (B, NB, 3)
+        L: float,
+        r0: float,
+        k: float = 200.0,
+    ) -> torch.Tensor:
+        """
+        Soft clash penalty between two atom sets A and B under PBC.
+        Returns mean penalty over batch.
+        """
+        L_t = torch.as_tensor(L, device=A.device, dtype=A.dtype)
+
+        dx = self.mic(A[:, :, None, :] - B[:, None, :, :], L_t)
+        d = torch.linalg.norm(dx, dim=-1)               # (B, NA, NB)
+
+        r0_t = torch.as_tensor(r0, device=A.device, dtype=A.dtype)
+        pen = F.softplus(k * (r0_t - d)) / k            # (B, NA, NB)
+        return pen.sum(dim=(1, 2)).mean()
+
+    def oo_clash_penalty(self, 
+        x_flat: torch.Tensor,      # (B,3N) nm
+        L: float,
+        n_solute: int,
+        n_waters: int,
+        r0: float = 0.22,          # nm
+        k: float = 200.0,          # softness
+        chunk: int = 64,
+    ) -> torch.Tensor:
+        """
+        Differentiable soft penalty: sum softplus(k*(r0 - d))/k over O_O pairs.
+        Returns scalar.
+        """
+        B, D = x_flat.shape
+        N = D // 3
+        X = x_flat.view(B, N, 3)
+
+        # O indices: n_solute + 3*w
+        O = torch.stack([X[:, n_solute + 3*w, :] for w in range(n_waters)], dim=1)  # (B,W,3)
+
+        L_t = torch.as_tensor(L, device=x_flat.device, dtype=x_flat.dtype)
+        r0_t = torch.as_tensor(r0, device=x_flat.device, dtype=x_flat.dtype)
+
+        pen = torch.zeros((B,), device=x_flat.device, dtype=x_flat.dtype)
+
+        for i0 in range(0, n_waters, chunk):
+            i1 = min(n_waters, i0 + chunk)
+            Oi = O[:, i0:i1, :]  # (B,ci,3)
+            ci = i1 - i0
+
+            dx = self.mic(Oi[:, :, None, :] - O[:, None, :, :], L_t)  # (B,ci,W,3)
+            d = torch.linalg.norm(dx, dim=-1)                    # (B,ci,W)
+
+            # Mask self-distances without in-place ops:
+            # For each local row kk in [0,ci), the "self" column is (i0+kk)
+            rows = torch.arange(ci, device=x_flat.device)
+            cols = rows + i0
+            mask_self = torch.zeros((ci, n_waters), device=x_flat.device, dtype=torch.bool)
+            mask_self[rows, cols] = True
+            d = d.masked_fill(mask_self.unsqueeze(0), 1e9)
+
+            pen = pen + (F.softplus(k * (r0_t - d)) / k).sum(dim=(1, 2))
+
+        return pen.mean()
 
     def run(
         self,
@@ -141,6 +261,9 @@ class Trainer:
         target_dist.train_data_i = target_dist.train_data_i.reshape(-1, target_dist.internal_dim).contiguous()
         target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
 
+        alpha = self.rate_flow_samples     # e.g. 0.0 .. 1.0
+        overlap_w = self.overlap_penalty
+
         global_step = 0
         for t in range(start_iter, n_iterations, 1):
             print("Iteration {}/{}".format(t + 1, n_iterations))
@@ -151,6 +274,7 @@ class Trainer:
                 print(f"  Iteration: {i}/{n_iterations}")
             it_start_time = time()
             self.optimizer.zero_grad()
+            clash_pen_value = None
 
             if self.model.loss_type == "forward_kl":
                 # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
@@ -173,7 +297,43 @@ class Trainer:
                 flow_loss = self.model.loss(i_batch)
                 transform_loss = -logdet_batch.mean()
                 loss = flow_loss + transform_loss
+                
+                if alpha > 0.0 or overlap_w > 0.0:
+                    B_rev = i_batch.shape[0]  
+                    z, log_q = self.model.flow.sample_and_log_prob((B_rev,))
+                    log_p = target_dist.log_prob(z)
 
+                    # Include flow samples with backward loss
+                    if alpha > 0.0:
+                        loss_rev = (log_q - log_p).mean()
+                        loss = (1.0 - alpha) * loss+ alpha * loss_rev
+
+                    # Overlap penalty
+                    if overlap_w > 0.0:
+                        x_pen, _ = target_dist.coordinate_transform.forward(z)    # (Bpen, 3N) in nm
+                        oo_pen = self.oo_clash_penalty(
+                            x_pen,
+                            L=float(target_dist.box_length_nm),
+                            n_solute=3,
+                            n_waters=int(target_dist.num_solvent_molecules),
+                            r0=0.22,
+                            k=200.0,
+                            chunk=64,
+                        )
+                        sw_pen = self.solute_water_clash_penalty(
+                            x_pen,
+                            L=float(target_dist.box_length_nm),
+                            n_solute=3,
+                            n_waters=int(target_dist.num_solvent_molecules),
+                            r0_SO=0.26,
+                            r0_OO=0.25,
+                            include_H=False,   # start simple
+                            k=200.0,
+                        )
+
+                        pen = oo_pen + sw_pen
+                        loss = loss + overlap_w * pen
+   
                 # train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
                 # train_logdet_xi = target_dist.train_logdet_xi.clone()
@@ -222,8 +382,7 @@ class Trainer:
                             self.optim_scheduler.step()
                 else:
                     warnings.warn("Encountered inf grad norm!")
-                if self.optim_scheduler and (i + 1) % self.lr_step == 0:
-                    self.optim_scheduler.step()
+          
             else:
                 warnings.warn("NaN loss encountered! No update performed.")
                 old_grad_norm = torch.zeros_like(loss)
@@ -240,6 +399,11 @@ class Trainer:
                     "iteration": i,
                 }
             )
+            if alpha > 0.0:
+                info["reverse_loss"] = loss_rev.detach().cpu().item()
+
+            if overlap_w > 0.0:
+                info["oo_pen"] = pen.detach().cpu().item()
 
             ct = getattr(target_dist, "coordinate_transform", None)
             if ct is not None and hasattr(ct, "get_stats"):

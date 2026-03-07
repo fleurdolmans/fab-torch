@@ -266,10 +266,25 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
 
         kBT = R * T  # kJ/mol
 
+        def wrap(x: torch.Tensor, L: float) -> torch.Tensor:
+            return torch.remainder(x, float(L))
+
         # local MIC helper
         def mic(dx: torch.Tensor, L: float) -> torch.Tensor:
             L_t = torch.as_tensor(float(L), device=dx.device, dtype=dx.dtype)
             return dx - L_t * torch.round(dx / L_t)
+        
+        def dist_pbc(p, q, L):
+            return torch.linalg.norm(mic(p - q, L), dim=-1)
+
+        def angle(a, b, c, L):
+            # angle ABC at B using MIC vectors BA and BC
+            ba = mic(a - b, L)
+            bc = mic(c - b, L)
+            ba_n = ba / ba.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            bc_n = bc / bc.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            cosang = (ba_n * bc_n).sum(dim=-1).clamp(-1.0, 1.0)
+            return torch.acos(cosang)
 
         # visualization helper: locally "unwrap" bonds for plotting and center solute atom0
         def make_whole_for_viz(Xp_flat: torch.Tensor, L: float, n_solute: int = 3, n_waters: int = 0) -> torch.Tensor:
@@ -307,9 +322,129 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             # center solute atom0 at origin
             X = X - X[:, 0:1, :]
 
-            # wrap into [-L/2, L/2]
-            X = X - L_t * torch.round(X / L_t)
             return X  # (B,N,3)
+        
+        def min_dist_stats(Xp_flat: torch.Tensor, L: float, n_solute: int, n_waters: int):
+            X = Xp_flat.view(Xp_flat.shape[0], -1, 3)
+
+            solute = X[:, :n_solute, :]  # (B,3,3)
+
+            O_idx  = [n_solute + 3*w for w in range(n_waters)]
+            H1_idx = [n_solute + 3*w + 1 for w in range(n_waters)]
+            H2_idx = [n_solute + 3*w + 2 for w in range(n_waters)]
+
+            Owat = X[:, O_idx, :]
+            Hwat = torch.cat([X[:, H1_idx, :], X[:, H2_idx, :]], dim=1)
+
+            def pairwise_min(A, B):
+                d = mic(A[:, :, None, :] - B[:, None, :, :], L)
+                d = torch.linalg.norm(d, dim=-1)
+                return d.amin(dim=(1, 2)).detach().cpu().numpy()
+
+            # O-O among waters
+            min_oo = min_mic_OO_distance(Xp_flat, L, n_solute, n_waters, chunk=64).detach().cpu().numpy()
+
+            min_solO = pairwise_min(solute, Owat)
+            min_solH = pairwise_min(solute, Hwat)
+
+            return min_oo, min_solO, min_solH
+        
+        def energy_by_force(context, system, x_flat, L_nm=None):
+            """
+            Returns a list of (force_index, force_name, energy_kJmol).
+            """
+            x = x_flat.view(-1, 3).detach().cpu().numpy()
+            context.setPositions(x * unit.nanometer)
+
+            # Make sure box vectors are set (optional if already correct)
+            if L_nm is not None:
+                import openmm as mm
+                context.setPeriodicBoxVectors(
+                    mm.Vec3(L_nm,0,0)*unit.nanometer,
+                    mm.Vec3(0,L_nm,0)*unit.nanometer,
+                    mm.Vec3(0,0,L_nm)*unit.nanometer,
+                )
+
+            out = []
+            for j, frc in enumerate(system.getForces()):
+                st = context.getState(getEnergy=True, groups={j})
+                Ej = st.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+                out.append((j, frc.getName(), Ej))
+            return out
+        
+        def water_orientation_angles(Xp_flat: torch.Tensor, L: float, n_solute: int, n_waters: int):
+            X = Xp_flat.view(Xp_flat.shape[0], -1, 3)
+
+            sol0 = X[:, 0, :]  # use first solute atom as reference
+
+            O_idx  = [n_solute + 3*w for w in range(n_waters)]
+            H1_idx = [n_solute + 3*w + 1 for w in range(n_waters)]
+            H2_idx = [n_solute + 3*w + 2 for w in range(n_waters)]
+
+            O  = X[:, O_idx, :]
+            H1 = X[:, H1_idx, :]
+            H2 = X[:, H2_idx, :]
+
+            r = mic(O - sol0[:, None, :], L)                 # solute -> O
+            b = mic((H1 + H2) / 2.0 - O, L)                  # O -> H-bisector
+
+            r = r / r.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            b = b / b.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+            cosang = (r * b).sum(dim=-1).clamp(-1.0, 1.0)
+            ang = torch.acos(cosang) * 180.0 / np.pi         # degrees
+            return ang.detach().cpu().numpy().reshape(-1)
+        
+        def split_water_blocks(i: torch.Tensor, n_waters: int):
+            """
+            i: (B, 6 + 6*n_waters)
+            Returns:
+            O:     (B, n_waters, 3)
+            omega: (B, n_waters, 3)
+            """
+            B = i.shape[0]
+            water = i[:, 6:]                       # (B, 6*n_waters)
+            water = water.view(B, n_waters, 6)     # (B, n_waters, 6)
+
+            O = water[:, :, 0:3]
+            omega = water[:, :, 3:6]
+            return O, omega
+        
+        def norm_stats(name: str, x: torch.Tensor):
+            """
+            x: (B, n_waters, 3)
+            """
+            norms = torch.linalg.norm(x, dim=-1).reshape(-1).detach().cpu().numpy()
+            print(
+                f"[{name}] norm median={np.median(norms):.4f} "
+                f"p10={np.percentile(norms, 10):.4f} "
+                f"p90={np.percentile(norms, 90):.4f} "
+                f"p99={np.percentile(norms, 99):.4f} "
+                f"max={np.max(norms):.4f}"
+            )
+            return norms
+        
+        def min_pairwise_O_stats(name: str, O: torch.Tensor):
+            """
+            O: (B, n_waters, 3)
+            Computes per-frame minimum pairwise O-O distance in internal O-space.
+            """
+            d = O[:, :, None, :] - O[:, None, :, :]             # (B,W,W,3)
+            d = torch.linalg.norm(d, dim=-1)                    # (B,W,W)
+
+            W = O.shape[1]
+            eye = torch.eye(W, device=O.device, dtype=torch.bool)[None]
+            d = d.masked_fill(eye, 1e9)
+
+            min_per_frame = d.amin(dim=(1, 2)).detach().cpu().numpy()
+
+            print(
+                f"[{name}] internal O-O min median={np.median(min_per_frame):.4f} "
+                f"p10={np.percentile(min_per_frame, 10):.4f} "
+                f"p90={np.percentile(min_per_frame, 90):.4f} "
+                f"min={np.min(min_per_frame):.4f}"
+            )
+            return min_per_frame
 
         # Load internal MD data
         if target.eval_mode == "val":
@@ -322,15 +457,107 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         # Sample from flow in internal space
         num_flow_samples = 10000
         with torch.no_grad():
-            flow_i = fab_model.flow.sample((num_flow_samples,))  # (B, internal_dim)
+            flow_i = fab_model.flow.sample((1000,))  # (B, internal_dim)
+
+            md_i = target_data_i[:1000].detach().cpu().numpy()
+
+        print("MD internal mean/std:", md_i.mean().item(), md_i.std().item())
+        print("FLOW internal mean/std:", flow_i.mean().item(), flow_i.std().item())
+
+
+        with torch.no_grad():
+            z = fab_model.flow.sample((64,))
+            x, _ = target.coordinate_transform.forward(z)
+            z_rec, _ = target.coordinate_transform.inverse(x)
+            err = (z - z_rec).abs()
+        print("max z roundtrip err", err.max().item())
+        print("mean z roundtrip err", err.mean().item())
 
         # Map both MD-i and flow-i into Cartesian (wrapped to [0,L) by your transform)
         with torch.no_grad():
+            flow_i = fab_model.flow.sample((num_flow_samples,))
             flowXp, _ = target.coordinate_transform.forward(flow_i)         # (B, 3N)
             print("flowXp std", flowXp.std().item(), "min", flowXp.min().item(), "max", flowXp.max().item())
             print("max pairwise diff in batch",
                 (flowXp[:8] - flowXp[0:1]).abs().max().item())
             mdXp, _ = target.coordinate_transform.forward(target_data_i)    # (B, 3N)
+
+            flowXp = wrap(flowXp, L)
+            mdXp   = wrap(mdXp, L)
+
+        n_diag_i = min(64, target_data_i.shape[0], flow_i.shape[0])
+        md_i_diag = target_data_i[:n_diag_i]
+        flow_i_diag = flow_i[:n_diag_i]
+
+        md_O, md_omega = split_water_blocks(md_i_diag, n_waters)
+        fl_O, fl_omega = split_water_blocks(flow_i_diag, n_waters)
+
+        md_O_norms = norm_stats("MD O", md_O)
+        fl_O_norms = norm_stats("FLOW O", fl_O)
+
+        md_omega_norms = norm_stats("MD omega", md_omega)
+        fl_omega_norms = norm_stats("FLOW omega", fl_omega)
+
+        md_OO_internal = min_pairwise_O_stats("MD", md_O)
+        fl_OO_internal = min_pairwise_O_stats("FLOW", fl_O)
+
+        fig = plt.figure(figsize=(12, 4))
+
+        plt.subplot(1, 3, 1)
+        plt.hist(md_O_norms, bins=60, density=True, alpha=0.4, label="MD")
+        plt.hist(fl_O_norms, bins=60, density=True, alpha=0.4, label="Flow")
+        plt.xlabel("||O||")
+        plt.ylabel("density")
+        plt.title("Water O-position norm")
+        plt.legend()
+
+        plt.subplot(1, 3, 2)
+        plt.hist(md_omega_norms, bins=60, density=True, alpha=0.4, label="MD")
+        plt.hist(fl_omega_norms, bins=60, density=True, alpha=0.4, label="Flow")
+        plt.xlabel("||omega||")
+        plt.title("Water rotation-vector norm")
+        plt.legend()
+
+        plt.subplot(1, 3, 3)
+        plt.hist(md_OO_internal, bins=60, density=True, alpha=0.4, label="MD")
+        plt.hist(fl_OO_internal, bins=60, density=True, alpha=0.4, label="Flow")
+        plt.xlabel("min pairwise O-O in internal space")
+        plt.title("Closest O-O in O-space")
+        plt.legend()
+
+        plt.tight_layout()
+        figs.append(fig)
+
+        n_diag = min(64, mdXp.shape[0], flowXp.shape[0])
+        mdXp_diag = mdXp[:n_diag]
+        flowXp_diag = flowXp[:n_diag]
+        
+        md_min_oo, md_min_solO, md_min_solH = min_dist_stats(mdXp_diag, L, n_solute, n_waters)
+        fl_min_oo, fl_min_solO, fl_min_solH = min_dist_stats(flowXp_diag, L, n_solute, n_waters)
+
+        md_ang = water_orientation_angles(mdXp_diag, L, n_solute, n_waters)
+        fl_ang = water_orientation_angles(flowXp_diag, L, n_solute, n_waters)
+
+        print("[MD distances]  min O-O median", np.median(md_min_oo),
+            "min solute-O median", np.median(md_min_solO),
+            "min solute-H median", np.median(md_min_solH))
+
+        print("[FLOW distances] min O-O median", np.median(fl_min_oo),
+            "min solute-O median", np.median(fl_min_solO),
+            "min solute-H median", np.median(fl_min_solH))
+
+        print("[MD orientation] median", np.median(md_ang), "p10", np.percentile(md_ang, 10), "p90", np.percentile(md_ang, 90))
+        print("[FLOW orientation] median", np.median(fl_ang), "p10", np.percentile(fl_ang, 10), "p90", np.percentile(fl_ang, 90))
+
+        fig = plt.figure(figsize=(8, 5))
+        plt.hist(md_ang, bins=60, density=True, alpha=0.4, label="MD")
+        plt.hist(fl_ang, bins=60, density=True, alpha=0.4, label="Flow")
+        plt.xlabel("Angle(solute0→O, O→H-bisector) [deg]")
+        plt.ylabel("density")
+        plt.title("Water orientation relative to solute")
+        plt.legend()
+        plt.tight_layout()
+        figs.append(fig)
 
         # ----------------------------
         # RDF: solute atom0 -> solvent oxygens (PBC MIC)
@@ -365,21 +592,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         r_md, g_md = rdf_solute0_to_solventO_pbc(mdXp, L, n_solute=n_solute, n_waters=n_waters, dr=0.005)
         r_fl, g_fl = rdf_solute0_to_solventO_pbc(flowXp, L, n_solute=n_solute, n_waters=n_waters, dr=0.005)
 
-        fig = plt.figure(figsize=(12, 4))
-        plt.subplot(1, 2, 1)
-        plt.plot(r_md, g_md, label="MD")
-        plt.plot(r_fl, g_fl, label="Flow")
-        plt.xlim(0, L / 2)
-        plt.xlabel("r (nm)")
-        plt.ylabel("g(r)")
-        plt.title("RDF: solute atom0 → solvent O")
-        plt.legend()
-        figs.append(fig)
-
         # ----------------------------
         # Energies: compute from CARTESIAN density only
-        #   U(x) [kT] = -log p_X(x)
-        #   U(x) [kJ/mol] = -log p_X(x) * kBT
         # ----------------------------
         with torch.no_grad():
             md_U_kT = (-target.p.log_prob_x(mdXp)).detach().cpu().numpy()
@@ -388,15 +602,89 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         md_U_kJ = md_U_kT * kBT
         fl_U_kJ = fl_U_kT * kBT
 
+        def summarize_energy(name, U_kT, U_kJ, energy_cut):
+            print(
+                f"[{name}] median(kT)={np.median(U_kT):.3f} "
+                f"p90(kT)={np.percentile(U_kT, 90):.3f} "
+                f"p99(kT)={np.percentile(U_kT, 99):.3f} "
+                f"max(kT)={np.max(U_kT):.3f}"
+            )
+            print(
+                f"[{name}] median(kJ/mol)={np.median(U_kJ):.3f} "
+                f"p90(kJ/mol)={np.percentile(U_kJ, 90):.3f} "
+                f"p99(kJ/mol)={np.percentile(U_kJ, 99):.3f} "
+                f"max(kJ/mol)={np.max(U_kJ):.3f}"
+            )
+            print(f"[{name}] clip_frac={np.mean(U_kT >= energy_cut - 1e-6):.4f}")
 
-        plt.subplot(1, 2, 2)
+        summarize_energy("MD", md_U_kT, md_U_kJ, target.energy_cut)
+        summarize_energy("FLOW", fl_U_kT, fl_U_kJ, target.energy_cut)
+
+
+        # Optional: see if you're hitting energy_cut a lot (very informative)
+        if hasattr(target, "energy_cut"):
+            cut = float(target.energy_cut)
+            print("[clip frac] md", np.mean(md_U_kT >= cut - 1e-6), "flow", np.mean(fl_U_kT >= cut - 1e-6))
+
+        if plot_dict["plot_md_energies"]:
+            prob, jac = target.log_prob_and_jac(target_data_i)
+            energy = -1 * (prob - jac).cpu()
+            energy_in_kJ_per_mol = energy * R * target.temperature  # R = 8.314 J/(mol K)
+            fig = plt.figure(figsize=(8, 5))
+            plt.plot(list(range(len(target_data_i))), energy_in_kJ_per_mol)
+            plt.xlabel("MD sample index")
+            plt.ylabel(f"Boltzmann energy (kJ/mol)")
+            plt.ylim(min(energy_in_kJ_per_mol) * 1.05, 0)
+            figs.append(fig)
+
+        # ----------------------------
+        # 4-panel: RDF truncated/full + Energy truncated/full
+        # ----------------------------
+        fig = plt.figure(figsize=(17, 10))
+
+        # RDF truncated (truncate y-axis)
+        plt.subplot(2, 2, 1)
+        plt.plot(r_md, g_md, label="MD", alpha=0.9)
+        plt.plot(r_fl, g_fl, label="Flow", alpha=0.9)
+        plt.xlim(0, L / 2)
+        y_hi = max(np.percentile(g_md, 99.5), 1.0) * 1.2
+        plt.ylim(0, y_hi)
+        plt.xlabel("r (nm)")
+        plt.ylabel("g(r)")
+        plt.title("RDF (truncated y)")
+        plt.legend()
+
+        # RDF full
+        plt.subplot(2, 2, 2)
+        plt.plot(r_md, g_md, label="MD", alpha=0.9)
+        plt.plot(r_fl, g_fl, label="Flow", alpha=0.9)
+        plt.xlim(0, L / 2)
+        plt.xlabel("r (nm)")
+        plt.ylabel("g(r)")
+        plt.title("RDF (full)")
+        plt.legend()
+
+        # Energy truncated to MD percentiles
+        plt.subplot(2, 2, 3)
+        nbins = 120
         e_lo, e_hi = np.percentile(md_U_kJ, [0.5, 99.5])
-        plt.hist(md_U_kJ, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
-        plt.hist(fl_U_kJ, bins=120, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
+        plt.hist(md_U_kJ, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(fl_U_kJ, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
         plt.xlabel("Potential energy (kJ/mol)")
         plt.ylabel("density")
-        plt.title("Energy histogram (truncated to MD percentiles)")
+        plt.title("Energy (truncated to MD percentiles)")
         plt.legend()
+
+        # Energy “full-ish” (robust): combined 0.1–99.9 percentiles
+        plt.subplot(2, 2, 4)
+        e2_lo, e2_hi = np.percentile(np.concatenate([md_U_kJ, fl_U_kJ]), [0.1, 99.9])
+        plt.hist(md_U_kJ, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(fl_U_kJ, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="Flow")
+        plt.xlabel("Potential energy (kJ/mol)")
+        plt.ylabel("density")
+        plt.title("Energy (full, robust range)")
+        plt.legend()
+
         plt.tight_layout()
         figs.append(fig)
 
@@ -404,6 +692,91 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         # ----------------------------
         # Visualize: MD + lowest/highest energy FLOW samples (by Cartesian energy)
         # ----------------------------
+        # choose representative flow samples
+        sorted_inds = np.argsort(fl_U_kJ)
+        low_inds = sorted_inds[:3]
+        mid_inds = sorted_inds[len(sorted_inds)//2 : len(sorted_inds)//2 + 3]
+        high_inds = sorted_inds[-3:]
+
+        for idx in low_inds:
+            print("LOW FLOW", idx)
+            print(energy_by_force(target.p.sim_context, target.system.system, flowXp[idx], L_nm=target.box_length_nm))
+
+        for idx in high_inds:
+            print("HIGH FLOW", idx)
+            print(energy_by_force(target.p.sim_context, target.system.system, flowXp[idx], L_nm=target.box_length_nm))
+        
+        for idx in mid_inds:
+            print("MID FLOW", idx)
+            print(energy_by_force(target.p.sim_context, target.system.system, flowXp[idx], L_nm=target.box_length_nm))
+
+        
+        # reshape flattened Cartesian to (B, N, 3)
+        mdX = mdXp_diag.view(mdXp_diag.shape[0], -1, 3)
+        flowX = flowXp_diag.view(flowXp_diag.shape[0], -1, 3)
+
+        # --- 4) Rigid water bond lengths + angle checks ---
+        oh_md = []
+        oh_flow = []
+        hoh_md = []
+        hoh_flow = []
+
+        for k in range(target.num_solvent_molecules):
+            O_idx = 3 + 3 * k
+            H1_idx = O_idx + 1
+            H2_idx = O_idx + 2
+
+            # distances
+            oh1_md = dist_pbc(mdX[:, H1_idx, :], mdX[:, O_idx, :], L)
+            oh2_md = dist_pbc(mdX[:, H2_idx, :], mdX[:, O_idx, :], L)
+            oh1_flow = dist_pbc(flowX[:, H1_idx, :], flowX[:, O_idx, :], L)
+            oh2_flow = dist_pbc(flowX[:, H2_idx, :], flowX[:, O_idx, :], L)
+
+            # angle H-O-H
+            ang_md = angle(mdX[:, H1_idx, :], mdX[:, O_idx, :], mdX[:, H2_idx, :], L)
+            ang_flow = angle(flowX[:, H1_idx, :], flowX[:, O_idx, :], flowX[:, H2_idx, :], L)
+
+            oh_md.append(torch.stack([oh1_md, oh2_md], dim=1))
+            oh_flow.append(torch.stack([oh1_flow, oh2_flow], dim=1))
+            hoh_md.append(ang_md)
+            hoh_flow.append(ang_flow)
+
+        oh_md = torch.cat(oh_md, dim=0)
+        oh_flow = torch.cat(oh_flow, dim=0)
+        hoh_md = torch.cat(hoh_md, dim=0)
+        hoh_flow = torch.cat(hoh_flow, dim=0)
+
+        print("[BONDS] MD OH mean (nm):", oh_md.mean().item(), "std:", oh_md.std(unbiased=False).item(), "max:", oh_md.max().item())
+        print("[BONDS] FLOW OH mean (nm):", oh_flow.mean().item(), "std:", oh_flow.std(unbiased=False).item(), "max:", oh_flow.max().item())
+        print("[ANGLE] MD HOH mean (deg):", (hoh_md.mean() * 180 / np.pi).item())
+        print("[ANGLE] FLOW HOH mean (deg):", (hoh_flow.mean() * 180 / np.pi).item())
+        print("[ANGLE] max |ΔHOH| flow-vs-rigid? (deg):", ((hoh_flow - hoh_md.mean()).abs().max() * 180 / np.pi).item())
+
+        # --- 5) Solute bond lengths + angle checks ---
+        # first 3 atoms are solute: [S, O, O]
+        S_idx = 0
+        O1_idx = 1
+        O2_idx = 2
+
+        r1_md = dist_pbc(mdX[:, O1_idx, :], mdX[:, S_idx, :], L)
+        r2_md = dist_pbc(mdX[:, O2_idx, :], mdX[:, S_idx, :], L)
+        r1_flow = dist_pbc(flowX[:, O1_idx, :], flowX[:, S_idx, :], L)
+        r2_flow = dist_pbc(flowX[:, O2_idx, :], flowX[:, S_idx, :], L)
+
+        ang_sol_md = angle(mdX[:, O1_idx, :], mdX[:, S_idx, :], mdX[:, O2_idx, :], L)
+        ang_sol_flow = angle(flowX[:, O1_idx, :], flowX[:, S_idx, :], flowX[:, O2_idx, :], L)
+
+        print("[SOLUTE BONDS] MD S-O mean (nm):", torch.cat([r1_md, r2_md]).mean().item(),
+            "std:", torch.cat([r1_md, r2_md]).std(unbiased=False).item(),
+            "max:", torch.cat([r1_md, r2_md]).max().item())
+
+        print("[SOLUTE BONDS] FLOW S-O mean (nm):", torch.cat([r1_flow, r2_flow]).mean().item(),
+            "std:", torch.cat([r1_flow, r2_flow]).std(unbiased=False).item(),
+            "max:", torch.cat([r1_flow, r2_flow]).max().item())
+
+        print("[SOLUTE ANGLE] MD O-S-O mean (deg):", (ang_sol_md.mean() * 180 / np.pi).item())
+        print("[SOLUTE ANGLE] FLOW O-S-O mean (deg):", (ang_sol_flow.mean() * 180 / np.pi).item())
+
         sorted_inds = np.argsort(fl_U_kJ)
         low_energy_inds = sorted_inds[:2]
         high_energy_inds = sorted_inds[-2:]
@@ -669,7 +1042,6 @@ def _run(cfg: DictConfig) -> None:
                 out.append((j, frc.getName(), Ej))
             return out
 
-
         with torch.no_grad():
             print("INITIAL TEST (NEW TRANSFORM)!")
 
@@ -677,9 +1049,7 @@ def _run(cfg: DictConfig) -> None:
             md_x = target.val_data_x[:bs].to(target.device).reshape(bs, -1)  # (B, 3N)
 
             # # --- 1) Transform inverse ---
-            # md_x_can = canonicalize_x_for_pbc(md_x, L, 3, target.num_solvent_molecules)
 
-            # md_i, _ = target.coordinate_transform.inverse(md_x_can)
             md_i, _ = target.coordinate_transform.inverse(md_x)  # (B, internal_dim), (B,)
             print("md_x shape:", tuple(md_x.shape), "md_i shape:", tuple(md_i.shape))
 
@@ -732,9 +1102,8 @@ def _run(cfg: DictConfig) -> None:
                 diff = e1 - e0
                 if abs(diff) > 1e-3:  # threshold
                     print(f"{j:2d} {name:30s}  md={e0: .6f}  rec={e1: .6f}  diff={diff: .6f}")
-
             
-
+        
             # --- 4) Rigid water bond lengths + angle checks ---
             mdXw  = wrap(mdX, L)
             recXw = wrap(recX, L)
@@ -769,8 +1138,8 @@ def _run(cfg: DictConfig) -> None:
             hoh_md = torch.cat(hoh_md, dim=0)     # (B*n_waters,)
             hoh_rec = torch.cat(hoh_rec, dim=0)
 
-            print("[BONDS] MD OH mean (nm):", oh_md.mean().item(), "std:", oh_md.std(unbiased=False).item())
-            print("[BONDS] REC OH mean (nm):", oh_rec.mean().item(), "std:", oh_rec.std(unbiased=False).item())
+            print("[BONDS] MD OH mean (nm):", oh_md.mean().item(), "std:", oh_md.std(unbiased=False).item(), "max:", oh_md.max().item())
+            print("[BONDS] REC OH mean (nm):", oh_rec.mean().item(), "std:", oh_rec.std(unbiased=False).item(), "max", oh_rec.max().item())
             print("[ANGLE] MD HOH mean (deg):", (hoh_md.mean() * 180 / np.pi).item())
             print("[ANGLE] REC HOH mean (deg):", (hoh_rec.mean() * 180 / np.pi).item())
             print("[ANGLE] max |ΔHOH| (deg):", ((hoh_rec - hoh_md).abs().max() * 180 / np.pi).item())
@@ -792,6 +1161,7 @@ def _run(cfg: DictConfig) -> None:
     if cfg.training.use_64_bit:
         torch.set_default_dtype(torch.float64)
         target = target.double()
+
     # Setup model and start training
     # Will grab logger and save_dir from target, if target has those defined.
     # TODO: Plotter assumes a triatomic solute in water solvent. Also that the transformation from flow output coords to

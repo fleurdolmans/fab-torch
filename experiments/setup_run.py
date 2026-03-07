@@ -437,7 +437,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             alpha=cfg.fab.alpha,
             lr_step=lr_step,
             warmup_scheduler=warmup_scheduler,
-            warmup_iters=warmup_iters
+            warmup_iters=warmup_iters,
+            # overlap_penalty=cfg.training.overlap_penalty
         )
     else:
         # TODO: Implement this for forward KL training with MD data!
@@ -453,7 +454,9 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             lr_step=lr_step,
             print_eval=cfg.evaluation.print_eval,
             warmup_scheduler=warmup_scheduler,
-            warmup_iters=warmup_iters
+            warmup_iters=warmup_iters,
+            overlap_penalty=cfg.training.overlap_penalty,
+            rate_flow_samples = cfg.training.rate_flow_samples
         )
 
     print("Starting training...")
