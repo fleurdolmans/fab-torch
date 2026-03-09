@@ -115,6 +115,7 @@ training:                             # Properties of the training procedure
   warmup_iter: 0                   # Int, number of iterations used for warmup
   max_grad_norm: 1                    # Double, limit for gradient clipping
   rate_flow_samples: 0                # Percentage of flow sample to include into the loss with reverse KL
+  mixing: 0.0                         # Percentage of MD sample to include into the loss
   overlap_penalty: 0                  # Rate to which we penalize overlap in the data.
   buffer:                             # Buffer args follow below here 
     use: true                         # Whether to use a replay buffer during training.
