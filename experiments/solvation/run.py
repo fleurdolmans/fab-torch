@@ -397,13 +397,13 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         
         def split_water_blocks(i: torch.Tensor, n_waters: int):
             """
-            i: (B, 6 + 6*n_waters)
+            i: (B, 3 + 6*n_waters)
             Returns:
             O:     (B, n_waters, 3)
             omega: (B, n_waters, 3)
             """
             B = i.shape[0]
-            water = i[:, 6:]                       # (B, 6*n_waters)
+            water = i[:, 3:]                       # (B, 6*n_waters)
             water = water.view(B, n_waters, 6)     # (B, n_waters, 6)
 
             O = water[:, :, 0:3]
@@ -464,14 +464,6 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         print("MD internal mean/std:", md_i.mean().item(), md_i.std().item())
         print("FLOW internal mean/std:", flow_i.mean().item(), flow_i.std().item())
 
-
-        with torch.no_grad():
-            z = fab_model.flow.sample((64,))
-            x, _ = target.coordinate_transform.forward(z)
-            z_rec, _ = target.coordinate_transform.inverse(x)
-            err = (z - z_rec).abs()
-        print("max z roundtrip err", err.max().item())
-        print("mean z roundtrip err", err.mean().item())
 
         # Map both MD-i and flow-i into Cartesian (wrapped to [0,L) by your transform)
         with torch.no_grad():

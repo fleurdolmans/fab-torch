@@ -1,13 +1,137 @@
 import numpy as np
-import torch
 import normflows as nf
 import larsflow as lf
 import torch
+from torch import nn
 from omegaconf import DictConfig
 from fab.target_distributions.base import TargetDistribution
 
 from fab.wrappers.normflows import WrappedNormFlowModel
 from fab.trainable_distributions import TrainableDistribution
+
+
+class MLP(nn.Module):
+    def __init__(self, in_dim: int, out_dim: int, hidden_dim: int, n_hidden: int, dropout: float = 0.0):
+        super().__init__()
+        layers = []
+        d = in_dim
+        for _ in range(n_hidden):
+            layers.append(nn.Linear(d, hidden_dim))
+            layers.append(nn.ReLU())
+            if dropout and dropout > 0.0:
+                layers.append(nn.Dropout(dropout))
+            d = hidden_dim
+        layers.append(nn.Linear(d, out_dim))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class WaterBlockMaskedAffineCoupling(nf.flows.Flow):
+    """
+    Block-masked affine coupling over whole 6D water blocks.
+
+    Layout of z:
+      [ solute(3) | water_0(6) | water_1(6) | ... ]
+
+    The first 3 solute dims are always conditioner dims and are never transformed here.
+    Water blocks are split into two groups by parity:
+      - if transform_odd_blocks=False: transform even-index water blocks, condition on odd-index blocks + solute
+      - if transform_odd_blocks=True:  transform odd-index water blocks,  condition on even-index blocks + solute
+    """
+    def __init__(
+        self,
+        dim: int,
+        n_prefix: int = 3,
+        block_size: int = 6,
+        hidden_dim: int = 128,
+        n_hidden: int = 2,
+        dropout: float = 0.0,
+        transform_odd_blocks: bool = False,
+        scale_clip: float = 2.0,
+    ):
+        super().__init__()
+        assert (dim - n_prefix) % block_size == 0, (dim, n_prefix, block_size)
+
+        self.dim = dim
+        self.n_prefix = n_prefix
+        self.block_size = block_size
+        self.n_blocks = (dim - n_prefix) // block_size
+        self.transform_odd_blocks = transform_odd_blocks
+        self.scale_clip = scale_clip
+
+        # Decide which whole water blocks are transformed
+        block_ids = torch.arange(self.n_blocks)
+        if transform_odd_blocks:
+            transform_blocks = block_ids[block_ids % 2 == 1]
+            context_blocks = block_ids[block_ids % 2 == 0]
+        else:
+            transform_blocks = block_ids[block_ids % 2 == 0]
+            context_blocks = block_ids[block_ids % 2 == 1]
+
+        self.register_buffer("transform_blocks", transform_blocks)
+        self.register_buffer("context_blocks", context_blocks)
+
+        # Convert block ids -> flat dimension indices
+        transform_idx = []
+        for b in transform_blocks.tolist():
+            start = n_prefix + b * block_size
+            transform_idx.extend(range(start, start + block_size))
+
+        context_idx = list(range(n_prefix))
+        for b in context_blocks.tolist():
+            start = n_prefix + b * block_size
+            context_idx.extend(range(start, start + block_size))
+
+        self.register_buffer("transform_idx", torch.tensor(transform_idx, dtype=torch.long))
+        self.register_buffer("context_idx", torch.tensor(context_idx, dtype=torch.long))
+
+        in_dim = len(context_idx)
+        out_dim = 2 * len(transform_idx)  # shift + log_scale
+        self.net = MLP(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            hidden_dim=hidden_dim,
+            n_hidden=n_hidden,
+            dropout=dropout,
+        )
+
+    def forward(self, z):
+        """
+        In normflows, forward is the sampling direction.
+        """
+        z_out = z.clone()
+
+        context = z[:, self.context_idx]                         # (B, n_context_dims)
+        params = self.net(context)                               # (B, 2*n_transform_dims)
+        shift, log_scale = params.chunk(2, dim=-1)
+
+        # Bound the scale for stability
+        log_scale = self.scale_clip * torch.tanh(log_scale / self.scale_clip)
+
+        x_t = z[:, self.transform_idx]
+        y_t = x_t * torch.exp(log_scale) + shift
+
+        z_out[:, self.transform_idx] = y_t
+        log_det = log_scale.sum(dim=-1)
+        return z_out, log_det
+
+    def inverse(self, z):
+        z_out = z.clone()
+
+        context = z[:, self.context_idx]
+        params = self.net(context)
+        shift, log_scale = params.chunk(2, dim=-1)
+
+        log_scale = self.scale_clip * torch.tanh(log_scale / self.scale_clip)
+
+        y_t = z[:, self.transform_idx]
+        x_t = (y_t - shift) * torch.exp(-log_scale)
+
+        z_out[:, self.transform_idx] = x_t
+        log_det = -log_scale.sum(dim=-1)
+        return z_out, log_det
 
 
 def make_normflow_flow(dim: int, n_flow_layers: int, layer_nodes_per_dim: int, act_norm: bool):
@@ -392,17 +516,21 @@ def make_wrapped_normflow_pbc_cartesian(config):
     flow = nf.NormalizingFlow(base, layers)
     return WrappedNormFlowModel(flow)
 
-def group_permutation(dim: int, group_size: int, seed: int) -> torch.Tensor:
-    """Return permutation of length dim that permutes whole groups, keeps within-group order."""
-    assert dim % group_size == 0
-    n_groups = dim // group_size
-    rng = np.random.RandomState(seed)
-    gperm = rng.permutation(n_groups)
+def water_block_permutation(dim: int, n_prefix: int, block_size: int, seed: int) -> torch.Tensor:
+    """
+    Keep the first n_prefix dims fixed, permute the remaining dims in whole blocks.
+    """
+    assert (dim - n_prefix) % block_size == 0
+    n_blocks = (dim - n_prefix) // block_size
 
-    perm = []
-    for g in gperm:
-        start = g * group_size
-        perm.extend(range(start, start + group_size))
+    rng = np.random.RandomState(seed)
+    bperm = rng.permutation(n_blocks)
+
+    perm = list(range(n_prefix))
+    for b in bperm:
+        start = n_prefix + b * block_size
+        perm.extend(range(start, start + block_size))
+
     return torch.tensor(perm, dtype=torch.long)
 
 
@@ -424,8 +552,6 @@ class PermuteFixed(nf.flows.Flow):
         z = z[:, self.inv_perm]
         log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         return z, log_det
-
-
 
 def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> nf.NormalizingFlow:
     """
@@ -459,25 +585,35 @@ def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> 
                 reverse_mask=bool(k % 2),
             )
         )
-        # Group-wise mixing (keeps 6D water blocks intact)
-        perm = group_permutation(dim, cfg.flow.group_size, seed=cfg.training.seed + k)
+        # flows.append(
+        #     WaterBlockMaskedAffineCoupling(
+        #         dim=dim,
+        #         n_prefix=3,
+        #         block_size=6,
+        #         hidden_dim=cfg.flow.hidden_units,
+        #         n_hidden=cfg.flow.blocks_per_layer,
+        #         dropout=cfg.flow.dropout,
+        #         transform_odd_blocks=bool(k % 2),
+        #         scale_clip=2.0,
+        #     )
+        # )
+        perm = water_block_permutation(
+            dim=dim,
+            n_prefix=3,
+            block_size=6,
+            seed=cfg.training.seed + k,
+        )
         flows.append(PermuteFixed(perm))
 
         # Mixing layer
         if cfg.flow.mixing == "affine":
             flows.append(nf.flows.InvertibleAffine(dim, use_lu=True))
-        elif cfg.flow.mixing == "permute":
-            flows.append(nf.flows.Permute(dim))
 
         if cfg.flow.actnorm:
             flows.append(nf.flows.ActNorm(dim))
-
-        # Optional: also permute groups sometimes (cheap extra mixing)
-        # (If you want, uncomment and keep group_size=6)
-        # if k % 4 == 3:
-        #     flows.append(nf.flows.Permute(dim))
 
     flow = nf.NormalizingFlow(base, flows)
     wrapped_flow = WrappedNormFlowModel(flow)
 
     return wrapped_flow
+

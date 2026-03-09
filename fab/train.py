@@ -35,7 +35,8 @@ class Trainer:
         warmup_iters: int = 0,
         print_eval: bool = False,
         overlap_penalty: Optional[float] = 0.2,
-        rate_flow_samples: Optional[float] = 0.2
+        rate_flow_samples: Optional[float] = 0.2,
+        mixing: Optional[float] = 0.0,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -54,6 +55,7 @@ class Trainer:
         self.warmup_iters = warmup_iters
         self.overlap_penalty = overlap_penalty
         self.rate_flow_samples = rate_flow_samples
+        self.mixing = mixing
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -261,7 +263,6 @@ class Trainer:
         target_dist.train_data_i = target_dist.train_data_i.reshape(-1, target_dist.internal_dim).contiguous()
         target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
 
-        alpha = self.rate_flow_samples     # e.g. 0.0 .. 1.0
         overlap_w = self.overlap_penalty
 
         global_step = 0
@@ -274,7 +275,6 @@ class Trainer:
                 print(f"  Iteration: {i}/{n_iterations}")
             it_start_time = time()
             self.optimizer.zero_grad()
-            clash_pen_value = None
 
             if self.model.loss_type == "forward_kl":
                 # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
@@ -298,41 +298,6 @@ class Trainer:
                 transform_loss = -logdet_batch.mean()
                 loss = flow_loss + transform_loss
                 
-                if alpha > 0.0 or overlap_w > 0.0:
-                    B_rev = i_batch.shape[0]  
-                    z, log_q = self.model.flow.sample_and_log_prob((B_rev,))
-                    log_p = target_dist.log_prob(z)
-
-                    # Include flow samples with backward loss
-                    if alpha > 0.0:
-                        loss_rev = (log_q - log_p).mean()
-                        loss = (1.0 - alpha) * loss+ alpha * loss_rev
-
-                    # Overlap penalty
-                    if overlap_w > 0.0:
-                        x_pen, _ = target_dist.coordinate_transform.forward(z)    # (Bpen, 3N) in nm
-                        oo_pen = self.oo_clash_penalty(
-                            x_pen,
-                            L=float(target_dist.box_length_nm),
-                            n_solute=3,
-                            n_waters=int(target_dist.num_solvent_molecules),
-                            r0=0.22,
-                            k=200.0,
-                            chunk=64,
-                        )
-                        sw_pen = self.solute_water_clash_penalty(
-                            x_pen,
-                            L=float(target_dist.box_length_nm),
-                            n_solute=3,
-                            n_waters=int(target_dist.num_solvent_molecules),
-                            r0_SO=0.26,
-                            r0_OO=0.25,
-                            include_H=False,   # start simple
-                            k=200.0,
-                        )
-
-                        pen = oo_pen + sw_pen
-                        loss = loss + overlap_w * pen
    
                 # train_data = target_dist.train_data_i.clone().reshape(-1, target_dist.internal_dim)
                 # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
@@ -360,6 +325,67 @@ class Trainer:
                 # Not doing MD training here.
                 # Loss function generates samples from the Flow and computes the loss value internally.
                 loss = self.model.loss(batch_size)
+            
+            # -------------------------------------------------
+            # Optional MD mixing term
+            # -------------------------------------------------
+            if self.mixing > 0.0:
+                train_data = target_dist.train_data_i
+                train_logdet_xi = target_dist.train_logdet_xi
+
+                n_mix = int(round(self.mixing * batch_size))
+                n_mix = max(1, min(n_mix, batch_size))
+
+                perm = torch.randperm(train_data.shape[0], device=train_data.device)
+                idx = perm[:n_mix]
+
+                i_batch_mix = train_data[idx].to(self.flow_device, non_blocking=True)
+                logdet_batch_mix = train_logdet_xi[idx].to(self.flow_device, non_blocking=True)
+
+                # MD likelihood term under the flow
+                flow_loss_mix = -self.model.flow.log_prob(i_batch_mix).mean()
+                transform_loss_mix = -logdet_batch_mix.mean()
+                data_loss_mix = flow_loss_mix + transform_loss_mix
+
+                mix_weight = 100.0
+                weighted_mix = mix_weight * data_loss_mix
+                loss = loss + weighted_mix
+
+
+            # -------------------------------------------------
+            # Optional overlap penalty on flow samples
+            # -------------------------------------------------
+            if overlap_w > 0.0:
+                B_rev = batch_size
+                z, log_q = self.model.flow.sample_and_log_prob((B_rev,))
+
+                x_pen, _ = target_dist.coordinate_transform.forward(z)  # (B_rev, 3N) in nm
+
+                oo_pen = self.oo_clash_penalty(
+                    x_pen,
+                    L=float(target_dist.box_length_nm),
+                    n_solute=3,
+                    n_waters=int(target_dist.num_solvent_molecules),
+                    r0=0.22,
+                    k=200.0,
+                    chunk=64,
+                )
+
+                sw_pen = self.solute_water_clash_penalty(
+                    x_pen,
+                    L=float(target_dist.box_length_nm),
+                    n_solute=3,
+                    n_waters=int(target_dist.num_solvent_molecules),
+                    r0_SO=0.26,
+                    r0_OO=0.25,
+                    include_H=False,
+                    k=200.0,
+                )
+
+                pen = oo_pen + 5 * sw_pen
+                loss = loss + overlap_w * pen
+
+
 
             # Update parameters
             if not torch.isnan(loss) and not torch.isinf(loss):
@@ -399,11 +425,10 @@ class Trainer:
                     "iteration": i,
                 }
             )
-            if alpha > 0.0:
-                info["reverse_loss"] = loss_rev.detach().cpu().item()
 
             if overlap_w > 0.0:
-                info["oo_pen"] = pen.detach().cpu().item()
+                info["oo_pen"] = oo_pen.detach().cpu().item()
+                info["sw_pen"] = sw_pen.detach().cpu().item()
 
             ct = getattr(target_dist, "coordinate_transform", None)
             if ct is not None and hasattr(ct, "get_stats"):

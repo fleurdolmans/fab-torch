@@ -1,7 +1,7 @@
 import torch
 import math
 import normflows as nf
-import torch.nn.functional as F
+
 
 class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
     """
@@ -28,8 +28,6 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         self.n_atoms_per_mol = 3
         self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_mol
         assert self.n_solute + 3 * self.n_waters == self.n_atoms
-
-        self.r_min_solute_O = 0.28
 
         # Build a reference rigid-water geometry in the "water body frame":
         # O at origin; two H vectors defined relative to O. We pull this from transform_data.
@@ -84,28 +82,45 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
 
     # ---------- SO(3) maps ----------
     def rotvec_to_rotmat(self, w: torch.Tensor) -> torch.Tensor:
-        """
-        w: (B,3) rotation vector (axis * angle)
-        returns R: (B,3,3)
-        """
         B = w.shape[0]
-        theta = torch.linalg.norm(w, dim=1, keepdim=True).clamp_min(1e-12)  # (B,1)
-        k = w / theta  # (B,3)
-
-        kx, ky, kz = k[:, 0], k[:, 1], k[:, 2]
-        K = torch.zeros((B, 3, 3), device=w.device, dtype=w.dtype)
-        K[:, 0, 1] = -kz
-        K[:, 0, 2] =  ky
-        K[:, 1, 0] =  kz
-        K[:, 1, 2] = -kx
-        K[:, 2, 0] = -ky
-        K[:, 2, 1] =  kx
-
+        theta = torch.linalg.norm(w, dim=1, keepdim=True)
         I = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).expand(B, 3, 3)
-        ct = torch.cos(theta).view(B, 1, 1)
-        st = torch.sin(theta).view(B, 1, 1)
 
-        R = I + st * K + (1.0 - ct) * (K @ K)
+        small = theta[:, 0] < 1e-8
+        big = ~small
+
+        R = I.clone()
+
+        if big.any():
+            th = theta[big]
+            k = w[big] / th
+            kx, ky, kz = k[:, 0], k[:, 1], k[:, 2]
+
+            K = torch.zeros((big.sum(), 3, 3), device=w.device, dtype=w.dtype)
+            K[:, 0, 1] = -kz
+            K[:, 0, 2] =  ky
+            K[:, 1, 0] =  kz
+            K[:, 1, 2] = -kx
+            K[:, 2, 0] = -ky
+            K[:, 2, 1] =  kx
+
+            ct = torch.cos(th).view(-1, 1, 1)
+            st = torch.sin(th).view(-1, 1, 1)
+            Ibig = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).expand(big.sum(), 3, 3)
+
+            R[big] = Ibig + st * K + (1.0 - ct) * (K @ K)
+
+        if small.any():
+            K = torch.zeros((small.sum(), 3, 3), device=w.device, dtype=w.dtype)
+            ws = w[small]
+            K[:, 0, 1] = -ws[:, 2]
+            K[:, 0, 2] =  ws[:, 1]
+            K[:, 1, 0] =  ws[:, 2]
+            K[:, 1, 2] = -ws[:, 0]
+            K[:, 2, 0] = -ws[:, 1]
+            K[:, 2, 1] =  ws[:, 0]
+            R[small] = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0) + K
+
         return R
 
     def rotmat_to_rotvec(self, R: torch.Tensor) -> torch.Tensor:
@@ -113,34 +128,85 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         R: (B,3,3)
         returns w: (B,3)
         """
-        # Robust log map for SO(3)
         B = R.shape[0]
         trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
         cos_theta = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0)
-        theta = torch.acos(cos_theta)  # (B,)
+        theta = torch.acos(cos_theta)
 
         w = torch.zeros((B, 3), device=R.device, dtype=R.dtype)
 
-        # For small angles, use first-order approximation
         small = theta < 1e-6
+        near_pi = torch.abs(theta - math.pi) < 1e-4
+        mid = ~(small | near_pi)
+
         if small.any():
-            # vee(R - R^T)/2
-            Rt = R[small].transpose(1, 2)
-            A = (R[small] - Rt) * 0.5
+            A = 0.5 * (R[small] - R[small].transpose(1, 2))
             w[small, 0] = A[:, 2, 1]
             w[small, 1] = A[:, 0, 2]
             w[small, 2] = A[:, 1, 0]
 
-        # For general case:
-        big = ~small
-        if big.any():
-            th = theta[big]
+        if mid.any():
+            th = theta[mid]
             denom = (2.0 * torch.sin(th)).clamp_min(1e-12)
-            wx = (R[big, 2, 1] - R[big, 1, 2]) / denom
-            wy = (R[big, 0, 2] - R[big, 2, 0]) / denom
-            wz = (R[big, 1, 0] - R[big, 0, 1]) / denom
-            axis = torch.stack([wx, wy, wz], dim=1)
-            w[big] = axis * th.unsqueeze(1)
+            axis = torch.stack([
+                (R[mid, 2, 1] - R[mid, 1, 2]) / denom,
+                (R[mid, 0, 2] - R[mid, 2, 0]) / denom,
+                (R[mid, 1, 0] - R[mid, 0, 1]) / denom,
+            ], dim=1)
+            w[mid] = axis * th.unsqueeze(1)
+
+        if near_pi.any():
+            Rp = R[near_pi]
+            th = theta[near_pi]
+
+            diag = torch.stack([
+                Rp[:, 0, 0],
+                Rp[:, 1, 1],
+                Rp[:, 2, 2],
+            ], dim=1)
+
+            axis = torch.sqrt(((diag + 1.0) / 2.0).clamp_min(0.0))
+
+            axis0 = axis[:, 0].clone()
+            axis1 = axis[:, 1].clone()
+            axis2 = axis[:, 2].clone()
+
+            axis1 = torch.where(
+                axis0 > 1e-6,
+                (Rp[:, 0, 1] + Rp[:, 1, 0]) / (4.0 * axis0.clamp_min(1e-12)),
+                axis1,
+            )
+            axis2 = torch.where(
+                axis0 > 1e-6,
+                (Rp[:, 0, 2] + Rp[:, 2, 0]) / (4.0 * axis0.clamp_min(1e-12)),
+                axis2,
+            )
+
+            axis0 = torch.where(
+                (axis0 <= 1e-6) & (axis1 > 1e-6),
+                (Rp[:, 0, 1] + Rp[:, 1, 0]) / (4.0 * axis1.clamp_min(1e-12)),
+                axis0,
+            )
+            axis2 = torch.where(
+                (axis0 <= 1e-6) & (axis1 > 1e-6),
+                (Rp[:, 1, 2] + Rp[:, 2, 1]) / (4.0 * axis1.clamp_min(1e-12)),
+                axis2,
+            )
+
+            axis0 = torch.where(
+                (axis0 <= 1e-6) & (axis1 <= 1e-6) & (axis2 > 1e-6),
+                (Rp[:, 0, 2] + Rp[:, 2, 0]) / (4.0 * axis2.clamp_min(1e-12)),
+                axis0,
+            )
+            axis1 = torch.where(
+                (axis0 <= 1e-6) & (axis1 <= 1e-6) & (axis2 > 1e-6),
+                (Rp[:, 1, 2] + Rp[:, 2, 1]) / (4.0 * axis2.clamp_min(1e-12)),
+                axis1,
+            )
+
+            axis = torch.stack([axis0, axis1, axis2], dim=1)
+            axis = axis / axis.norm(dim=1, keepdim=True).clamp_min(1e-12)
+            w[near_pi] = axis * th.unsqueeze(1)
 
         return w
 
@@ -190,39 +256,50 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         cosang = (ba * bc).sum(dim=-1).clamp(-1.0, 1.0)
         return torch.acos(cosang)
     
-    def cartesian_to_shifted_spherical(self, v: torch.Tensor):
+    def _solute_frame(self, sol: torch.Tensor):
+        # sol: (B,3,3), assumed whole, atom0 is origin reference
+        v1 = sol[:, 1, :] - sol[:, 0, :]
+        v2 = sol[:, 2, :] - sol[:, 0, :]
+
+        e1 = v1 / v1.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+        n = torch.cross(v1, v2, dim=-1)
+        e3 = n / n.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+        e2 = torch.cross(e3, e1, dim=-1)
+        e2 = e2 / e2.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+        # columns = body axes in lab coordinates
+        Q = torch.stack([e1, e2, e3], dim=-1)   # (B,3,3)
+        return Q
+    
+    def cartesian_to_spherical(self, v: torch.Tensor):
         """
         v: (B,3)
         returns:
-          s   : (B,1), where r = r_min_solute_O + softplus(s)
-          c   : (B,1), cos(theta) in [-1,1]
-          phi : (B,1), atan2(y,x)
+        rho: (B,1)   where rho = log(r)
+        c:   (B,1)   where c = cos(theta) in [-1,1]
+        phi: (B,1)   in (-pi, pi]
         """
-        r_min = torch.as_tensor(self.r_min_solute_O, device=v.device, dtype=v.dtype)
-        r = torch.linalg.norm(v, dim=-1, keepdim=True).clamp_min(r_min + 1e-12)
-
-        # inverse softplus of (r - r_min)
-        rp = (r - r_min).clamp_min(1e-12)
-        s = rp + torch.log(-torch.expm1(-rp))   # stable inverse softplus
-
+        r = torch.linalg.norm(v, dim=-1, keepdim=True).clamp_min(1e-12)
+        rho = torch.log(r)
         c = (v[:, 2:3] / r).clamp(-1.0, 1.0)
         phi = torch.atan2(v[:, 1:2], v[:, 0:1])
-        return s, c, phi
-
-    def shifted_spherical_to_cartesian(self, s: torch.Tensor, c: torch.Tensor, phi: torch.Tensor):
+        return rho, c, phi
+    
+    def spherical_to_cartesian(self, rho: torch.Tensor, c: torch.Tensor, phi: torch.Tensor):
         """
-        s: shifted radial variable, r = r_min_solute_O + softplus(s)
+        rho: log-radius
         c: cos(theta)
         phi: azimuth
+        returns v: (B,3)
         """
-        r_min = torch.as_tensor(self.r_min_solute_O, device=s.device, dtype=s.dtype)
-        r = r_min + F.softplus(s)
-
+        r = torch.exp(rho)
         c = c.clamp(-1.0 + 1e-6, 1.0 - 1e-6)
-        sin_theta = torch.sqrt((1.0 - c**2).clamp_min(1e-12))
+        s = torch.sqrt((1.0 - c**2).clamp_min(1e-12))
 
-        x = r * sin_theta * torch.cos(phi)
-        y = r * sin_theta * torch.sin(phi)
+        x = r * s * torch.cos(phi)
+        y = r * s * torch.sin(phi)
         z = r * c
         return torch.cat([x, y, z], dim=-1)
 
@@ -247,6 +324,10 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
 
         # pieces = [v1, v2]
 
+
+        Q = self._solute_frame(sol)
+        Qt = Q.transpose(1, 2)
+
         # Solute internal shape: r1, r2, theta
         v1 = x_rel[:, 1, :]                      # S -> O1
         v2 = x_rel[:, 2, :]                      # S -> O2
@@ -256,6 +337,7 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         theta = self.angle_abc(x_rel[:, 1, :], x_rel[:, 0, :], x_rel[:, 2, :]).unsqueeze(1)  # (B,1)
 
         pieces = [r1, r2, theta]
+
         logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
 
         # Waters: O position + rotation vector omega
@@ -265,27 +347,27 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
             w = x_rel[:, s:s+3, :]               # (B,3,3) [O,H,H] in solute-centered frame
             w = self.make_whole_water(w)         # ensure H's are whole w.r.t O
 
-            O = w[:, 0, :]                       # (B,3)
+            # O = w[:, 0, :]                       # (B,3)
+            O_lab = w[:, 0, :]                     # relative to solute atom0
+
+            O_body = torch.einsum("bij,bj->bi", Qt, O_lab)
 
             # Infer orientation by Kabsch from reference geometry
             w_rel = w - w[:, 0:1, :]             # O at 0
             w_cent = w_rel - w_rel.mean(dim=1, keepdim=True)
-            R = self.kabsch_rotation(Yref, w_cent)
-            omega = self.rotmat_to_rotvec(R)           # (B,3)
+            # R = self.kabsch_rotation(w_cent, Yref)  # (B,3,3)
+            R_lab = self.kabsch_rotation(Yref, w_cent)
 
-            s_rad, c, phi = self.cartesian_to_shifted_spherical(O)
-            pieces += [s_rad, c, phi, omega]
-  
+            R_body = Qt @ R_lab
 
-            # pieces += [O, omega]
+            omega_body = self.rotmat_to_rotvec(R_body)     # (B,3
+            # pieces += [O_body, omega_body]
+            rho, c, phi = self.cartesian_to_spherical(O_body)
+            logdet = logdet - 3.0 * rho[:, 0]
+            pieces += [rho, c, phi, omega_body]
 
             # Optional SO(3) exp-map Jacobian correction
             # logdet = logdet + self.so3_logdet_exp(omega)
-
-            r_min = torch.as_tensor(self.r_min_solute_O, device=x.device, dtype=x.dtype)
-            r = r_min + F.softplus(s_rad)
-            logdet = logdet - (2.0 * torch.log(r[:, 0]) + torch.log(torch.sigmoid(s_rad[:, 0]).clamp_min(1e-12)))
-
 
         i = torch.cat(pieces, dim=1)  # (B, 6 + 6*n_waters)
         return i, logdet
@@ -340,26 +422,20 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)  # (1,3,1)
         H2_ref = self.ref_H2.to(i.device, i.dtype).view(1, 3, 1)
 
-        for k in range(self.n_waters):
-            s_rad = i[:, idx:idx + 1]
-            c = i[:, idx + 1:idx + 2]
-            phi = i[:, idx + 2:idx + 3]
-            omega = i[:, idx + 3:idx + 6]
+        for k in range(self.n_waters): 
+            rho = i[:, idx:idx+1]
+            c = i[:, idx+1:idx+2]
+            phi = i[:, idx+2:idx+3]
+            omega = i[:, idx+3:idx+6]
             idx += 6
 
-            O = self.shifted_spherical_to_cartesian(s_rad, c, phi)
-            R = self.rotvec_to_rotmat(omega)
-
+            O = self.spherical_to_cartesian(rho, c, phi)
+            logdet = logdet + 3.0 * rho[:, 0]
             # O = i[:, idx:idx+3]           # (B,3)
             # omega = i[:, idx+3:idx+6]     # (B,3)
             # idx += 6
 
-            # R = self.rotvec_to_rotmat(omega)  # (B,3,3)
-
-            # Jacobian for (s_rad, c, phi) -> O
-            r_min = torch.as_tensor(self.r_min_solute_O, device=i.device, dtype=i.dtype)
-            r = r_min + F.softplus(s_rad)
-            logdet = logdet + (2.0 * torch.log(r[:, 0]) + torch.log(torch.sigmoid(s_rad[:, 0]).clamp_min(1e-12)))
+            R = self.rotvec_to_rotmat(omega)  # (B,3,3)
 
             # Oxygen position is relative to solute atom0 at center
             O_abs = center + O

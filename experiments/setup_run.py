@@ -456,7 +456,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             warmup_scheduler=warmup_scheduler,
             warmup_iters=warmup_iters,
             overlap_penalty=cfg.training.overlap_penalty,
-            rate_flow_samples = cfg.training.rate_flow_samples
+            rate_flow_samples = cfg.training.rate_flow_samples,
+            mixing=cfg.training.mixing
         )
 
     print("Starting training...")
