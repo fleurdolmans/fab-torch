@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_h100
-#SBATCH --time=01:30:00
+#SBATCH --partition=gpu_a100
+#SBATCH --time=00:40:00
 
 module purge
 module load 2025
@@ -41,17 +41,33 @@ export MAIN_DIR="${MAIN_DIR}"
 
 
 # Create MD data for water in water (PBC) and plot diagnostics
+# srun python "${MAIN_DIR}/data_generation/md_data.py" \
+#   --config-name make_md_data \
+#   solute_name=so2 \
+#   simulation_version="v7" \
+#   create_md=true \
+#   validate_md=true \
+#   boundary_condition=pbc \
+#   nonbonded_cutoff_nm=0.8 \
+#   femtoseconds_per_timestep=2.0 \
+#   solvent_density=1.0 \
+#   box_length_nm=1.8 \
+#   internal_constraints=hbonds \
+#   rigid_water=true \
+#   report_interval=1e4 \
+#   save_interval=100 \
+
 srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=so2 \
-  simulation_version="v7" \
+  simulation_version="v10" \
   create_md=true \
   validate_md=true \
   boundary_condition=pbc \
-  nonbonded_cutoff_nm=0.8 \
+  nonbonded_cutoff_nm=0.4 \
   femtoseconds_per_timestep=2.0 \
   solvent_density=1.0 \
-  box_length_nm=1.8 \
+  box_length_nm=0.9 \
   internal_constraints=hbonds \
   rigid_water=true \
   report_interval=1e4 \

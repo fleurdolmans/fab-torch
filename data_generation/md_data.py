@@ -3,6 +3,7 @@ from omegaconf import DictConfig, OmegaConf
 
 import os
 
+import math
 import openmm as mm
 from openmm import unit, app
 import numpy as np
@@ -16,6 +17,34 @@ import mdtraj as md
 
 from fab.target_distributions.solute_in_water import TriatomicInWaterSys
 
+def _estimate_solute_volume_nm3(forcefield, topology):
+    """
+    Estimate solute volume from LJ sigma values of the solute-only system.
+    Uses sum of atomic spheres with radius = sigma/2.
+    Returns volume in nm^3.
+    """
+    solute_system = forcefield.createSystem(
+        topology,
+        nonbondedMethod=app.NoCutoff,
+        constraints=None,
+        rigidWater=False,
+    )
+
+    for force in solute_system.getForces():
+        if isinstance(force, mm.NonbondedForce):
+            nb = force
+            break
+
+    n_solute_atoms = topology.getNumAtoms()
+    V_solute_nm3 = 0.0
+
+    for i in range(n_solute_atoms):
+        q, sigma, epsilon = nb.getParticleParameters(i)
+        sigma_nm = sigma.value_in_unit(unit.nanometer)
+        r_nm = 0.5 * sigma_nm
+        V_solute_nm3 += (4.0 / 3.0) * math.pi * r_nm**3
+
+    return V_solute_nm3
 
 def create_md_sim(cfg: DictConfig):
     """
@@ -46,12 +75,32 @@ def create_md_sim(cfg: DictConfig):
     
     # Overwite number of solvent molecules based on density if using PBC (ignore user input for num_solvent_molecules in this case)
     if cfg.boundary_condition == "pbc":
-        # Number of water molecules
-        V = (cfg.box_length_nm ** 3) * 1e-21               # Volume in cm^3
+
+        pdb = app.PDBFile(cfg.solute_pdb_path)  # This can be any triatomic solute
+        # This pdb file has a single water molecule, where the OH bonds are 0.0957 nm in length.
+        forcefield = app.ForceField("amber14/tip3p.xml") 
+        if cfg.solute_xml_path is not None:
+            forcefield.loadFile(cfg.solute_xml_path)
+
+        # Estimate solute volume from solute-only topology
+        V_solute_nm3 = _estimate_solute_volume_nm3(forcefield, pdb.topology)
+
+        V_box_nm3 = cfg.box_length_nm ** 3
+        V_solvent_nm3 = max(V_box_nm3 - V_solute_nm3, 0.0)
+
+        # density in g/cm^3, volume in cm^3
+        V_solvent_cm3 = V_solvent_nm3 * 1e-21
         M = 18.01528                       # Water molar mass in g/mol
         NA = 6.02214076e23                 # Avogadro’s number in 1/mol
 
-        cfg.num_solvent_molecules = int(cfg.solvent_density * V * NA / M)
+        n_solvent = int(cfg.solvent_density * V_solvent_cm3 * NA / M)
+
+        print(f"[Volume] box={V_box_nm3:.4f} nm^3 "
+              f"solute≈{V_solute_nm3:.4f} nm^3 "
+              f"solvent≈{V_solvent_nm3:.4f} nm^3")
+        print(f"[Solvent count corrected] {n_solvent}")
+
+        cfg.num_solvent_molecules = n_solvent
     
     # Initialize the TriatomicInWaterSys class with the necessary parameters:
     # 3 atoms in solute, 3 atoms in solvent, 4 solvent molecules. 3 dimensions per atom (xyz)
