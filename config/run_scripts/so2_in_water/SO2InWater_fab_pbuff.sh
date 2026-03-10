@@ -19,10 +19,10 @@ CONDA_ENV="bgsol"
 
 SOLUTE="so2"
 SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="fab_${SOLUTE}_in_${SOLVENT}_test"
 
 # Launch dir
-LAUNCH_DIR=${MAIN_DIR}/launch
+LAUNCH_DIR=${MAIN_DIR}/launch/
 mkdir -p "${LAUNCH_DIR}"
 
 # Create dir for specific experiment run
@@ -48,17 +48,15 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:10:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
 source \$(conda info --base)/etc/profile.d/conda.sh
+conda deactivate
 conda activate ${CONDA_ENV}
-
-python -c "import sys, hydra; print('PY', sys.executable, 'hydra', hydra.__version__)"
-python -c "import numpy; from openmm import app; print('numpy', numpy.__version__, 'openmm app OK')"
 
 export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
@@ -68,22 +66,20 @@ export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
 
-# We are essentially just using the loss_type and use_ais arguments when doing reverse KL training.
-
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v9\\
-  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=24 \\
-  target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e10 \\
-  target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
+  target.boundary_condition=pbc target.simulation_version=v5\\
+  target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
+  target.energy_cut=1e6 target.energy_max=1e9 \\
+  flow.hidden_units=128 flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=6\\
+  flow.base.type=gauss flow.type=coupled-spline-nf\\
+  fab.n_intermediate_distributions=8 fab.transition_operator.n_inner_steps=4 fab.transition_operator.init_step_size=0.02 \\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
-  training.max_grad_norm=5 training.warmup_iter=50 \\
-  training.overlap_penalty=0 training.mixing=0.5 training.energy_mode=full\\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500\\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  training.buffer.maximum_length=32768 training.buffer.min_length=4096\\
+  training.max_grad_norm=10 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=5\\
+  training.warmup_iter=500 training.n_iterations=10000 training.lr_scheduler.decay_iter=10000\\
+  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
 
 chmod +x "${SLURM}"
@@ -91,3 +87,5 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
+
+# fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=16 fab.transition_operator.target_p_accept=0.8 \\
