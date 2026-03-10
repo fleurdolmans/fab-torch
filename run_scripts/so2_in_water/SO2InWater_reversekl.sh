@@ -72,8 +72,8 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v9\\
-  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=24 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
+  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\

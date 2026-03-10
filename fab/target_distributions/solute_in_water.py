@@ -346,8 +346,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         if self.boundary_condition == "pbc":
             # self.internal_dim = self.cartesian_dim                    # for cartesian flow
-            # self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-            self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            # self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
         print(f"Internal dim: {self.internal_dim}")
