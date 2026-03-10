@@ -527,8 +527,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         md_min_oo, md_min_solO, md_min_solH = min_dist_stats(mdXp_diag, L, n_solute, n_waters)
         fl_min_oo, fl_min_solO, fl_min_solH = min_dist_stats(flowXp_diag, L, n_solute, n_waters)
 
-        md_ang = water_orientation_angles(mdXp_diag, L, n_solute, n_waters)
-        fl_ang = water_orientation_angles(flowXp_diag, L, n_solute, n_waters)
+        # md_ang = water_orientation_angles(mdXp_diag, L, n_solute, n_waters)
+        # fl_ang = water_orientation_angles(flowXp_diag, L, n_solute, n_waters)
 
         print("[MD distances]  min O-O median", np.median(md_min_oo),
             "min solute-O median", np.median(md_min_solO),
@@ -538,18 +538,18 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             "min solute-O median", np.median(fl_min_solO),
             "min solute-H median", np.median(fl_min_solH))
 
-        print("[MD orientation] median", np.median(md_ang), "p10", np.percentile(md_ang, 10), "p90", np.percentile(md_ang, 90))
-        print("[FLOW orientation] median", np.median(fl_ang), "p10", np.percentile(fl_ang, 10), "p90", np.percentile(fl_ang, 90))
+        # print("[MD orientation] median", np.median(md_ang), "p10", np.percentile(md_ang, 10), "p90", np.percentile(md_ang, 90))
+        # print("[FLOW orientation] median", np.median(fl_ang), "p10", np.percentile(fl_ang, 10), "p90", np.percentile(fl_ang, 90))
 
-        fig = plt.figure(figsize=(8, 5))
-        plt.hist(md_ang, bins=60, density=True, alpha=0.4, label="MD")
-        plt.hist(fl_ang, bins=60, density=True, alpha=0.4, label="Flow")
-        plt.xlabel("Angle(solute0→O, O→H-bisector) [deg]")
-        plt.ylabel("density")
-        plt.title("Water orientation relative to solute")
-        plt.legend()
-        plt.tight_layout()
-        figs.append(fig)
+        # fig = plt.figure(figsize=(8, 5))
+        # plt.hist(md_ang, bins=60, density=True, alpha=0.4, label="MD")
+        # plt.hist(fl_ang, bins=60, density=True, alpha=0.4, label="Flow")
+        # plt.xlabel("Angle(solute0→O, O→H-bisector) [deg]")
+        # plt.ylabel("density")
+        # plt.title("Water orientation relative to solute")
+        # plt.legend()
+        # plt.tight_layout()
+        # figs.append(fig)
 
         # ----------------------------
         # RDF: solute atom0 -> solvent oxygens (PBC MIC)
@@ -639,7 +639,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.plot(r_md, g_md, label="MD", alpha=0.9)
         plt.plot(r_fl, g_fl, label="Flow", alpha=0.9)
         plt.xlim(0, L / 2)
-        y_hi = max(np.percentile(g_md, 99.5), 1.0) * 1.2
+        g_all = np.concatenate([g_md, g_fl])
+        y_hi = max(np.percentile(g_all, 99.5) * 1.1, 0.05)
         plt.ylim(0, y_hi)
         plt.xlabel("r (nm)")
         plt.ylabel("g(r)")

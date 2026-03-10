@@ -35,7 +35,6 @@ class Trainer:
         warmup_iters: int = 0,
         print_eval: bool = False,
         overlap_penalty: Optional[float] = 0.2,
-        rate_flow_samples: Optional[float] = 0.2,
         mixing: Optional[float] = 0.0,
     ):
         self.model = model
@@ -54,7 +53,6 @@ class Trainer:
         self.warmup_scheduler = warmup_scheduler
         self.warmup_iters = warmup_iters
         self.overlap_penalty = overlap_penalty
-        self.rate_flow_samples = rate_flow_samples
         self.mixing = mixing
 
     def save_checkpoint(self, i):
@@ -264,6 +262,7 @@ class Trainer:
         target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
 
         overlap_w = self.overlap_penalty
+        alpha = self.mixing
 
         global_step = 0
         for t in range(start_iter, n_iterations, 1):
@@ -329,11 +328,11 @@ class Trainer:
             # -------------------------------------------------
             # Optional MD mixing term
             # -------------------------------------------------
-            if self.mixing > 0.0:
+            if alpha > 0.0:
                 train_data = target_dist.train_data_i
                 train_logdet_xi = target_dist.train_logdet_xi
 
-                n_mix = int(round(self.mixing * batch_size))
+                n_mix = int(round(alpha * batch_size))
                 n_mix = max(1, min(n_mix, batch_size))
 
                 perm = torch.randperm(train_data.shape[0], device=train_data.device)
@@ -347,9 +346,7 @@ class Trainer:
                 transform_loss_mix = -logdet_batch_mix.mean()
                 data_loss_mix = flow_loss_mix + transform_loss_mix
 
-                mix_weight = 100.0
-                weighted_mix = mix_weight * data_loss_mix
-                loss = loss + weighted_mix
+                loss = (1 - alpha) * data_loss_mix + alpha * loss
 
 
             # -------------------------------------------------

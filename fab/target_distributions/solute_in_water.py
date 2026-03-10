@@ -148,18 +148,57 @@ class TriatomicInWaterSys(TestSystem):
                     nonbondedMethod=app.PME,               
                     nonbondedCutoff=self.nonbonded_cutoff_nm * unit.nanometers,
                     constraints=constraints_dict[self.internal_constraints],
-
                     rigidWater=self.rigid_water,
                 )
+                nb = None
                 for force in self.system.getForces():
                     if isinstance(force, mm.HarmonicBondForce):
                         force.setUsesPeriodicBoundaryConditions(True)
                     if isinstance(force, mm.NonbondedForce):
                         force.setExceptionsUsePeriodicBoundaryConditions(True)
+                        nb = force
                 
+                if nb is None:
+                    raise RuntimeError("No NonbondedForce found in system.")
+                
+                nb_coul = mm.NonbondedForce()
+                nb_coul.setName("CoulombForce")
+                nb_lj = mm.NonbondedForce()
+                nb_lj.setName("LennardJonesForce")
+
+                for f in (nb_coul, nb_lj):
+                    f.setNonbondedMethod(nb.getNonbondedMethod())
+                    f.setCutoffDistance(nb.getCutoffDistance())
+                    try:
+                        f.setUseDispersionCorrection(nb.getUseDispersionCorrection())
+                    except Exception:
+                        pass
+                    try:
+                        f.setEwaldErrorTolerance(nb.getEwaldErrorTolerance())
+                    except Exception:
+                        pass
+                    f.setExceptionsUsePeriodicBoundaryConditions(True)
+                for i in range(nb.getNumParticles()):
+                    q, sigma, epsilon = nb.getParticleParameters(i)
+
+                    nb_coul.addParticle(q, sigma, 0.0 * epsilon)
+                    nb_lj.addParticle(0.0 * q, sigma, epsilon)
+                                    
+                for i in range(nb.getNumExceptions()):
+                    p1, p2, q, sigma, epsilon = nb.getExceptionParameters(i)
+
+                    
+                    nb_coul.addException(p1, p2, q, sigma, 0.0 * epsilon)
+                    nb_lj.addException(p1, p2, 0.0 * q, sigma, epsilon)
+                
+
+                self.system.addForce(nb_coul)
+                self.system.addForce(nb_lj)
+
                 for j, force in enumerate(self.system.getForces()):
                     force.setForceGroup(j)
                     print(f"[ForceGroup] group={j} type={type(force).__name__} name={force.getName()}")
+                
             else:
                 raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
         elif solute_inpcrd_path is not None and solute_prmtop_path is not None:
@@ -275,6 +314,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         constraint_force: float = 10000.0,
         platform_name: str = None,
         platform_properties: Optional[Dict[str, str]] = None,
+        energy_mode: str = "full",
     ):
         super(SoluteInWater, self).__init__()
 
@@ -291,6 +331,18 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.plot_marginal_hists = plot_marginal_hists
         self.boundary_condition = boundary_condition
         self.box_length_nm = box_length_nm
+        self.energy_mode = energy_mode
+
+        if self.energy_mode == "full":
+            force_groups = None
+        elif self.energy_mode == "lj_only":
+            force_groups = [6]   # LJ
+        elif self.energy_mode == "nonbonded":
+            force_groups = [5, 6]      # Coulomb + LJ only
+        elif self.energy_mode == "coul_only":
+            force_groups = [5]
+        else:
+            raise ValueError(f"Unknown energy_mode: {self.energy_mode}")
 
         if self.boundary_condition == "pbc":
             # self.internal_dim = self.cartesian_dim                    # for cartesian flow
@@ -453,7 +505,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 temperature,
                 energy_cut=energy_cut,
                 energy_max=energy_max,
-                transform=self.coordinate_transform,           
+                transform=self.coordinate_transform, 
+                force_groups=force_groups          
             )
 
     # @staticmethod

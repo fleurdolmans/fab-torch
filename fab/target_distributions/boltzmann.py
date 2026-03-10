@@ -26,7 +26,7 @@ class TransformedBoltzmann(nn.Module):
     Boltzmann distribution with respect to transformed variables, uses OpenMM to get energy and forces.
     """
 
-    def __init__(self, sim_context, temperature, energy_cut, energy_max, transform):
+    def __init__(self, sim_context, temperature, energy_cut, energy_max, transform, force_groups):
         """
         Constructor
         :param sim_context: Context of the simulation object used for energy
@@ -46,9 +46,10 @@ class TransformedBoltzmann(nn.Module):
         # Set up functions
         self.openmm_energy = OpenMMEnergyInterface.apply
         self.regularize_energy = regularize_energy
+        self.force_groups = force_groups
 
         self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.sim_context, temperature)[:, 0], self.energy_cut, self.energy_max
+            self.openmm_energy(pos, self.sim_context, temperature, self.force_groups)[:, 0], self.energy_cut, self.energy_max, 
         )
 
         self.transform = transform
@@ -138,7 +139,7 @@ class TransformedBoltzmannParallel(nn.Module):
 
 class OpenMMEnergyInterface(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input, openmm_context, temperature):
+    def forward(ctx, input, openmm_context, temperature, force_groups):
         device = input.device
         n_batch = input.shape[0]
         input = input.view(n_batch, -1, 3)
@@ -156,7 +157,17 @@ class OpenMMEnergyInterface(torch.autograd.Function):
                 energies[i, 0] = np.nan
             else:
                 openmm_context.setPositions(x)
-                state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
+                # state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
+
+                if force_groups is None:
+                    state = openmm_context.getState(getForces=True, getEnergy=True, getPositions=True)
+                else:
+                    state = openmm_context.getState(
+                        getForces=True,
+                        getEnergy=True,
+                        getPositions=True,
+                        groups=set(force_groups),
+                    )
                 # get energy
                 # energies[i, 0] = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole) / kBT
                 energy_kj = state.getPotentialEnergy().value_in_unit(unit.kilojoule / unit.mole)
@@ -181,7 +192,7 @@ class OpenMMEnergyInterface(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         (forces,) = ctx.saved_tensors
-        return forces * grad_output, None, None
+        return forces * grad_output, None, None, None
 
 class OpenMMEnergyInterfaceParallel(torch.autograd.Function):
     """
