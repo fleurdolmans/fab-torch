@@ -346,7 +346,7 @@ class Trainer:
                 transform_loss_mix = -logdet_batch_mix.mean()
                 data_loss_mix = flow_loss_mix + transform_loss_mix
 
-                loss = (1 - alpha) * data_loss_mix + alpha * loss
+                loss = alpha * data_loss_mix + (1 - alpha) * loss
 
 
             # -------------------------------------------------

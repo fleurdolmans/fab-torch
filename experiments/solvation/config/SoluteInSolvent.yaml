@@ -99,6 +99,9 @@ training:                             # Properties of the training procedure
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4                      # Int, number of workers to be used for data loading
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
+  load_optimizer_state: false         # Use optimizer from checkpoint model
+  latest_run: false
+  continue_same_run: false
   n_iterations: 50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
   batch_size: 1024                    # Int, batch size used during training

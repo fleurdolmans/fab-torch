@@ -22,8 +22,7 @@ from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
-from fab.transforms.global_3point_spherical_transform_pbc import PBCGlobal3PointSphericalTransform
-from fab.transforms.global_3point_spherical_transform_pbc2 import PBCGlobal3PointSphericalTransform2
+from fab.transforms.global_3point_spherical_transform_pbc import PBCGlobal3PointSphericalTransform, PBCGlobal3PointSphericalTransform2
 from fab.transforms.transform_pbc import PBCPreprocessTransform
 
 
@@ -346,8 +345,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         if self.boundary_condition == "pbc":
             # self.internal_dim = self.cartesian_dim                    # for cartesian flow
-            self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-            # self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            # self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
         print(f"Internal dim: {self.internal_dim}")
@@ -438,12 +437,20 @@ class SoluteInWater(nn.Module, TargetDistribution):
             #     anchor_idx=0,
             #     do_center=False,
             # )
-            self.coordinate_transform = PBCGlobal3PointSphericalTransform2(
-                L=self.box_length_nm,
-                system=self.system,
-                transform_data=self.transform_data.to(device),
-                internal_dim=self.internal_dim
-            )
+            if self.internal_dim == 138: 
+                self.coordinate_transform = PBCGlobal3PointSphericalTransform2(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    internal_dim=self.internal_dim
+                )
+            elif self.internal_dim == 135:
+                self.coordinate_transform = PBCGlobal3PointSphericalTransform(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    internal_dim=self.internal_dim
+                )
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
         
