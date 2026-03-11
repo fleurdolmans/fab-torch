@@ -146,23 +146,41 @@ def setup_buffer(
     return buffer
 
 
-def get_load_checkpoint_dir(outer_checkpoint_dir):
-    """Get directory of most recent checkpoint"""
+def get_load_checkpoint_dir(outer_checkpoint_dir, latest=False, continue_same_run=False):
+    """Get directory of checkpoint of a specific run, or if latest is True,
+    the most recent run inside outer_checkpoint_dir.
+    
+    run should be the full path to the folder of that run.
+    """
     try:
-        # load the most recent checkpoint, from the most recent run.
-        chkpts = [it.path for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
-        folder_names = [it.name for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
-        times = [datetime.fromisoformat(time).timestamp() for time in folder_names]
-        # grab most recent dir with argmax on times
-        latest_chkpts_dir = os.path.join(chkpts[np.argmax(times)], "model_checkpoints")
-        iter_dirs = [it.path for it in os.scandir(latest_chkpts_dir) if it.is_dir()]
-        re_matches = [re.search(r"(.*iter_([0-9]*))", subdir) for subdir in iter_dirs]
-        iter_numbers = [int(match.groups()[1]) if match else -1 for match in re_matches]
-        chkpt_dir = re_matches[np.argmax(iter_numbers)].groups()[0]
-        iter_number = np.max(iter_numbers)
-    except:
-        print("Starting training from the beginning with no checkpoint.")
+        if not latest:
+            chkpts_dir = os.path.join(outer_checkpoint_dir, "model_checkpoints")
+        else:
+            chkpts = [it.path for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
+            folder_names = [it.name for it in os.scandir(outer_checkpoint_dir) if it.is_dir()]
+            times = [datetime.fromisoformat(name).timestamp() for name in folder_names]
+            chkpts_dir = os.path.join(chkpts[np.argmax(times)], "model_checkpoints")
+        
+        
+        iter_dirs = [it.path for it in os.scandir(chkpts_dir) if it.is_dir()]
+        matches = []
+        for subdir in iter_dirs:
+            m = re.search(r"iter_(\d+)$", os.path.basename(subdir))
+            if m is not None:
+                matches.append((subdir, int(m.group(1))))
+
+        if not matches:
+            raise FileNotFoundError(f"No iter_* checkpoint folders found in {chkpts_dir}")
+
+        chkpt_dir, iter_number = max(matches, key=lambda x: x[1])
+        
+        if continue_same_run is False:
+            iter_number = 0
+
+    except Exception as e:
+        print(f"Starting training from the beginning with no checkpoint. Reason: {e}")
         return None, 0
+
     return chkpt_dir, iter_number
 
 
@@ -288,7 +306,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             chkpt_dir = None
             iter_number = 0
         else:
-            chkpt_dir, iter_number = get_load_checkpoint_dir(cfg.training.checkpoint_load_dir)
+            chkpt_dir, iter_number = get_load_checkpoint_dir(cfg.training.checkpoint_load_dir, cfg.training.continue_same_run)
     else:
         chkpt_dir = None
         iter_number = 0
@@ -405,8 +423,10 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
         fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location)
-        opt_state = torch.load(os.path.join(chkpt_dir, "optimizer.pt"), map_location)
-        optimizer.load_state_dict(opt_state)
+        
+        if cfg.training.load_optimizer_state:
+            opt_state = torch.load(os.path.join(chkpt_dir, "optimizer.pt"), map_location)
+            optimizer.load_state_dict(opt_state)
         if buffer is not None:
             buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
             assert buffer.can_sample, (

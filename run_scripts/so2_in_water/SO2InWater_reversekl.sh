@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:10:00
+#SBATCH --time=00:30:00
 
 module purge
 module load 2025
@@ -72,19 +72,22 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
-  training.max_grad_norm=5 training.warmup_iter=50 \\
-  training.overlap_penalty=0 training.mixing=0.5 training.energy_mode=full\\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500\\
+  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf \\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3 \\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64 \\
+  training.max_grad_norm=5 training.warmup_iter=10\\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-10/17-22-37_980802 \\
+  training.overlap_penalty=0 training.mixing=0.5 training.energy_mode=full \\
+  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500 \\
   evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
+
+
 
 chmod +x "${SLURM}"
 

@@ -64,6 +64,8 @@ class FABModel(Model):
         self.target_distribution = target_distribution
         self.n_intermediate_distributions = n_intermediate_distributions
         self.ais_distribution_spacing = ais_distribution_spacing
+        self.use_ais = use_ais
+        self.loss_type = loss_type
         assert len(flow.event_shape) == 1, "Currently only 1D distributions are supported"
         if use_ais or loss_type in LOSSES_USING_AIS:
             if transition_operator is None:
@@ -271,19 +273,28 @@ class FABModel(Model):
         except RuntimeError:
             # If flow is incorretly loaded then this will mess up evaluation, so raise Error.
             raise RuntimeError("Flow could not be loaded. " "Perhaps there is a mismatch in the architectures.")
-        try:
-            self.transition_operator.load_state_dict(checkpoint["trans_op"])
-        except RuntimeError:
-            # Sometimes we only evaluate the flow, in which case having a transition operator
-            # mismatch is okay, so we raise a warning.
-            warnings.warn(
-                "Transition operator could not be loaded. " "Perhaps there is a mismatch in the architectures."
-            )
-        if self.annealed_importance_sampler:
+        
+        trans_op = getattr(self, "transition_operator", None)
+        if (self.use_ais or self.loss_type in LOSSES_USING_AIS):
+            if trans_op is not None and "trans_op" in checkpoint:
+                try:
+                    trans_op.load_state_dict(checkpoint["trans_op"])
+                except RuntimeError:
+                    warnings.warn(
+                        "Transition operator could not be loaded. "
+                        "Perhaps there is a mismatch in the architectures."
+                    )
+            elif "trans_op" in checkpoint:
+                warnings.warn(
+                    "Checkpoint contains transition operator state, but current model "
+                    "has no transition operator. Skipping trans_op load."
+                )
+
+        if getattr(self, "annealed_importance_sampler", None) is not None and trans_op is not None:
             self.annealed_importance_sampler = AnnealedImportanceSampler(
                 base_distribution=self.flow,
                 target_log_prob=self.target_distribution.log_prob,
-                transition_operator=self.transition_operator,
+                transition_operator=trans_op,
                 p_target=False,
                 alpha=self.alpha,
                 n_intermediate_distributions=self.n_intermediate_distributions,

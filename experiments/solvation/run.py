@@ -395,7 +395,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             ang = torch.acos(cosang) * 180.0 / np.pi         # degrees
             return ang.detach().cpu().numpy().reshape(-1)
         
-        def split_water_blocks(i: torch.Tensor, n_waters: int):
+        def split_water_blocks(i: torch.Tensor, n_waters: int, solute_dim: int = 6):
             """
             i: (B, 3 + 6*n_waters)
             Returns:
@@ -403,7 +403,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             omega: (B, n_waters, 3)
             """
             B = i.shape[0]
-            water = i[:, 3:]                       # (B, 6*n_waters)
+            # water = i[:, 3:]                       # (B, 6*n_waters)
+            water = i[:, solute_dim:]                       # (B, 6*n_waters)
             water = water.view(B, n_waters, 6)     # (B, n_waters, 6)
 
             O = water[:, :, 0:3]
@@ -481,8 +482,10 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         md_i_diag = target_data_i[:n_diag_i]
         flow_i_diag = flow_i[:n_diag_i]
 
-        md_O, md_omega = split_water_blocks(md_i_diag, n_waters)
-        fl_O, fl_omega = split_water_blocks(flow_i_diag, n_waters)
+        solute_dim = target.internal_dim - 6 * n_waters
+
+        md_O, md_omega = split_water_blocks(md_i_diag, n_waters, solute_dim=solute_dim)
+        fl_O, fl_omega = split_water_blocks(flow_i_diag, n_waters, solute_dim=solute_dim)
 
         md_O_norms = norm_stats("MD O", md_O)
         fl_O_norms = norm_stats("FLOW O", fl_O)
@@ -575,7 +578,8 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             shell_vol = 4.0 * np.pi * (r_centers**2) * dr
             V = L**3
             rho = n_waters / V
-            expected = (B * n_waters) * rho * shell_vol
+            # expected = (B * n_waters) * rho * shell_vol
+            expected = B * rho * shell_vol
 
             g_r = counts / np.maximum(expected, 1e-12)
             g_r[0] = 0.0
@@ -634,31 +638,18 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         # ----------------------------
         fig = plt.figure(figsize=(17, 10))
 
-        # RDF truncated (truncate y-axis)
+        # RDF full
         plt.subplot(2, 2, 1)
         plt.plot(r_md, g_md, label="MD", alpha=0.9)
         plt.plot(r_fl, g_fl, label="Flow", alpha=0.9)
-        plt.xlim(0, L / 2)
-        g_all = np.concatenate([g_md, g_fl])
-        y_hi = max(np.percentile(g_all, 99.5) * 1.1, 0.05)
-        plt.ylim(0, y_hi)
-        plt.xlabel("r (nm)")
-        plt.ylabel("g(r)")
-        plt.title("RDF (truncated y)")
-        plt.legend()
-
-        # RDF full
-        plt.subplot(2, 2, 2)
-        plt.plot(r_md, g_md, label="MD", alpha=0.9)
-        plt.plot(r_fl, g_fl, label="Flow", alpha=0.9)
-        plt.xlim(0, L / 2)
+        plt.xlim(0, L)
         plt.xlabel("r (nm)")
         plt.ylabel("g(r)")
         plt.title("RDF (full)")
         plt.legend()
 
         # Energy truncated to MD percentiles
-        plt.subplot(2, 2, 3)
+        plt.subplot(2, 2, 2)
         nbins = 120
         e_lo, e_hi = np.percentile(md_U_kJ, [0.5, 99.5])
         plt.hist(md_U_kJ, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
@@ -669,7 +660,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.legend()
 
         # Energy “full-ish” (robust): combined 0.1–99.9 percentiles
-        plt.subplot(2, 2, 4)
+        plt.subplot(2, 2, 3)
         e2_lo, e2_hi = np.percentile(np.concatenate([md_U_kJ, fl_U_kJ]), [0.1, 99.9])
         plt.hist(md_U_kJ, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="MD")
         plt.hist(fl_U_kJ, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="Flow")

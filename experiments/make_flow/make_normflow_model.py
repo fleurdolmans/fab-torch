@@ -597,9 +597,11 @@ def make_coupled_spline_flow_nf(cfg: DictConfig, target: TargetDistribution) -> 
         #         scale_clip=2.0,
         #     )
         # )
+        solute_dim = target.internal_dim - 6 * target.num_solvent_molecules
+        
         perm = water_block_permutation(
             dim=dim,
-            n_prefix=3,
+            n_prefix=solute_dim,
             block_size=6,
             seed=cfg.training.seed + k,
         )
