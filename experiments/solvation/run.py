@@ -954,7 +954,9 @@ def _run(cfg: DictConfig) -> None:
             constraint_radius=cfg.target.constraint_radius,
             constraint_force=cfg.target.constraint_force,
             platform_name=cfg.target.platform_name,
-            platform_properties=platform_properties 
+            platform_properties=platform_properties,
+            energy_mode=cfg.training.energy_mode,
+            transform_version=cfg.target.transform_version
             
         )
     else:
@@ -1151,7 +1153,7 @@ def _run(cfg: DictConfig) -> None:
                 "max:", torch.cat([r1_rec, r2_rec]).max().item())
 
             print("[SOLUTE ANGLE] MD O-S-O mean (deg):", (ang_sol_md.mean() * 180 / np.pi).item())
-            print("[SOLUTE ANGLE] FLOW O-S-O mean (deg):", (ang_sol_rec.mean() * 180 / np.pi).item())
+            print("[SOLUTE ANGLE] REC O-S-O mean (deg):", (ang_sol_rec.mean() * 180 / np.pi).item())
 
             # --- 5) Overlap / clash check: min MIC O-O distance ---
             x_from_i_wrapped = wrap(x_from_i, L)

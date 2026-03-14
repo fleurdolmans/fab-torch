@@ -30,6 +30,7 @@ target:                               # Properties of molecular system
   rigid_water: false                  # Rigid water molecules true/false.
 
   # Only used for PBC simulations.     
+  transform_version: v1               # which transform to use: v1, v1_sorted, v2, v2_sorted
   nonbonded_cutoff_nm: 1.0            # Nonbonded cutoff in nm           
   box_length_nm: 2.5                  # Length of the box = (num_solvent_molecules / 33.4)^(1/3) (Liquid water density ≈ 33.4 water molecules / nm^3)
     
@@ -98,10 +99,12 @@ training:                             # Properties of the training procedure
   only_test_run: false                # Bool, whether to only run a test run (for debugging) and then return, or to run the full training procedure.
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4                      # Int, number of workers to be used for data loading
+  # Only for we continueing same are new stage run
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
-  load_optimizer_state: false         # Use optimizer from checkpoint model
-  latest_run: false
-  continue_same_run: false
+  load_optimizer_state: false         # Use optimizer from checkpoint model; only set to true we continueing same run
+  latest_run: false                   # Wheter to pick the latest run in the load folder defined by checkpoint_load_dir or use a specific run
+  continue_same_run: false            # Wheter to continue same run or do stage training
+
   n_iterations: 50000                 # Int, maximum number of iteration
   n_flow_forward_pass: null            # Int, alternative way of setting training time: number of training passes through the flow model.
   batch_size: 1024                    # Int, batch size used during training
@@ -117,9 +120,7 @@ training:                             # Properties of the training procedure
     decay_iter: 1                     # Int, number of iterations before decay for exponential scheduler or LRStep.
   warmup_iter: 0                   # Int, number of iterations used for warmup
   max_grad_norm: 1                    # Double, limit for gradient clipping
-  energy_mode: lj_only
-  mixing: 0.0                         # Percentage of MD sample to include into the loss
-  overlap_penalty: 0                  # Rate to which we penalize overlap in the data.
+  energy_mode: full
   buffer:                             # Buffer args follow below here 
     use: true                         # Whether to use a replay buffer during training.
     prioritised: true                 # If True then FAB loss WILL be used no matter what fab.loss_type is.
@@ -131,6 +132,11 @@ training:                             # Properties of the training procedure
     w_adjust_max_clip: 10             # clipping of weight adjustment factor for prioritised replay
     temp: 1.0                         # Rate that we weight new experience over old (for non-prioritised replay only)
     log_w_clip_frac: null             # Null for no clipping, for non-prioritised replay only.
+    load_buffer: false
+  
+  # Only for reverse kl
+  mixing: 0.0                         # Rate of MD sample to include into the loss; TODO currently only implemented from reverse kl side!!
+  overlap_penalty: 0.0                # Rate to which we penalize overlap in the data.
 
 evaluation:
   eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"

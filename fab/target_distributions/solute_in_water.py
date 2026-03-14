@@ -23,6 +23,7 @@ from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
 from fab.transforms.global_3point_spherical_transform_pbc import PBCGlobal3PointSphericalTransform, PBCGlobal3PointSphericalTransform2
+from fab.transforms.global_3point_spherical_transform_pbc_sorted import PBCGlobal3PointSphericalTransformSorted, PBCGlobal3PointSphericalTransformSorted2
 from fab.transforms.transform_pbc import PBCPreprocessTransform
 
 
@@ -314,6 +315,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         platform_name: str = None,
         platform_properties: Optional[Dict[str, str]] = None,
         energy_mode: str = "full",
+        transform_version: str = "v1"
     ):
         super(SoluteInWater, self).__init__()
 
@@ -331,6 +333,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.boundary_condition = boundary_condition
         self.box_length_nm = box_length_nm
         self.energy_mode = energy_mode
+        self.transform_version = transform_version
 
         if self.energy_mode == "full":
             force_groups = None
@@ -344,9 +347,12 @@ class SoluteInWater(nn.Module, TargetDistribution):
             raise ValueError(f"Unknown energy_mode: {self.energy_mode}")
 
         if self.boundary_condition == "pbc":
-            # self.internal_dim = self.cartesian_dim                    # for cartesian flow
-            # self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-            self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            if self.transform_version == "v1" or self.transform_version == "v1_sorted":
+                self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+
+            if self.transform_version == "v2" or self.transform_version == "v2_sorted":
+                # self.internal_dim = self.cartesian_dim                    # for cartesian flow
+                self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
         else:
             self.internal_dim = self.cartesian_dim - 6
         print(f"Internal dim: {self.internal_dim}")
@@ -437,20 +443,36 @@ class SoluteInWater(nn.Module, TargetDistribution):
             #     anchor_idx=0,
             #     do_center=False,
             # )
-            if self.internal_dim == 138: 
+            if self.transform_version == "v1_sorted":
+                self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted(
+                        L=self.box_length_nm,
+                        system=self.system,
+                        transform_data=self.transform_data.to(device),
+                        internal_dim=self.internal_dim
+                    )
+            elif self.transform_version == "v2":
                 self.coordinate_transform = PBCGlobal3PointSphericalTransform2(
                     L=self.box_length_nm,
                     system=self.system,
                     transform_data=self.transform_data.to(device),
                     internal_dim=self.internal_dim
                 )
-            elif self.internal_dim == 135:
-                self.coordinate_transform = PBCGlobal3PointSphericalTransform(
+            elif self.transform_version == "v2_sorted":
+                self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted2(
                     L=self.box_length_nm,
                     system=self.system,
                     transform_data=self.transform_data.to(device),
                     internal_dim=self.internal_dim
                 )
+            
+            else:
+                self.coordinate_transform = PBCGlobal3PointSphericalTransform(
+                        L=self.box_length_nm,
+                        system=self.system,
+                        transform_data=self.transform_data.to(device),
+                        internal_dim=self.internal_dim
+                    )
+                
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
         

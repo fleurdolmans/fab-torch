@@ -342,6 +342,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     with open(os.path.join(save_path, "config.txt"), "w") as file:
         file.write(str(cfg))
 
+    # 1) Build model
     print("Setting up model...")
     fab_model = setup_model(cfg, target)
     num_model_params = sum(p.numel() for p in fab_model.flow.parameters() if p.requires_grad)
@@ -349,7 +350,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     print(fab_model.flow)
     logger.write({"num_parameters": num_model_params})
 
-    # Initialize optimizer and its parameters
+    # 2) Initialize optimizer and its parameters
     #  Taken from ALDP's train.py.
     lr = cfg.training.lr
     weight_decay = cfg.training.wd
@@ -362,7 +363,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     else:
         raise NotImplementedError("The optimizer " + optimizer_name + " is not implemented.")
     
-    # Scheduler
+    # 3) Scheduler
     scheduler = None
     lr_step = 1
 
@@ -402,24 +403,15 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     else:
         raise NotImplementedError(f"The scheduler {sched_type} is not implemented.")
 
-    # Scheduler warmup
+    # 4) Scheduler warmup
     warmup_iters = cfg.training.warmup_iter if "warmup_iter" in cfg.training and cfg.training.warmup_iter is not None else 0
     warmup_scheduler = None
     if warmup_iters > 0:
         warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda s: min(1.0, s / warmup_iters)
         )
-
-    # Create buffer if needed
-    if cfg.training.buffer.use is True:
-        print("Setting up buffer...")
-        buffer_time = time.time()
-
-        buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=chkpt_dir is None)
-    else:
-        buffer = None
     
-
+    # 5) Load checkpointed model
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
         fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location)
@@ -427,12 +419,26 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         if cfg.training.load_optimizer_state:
             opt_state = torch.load(os.path.join(chkpt_dir, "optimizer.pt"), map_location)
             optimizer.load_state_dict(opt_state)
-        if buffer is not None:
-            buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
-            assert buffer.can_sample, (
-                "If a buffer is loaded, it is expected to contain enough samples to sample from."
-            )
+
+    # 6) Create buffer if needed
+    buffer = None
+    if cfg.training.buffer.use:
+        print("Setting up buffer...")
+        buffer_time = time.time()
+        # Only use buffer when specified or when continuing the same run
+        auto_fill_buffer = not (cfg.training.continue_same_run or cfg.training.buffer.load_buffer)
+        buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=auto_fill_buffer)
+
+    
+
+    # 7) If continuing same run, overwrite prefresh buffer by loading saved buffer
+    if chkpt_dir is not None and cfg.training.continue_same_run and buffer is not None:
+        buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
+        assert buffer.can_sample, (
+            "If a buffer is loaded, it is expected to contain enough samples to sample from."
+        )
         print(f"\n\n**************** Loaded checkpoint: {chkpt_dir}*******************\n\n")
+
     if buffer is not None:
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
         print(f" Buffer setup time: {time.time() - buffer_time:.2f}s")
@@ -443,7 +449,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     # Create trainer
     print("Create trainer...")     
 
-    if buffer:
+    if buffer and cfg.training.buffer.prioritised:
         trainer = PrioritisedBufferTrainer(
             model=fab_model,
             optimizer=optimizer,
@@ -458,12 +464,23 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             alpha=cfg.fab.alpha,
             lr_step=lr_step,
             warmup_scheduler=warmup_scheduler,
-            warmup_iters=warmup_iters,
-            # overlap_penalty=cfg.training.overlap_penalty
+            warmup_iters=warmup_iters
         )
+
+    elif buffer:
+        trainer = BufferTrainer(
+            model=fab_model,
+            optimizer=optimizer,
+            logger=logger,
+            plot=plot,
+            optim_scheduler=scheduler,
+            save_path=save_path,
+            buffer=buffer,
+            n_batches_buffer_sampling=cfg.training.buffer.n_batches_sampling,
+            max_gradient_norm=cfg.training.max_grad_norm
+        )
+
     else:
-        # TODO: Implement this for forward KL training with MD data!
-        # raise NotImplementedError("Buffer-less training doesn't have all changes: 1) no warmup scheduler, 2) ...")
         trainer = Trainer(
             model=fab_model,
             optimizer=optimizer,
