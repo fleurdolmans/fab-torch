@@ -81,7 +81,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
   training.max_grad_norm=5 training.warmup_iter=50 \\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=lj_only\\
+  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
   training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500\\
   evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
 EOF
