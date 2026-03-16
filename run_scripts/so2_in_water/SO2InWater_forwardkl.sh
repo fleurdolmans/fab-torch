@@ -77,8 +77,8 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
+  flow.hidden_units=128 flow.base.type=gauss flow.type=shared-water-spline-nf\\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=5\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
   training.max_grad_norm=5 training.warmup_iter=50 \\
   training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
