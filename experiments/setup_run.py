@@ -28,6 +28,7 @@ from experiments.make_flow import (
     make_wrapped_normflow_snf_model,
     make_wrapped_normflow_solvent_flow,
     make_coupled_spline_flow_nf,
+    make_shared_water_spline_flow_nf,
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -194,7 +195,9 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         dim = cfg.target.cartesian_dim  # applies to flow and target
     p_target = cfg.fab.loss_type not in ALPHA_DIV_TARGET_LOSSES or not cfg.training.buffer.prioritised
 
-    if cfg.flow.type == "coupled-spline-nf":
+    if cfg.flow.type == "shared-water-spline-nf":
+        flow = make_shared_water_spline_flow_nf(cfg, target)
+    elif cfg.flow.type == "coupled-spline-nf":
         flow = make_coupled_spline_flow_nf(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
@@ -307,6 +310,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             iter_number = 0
         else:
             chkpt_dir, iter_number = get_load_checkpoint_dir(cfg.training.checkpoint_load_dir, cfg.training.continue_same_run)
+            print(f"Checkpoint directory: {chkpt_dir}, starting from iteration {iter_number}")
     else:
         chkpt_dir = None
         iter_number = 0

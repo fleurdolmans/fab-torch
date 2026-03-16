@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=01:30:00
+#SBATCH --time=04:30:00
 
 module purge
 module load 2025
@@ -77,12 +77,12 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   flow.base.type=gauss flow.type=coupled-spline-nf\\
   fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=4 fab.transition_operator.init_step_size=0.02 \\
   training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-10/17-22-37_980802 \\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-15/17-34-32_676787 \\
   training.lr=5e-5 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=128\\
   training.buffer.maximum_length=32768 training.buffer.min_length=4096 training.warmup_iter=100\\
   training.max_grad_norm=10 training.buffer.n_batches_sampling=2 training.buffer.w_adjust_max_clip=1\\
-  training.warmup_iter=500 training.n_iterations=500 training.lr_scheduler.decay_iter=500\\
-  evaluation.n_eval=100 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  training.warmup_iter=100 training.n_iterations=500 training.lr_scheduler.decay_iter=500\\
+  evaluation.n_eval=100 evaluation.n_plots=50 evaluation.n_checkpoints=1
 EOF
 
 chmod +x "${SLURM}"
@@ -92,3 +92,4 @@ echo "Submitting GPU job: ${SLURM}"
 sbatch ${SLURM}
 
 # fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=16 fab.transition_operator.target_p_accept=0.8 \\
+# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-10/17-22-37_980802 \\
