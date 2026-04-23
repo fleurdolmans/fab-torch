@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_so2_water
+#SBATCH --job-name=slurm_lj_base_transport
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
@@ -16,10 +16,7 @@ BASE_DIR="${SCRATCH:-$HOME}"
 MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
 
 CONDA_ENV="bgsol"
-
-SOLUTE="so2"
-SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="LJ_test"
 
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch
@@ -41,14 +38,14 @@ mkdir -p "${LOGS_DIR}/logs"   # ensure GPU job logs dir exists
 cat > "${SLURM}" <<EOF
 #!/bin/bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.out
-#SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
+#SBATCH --output=${LOGS_DIR}/logs/slurm-LJ-%j.out
+#SBATCH --error=${LOGS_DIR}/logs/slurm-LJ-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=00:30:00
+#SBATCH --time=00:10:00
 
 module purge
 module load 2025
@@ -70,20 +67,17 @@ nvidia-smi
 
 # We are essentially just using the loss_type and use_ais arguments when doing forward KL training.
 
-python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
-  --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
-  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
-  target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e10 \\
-  target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.type=shared-water-spline-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=5\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64\\
-  training.max_grad_norm=5 training.warmup_iter=50 \\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500\\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
+python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run_LJ.py \\
+  --config-name LJ \\
+  target.base_state=v4 target.target_state=v5 target.solute_sigma_nm=0.4\\
+  fab.loss_type=base_transport fab.use_ais=false \\
+  flow.hidden_units=128 flow.base.type=gauss-uni flow.base.learn_mean_var=false flow.type=lj_coupling_torus\\
+  flow.n_layers=12 flow.layer_nodes_per_dim=4 \\
+  training.lr=7e-5 training.wd=1e-6 training.batch_size=502 evaluation.eval_batch_size=128\\
+  training.max_grad_norm=10 training.warmup_iter=100 \\
+  training.overlap_penalty=0.0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
+  training.n_iterations=300 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=300\\
+  evaluation.n_eval=6 evaluation.n_plots=6 evaluation.n_checkpoints=1 
 EOF
 
 chmod +x "${SLURM}"

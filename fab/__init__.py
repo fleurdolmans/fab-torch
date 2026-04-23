@@ -2,6 +2,8 @@
 
 from .core import FABModel
 from .train import Trainer
+from .train_LJ import TrainerLJ
+from .train_LJ_2D import TrainerLJ2D
 from .train_with_buffer import BufferTrainer
 from .train_with_prioritised_buffer import PrioritisedBufferTrainer
 from .sampling_methods import AnnealedImportanceSampler, HamiltonianMonteCarlo, Metropolis

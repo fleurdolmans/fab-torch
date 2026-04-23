@@ -36,6 +36,7 @@ class Trainer:
         print_eval: bool = False,
         overlap_penalty: Optional[float] = 0.2,
         mixing: Optional[float] = 0.0,
+        n_pretraining: Optional[int] = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -54,6 +55,7 @@ class Trainer:
         self.warmup_iters = warmup_iters
         self.overlap_penalty = overlap_penalty
         self.mixing = mixing
+        self.n_pretraining = n_pretraining
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -261,15 +263,20 @@ class Trainer:
         target_dist.train_data_i = target_dist.train_data_i.reshape(-1, target_dist.internal_dim).contiguous()
         target_dist.train_logdet_xi = target_dist.train_logdet_xi.reshape(-1).contiguous()
 
+        if self.n_pretraining is not None:
+            print(f" Pretraining set: training with {self.n_pretraining} MD samples.")
+            train_data = target_dist.train_data_i[:self.n_pretraining]
+            train_logdet_xi = target_dist.train_logdet_xi[:self.n_pretraining]
+        else:
+            train_data = target_dist.train_data_i
+            train_logdet_xi = target_dist.train_logdet_xi
+
         overlap_w = self.overlap_penalty
-        alpha = self.mixing
 
         global_step = 0
         for t in range(start_iter, n_iterations, 1):
             print("Iteration {}/{}".format(t + 1, n_iterations))
             i = t + 1
-            if self.model.loss_type == "forward_kl" and next_epoch:
-                print(f" The following iterations correspond to epoch {epoch} of Forward KL training.")
             if i % 100 == 1:
                 print(f"  Iteration: {i}/{n_iterations}")
             it_start_time = time()
@@ -279,12 +286,7 @@ class Trainer:
                 # MD training: get the next batch of data and compute the likelihood (loss) under the Flow.
                 # 'i' here represents that the data has already been transformed to internal coordinates, rather than
                 #  Cartesian. This is what we feed into the flow.
-
-                # No cloning necessary here, as we are not modifying the data, just slicing it.
-                train_data = target_dist.train_data_i
-                # Log determinant Jacobian for the transformation from Cartesian to internal coordinates.
-                train_logdet_xi = target_dist.train_logdet_xi
-
+                
                 # shuffle indices once per epoch
                 if k == 0:
                     perm = torch.randperm(train_data.shape[0], device=train_data.device)
@@ -328,11 +330,11 @@ class Trainer:
             # -------------------------------------------------
             # Optional MD mixing term
             # -------------------------------------------------
-            if alpha > 0.0:
+            if self.mixing > 0.0:
                 train_data = target_dist.train_data_i
                 train_logdet_xi = target_dist.train_logdet_xi
 
-                n_mix = int(round(alpha * batch_size))
+                n_mix = int(round(self.mixing * batch_size))
                 n_mix = max(1, min(n_mix, batch_size))
 
                 perm = torch.randperm(train_data.shape[0], device=train_data.device)
@@ -346,11 +348,11 @@ class Trainer:
                 transform_loss_mix = -logdet_batch_mix.mean()
                 data_loss_mix = flow_loss_mix + transform_loss_mix
 
-                loss = alpha * data_loss_mix + (1 - alpha) * loss
+                loss = self.mixing * data_loss_mix + (1 - self.mixing) * loss
 
 
             # -------------------------------------------------
-            # Optional overlap penalty on flow samples
+            # Overlap penalty on flow samples
             # -------------------------------------------------
             if overlap_w > 0.0:
                 B_rev = batch_size
@@ -363,7 +365,7 @@ class Trainer:
                     L=float(target_dist.box_length_nm),
                     n_solute=3,
                     n_waters=int(target_dist.num_solvent_molecules),
-                    r0=0.22,
+                    r0=0.24,
                     k=200.0,
                     chunk=64,
                 )
@@ -373,13 +375,13 @@ class Trainer:
                     L=float(target_dist.box_length_nm),
                     n_solute=3,
                     n_waters=int(target_dist.num_solvent_molecules),
-                    r0_SO=0.26,
-                    r0_OO=0.25,
+                    r0_SO=0.25,
+                    r0_OO=0.20,
                     include_H=False,
-                    k=200.0,
+                    k=100.0,
                 )
 
-                pen = oo_pen + 5 * sw_pen
+                pen = oo_pen + sw_pen
                 loss = loss + overlap_w * pen
 
 

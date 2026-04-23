@@ -53,6 +53,7 @@ class FABModel(Model):
             "flow_alpha_2_div_unbiased",
             "flow_alpha_2_div_nis",
             "target_forward_kl",
+            "base_transport"
         ]
         if loss_type in EXPERIMENTAL_LOSSES:
             warnings.warn("Running using experiment loss not used within the main FAB paper.")
@@ -103,6 +104,8 @@ class FABModel(Model):
             return self.target_forward_kl(args)  # Maximum likelihood (forward KL) using target p distribution.
         elif self.loss_type == "fab_ub_alpha_2_div":
             return self.fab_ub_alpha_div_loss(args)
+        elif self.loss_type == "base_transport":
+            return self.base_transport(args)
         else:
             raise NotImplementedError
 
@@ -188,12 +191,18 @@ class FABModel(Model):
     def forward_kl(self, x_p: torch.Tensor) -> torch.Tensor:
         """Forward kl with estimated using x ~ p(x) where p is the target distribution."""
         return -torch.mean(self.flow.log_prob(x_p))
+    
+    def base_transport(self, z_base: torch.Tensor) -> torch.Tensor:
+        z_mapped, logdet = self.flow.forward_map(z_base)
+        log_p = self.target_distribution.log_prob(z_mapped)
+        return -(log_p + logdet).mean()
 
     def get_iter_info(self) -> Dict[str, Any]:
         if hasattr(self, "annealed_importance_sampler"):
             if hasattr(self.annealed_importance_sampler, "_logging_info"):
                 return self.annealed_importance_sampler.get_logging_info()
         return {}
+    
 
     def get_eval_info(
             self,
@@ -247,10 +256,12 @@ class FABModel(Model):
                 samples=None,
                 log_w=None,
                 log_q_fn=self.flow.log_prob,
-                flow=self.flow,  # Used for generating data
+                flow=self.flow,
                 iteration=iteration,
             )
+
             info.update(flow_info)
+            
 
         return info
 
@@ -260,20 +271,52 @@ class FABModel(Model):
         if hasattr(self, "transition_operator"):
             save_dict.update({"trans_op": self.transition_operator.state_dict()})
         torch.save(save_dict, path)
+    
+    def _partial_load_module(self, module, state_dict, verbose: bool = True):
+        current = module.state_dict()
+
+        matched = {}
+        skipped = []
+
+        for k, v in state_dict.items():
+            if k not in current:
+                skipped.append((k, "missing_in_current"))
+                continue
+            if current[k].shape != v.shape:
+                skipped.append((k, f"shape_mismatch ckpt={tuple(v.shape)} current={tuple(current[k].shape)}"))
+                continue
+            matched[k] = v
+
+        current.update(matched)
+        module.load_state_dict(current, strict=False)
+
+        if verbose:
+            print(f"[partial load] loaded {len(matched)} tensors into {module.__class__.__name__}")
+            if skipped:
+                print(f"[partial load] skipped {len(skipped)} tensors")
+                for k, reason in skipped[:30]:
+                    print(f"  - {k}: {reason}")
+                if len(skipped) > 30:
+                    print("  ...")
 
     def load(
         self,
-        path: "str",
+        path: str,
         map_location: Optional[str] = None,
+        partial_flow_load: bool = False,
     ):
-        """Load FAB model from file."""
         checkpoint = torch.load(path, map_location=map_location)
-        try:
-            self.flow.load_state_dict(checkpoint["flow"])
-        except RuntimeError:
-            # If flow is incorretly loaded then this will mess up evaluation, so raise Error.
-            raise RuntimeError("Flow could not be loaded. " "Perhaps there is a mismatch in the architectures.")
-        
+
+        if partial_flow_load:
+            self._partial_load_module(self.flow, checkpoint["flow"], verbose=True)
+        else:
+            try:
+                self.flow.load_state_dict(checkpoint["flow"])
+            except RuntimeError:
+                raise RuntimeError(
+                    "Flow could not be loaded. Perhaps there is a mismatch in the architectures."
+                )
+
         trans_op = getattr(self, "transition_operator", None)
         if (self.use_ais or self.loss_type in LOSSES_USING_AIS):
             if trans_op is not None and "trans_op" in checkpoint:
@@ -300,3 +343,42 @@ class FABModel(Model):
                 n_intermediate_distributions=self.n_intermediate_distributions,
                 distribution_spacing_type=self.ais_distribution_spacing,
             )
+    # def load(
+    #     self,
+    #     path: "str",
+    #     map_location: Optional[str] = None,
+    # ):
+    #     """Load FAB model from file."""
+    #     checkpoint = torch.load(path, map_location=map_location)
+    #     try:
+    #         self.flow.load_state_dict(checkpoint["flow"])
+    #     except RuntimeError:
+    #         # If flow is incorretly loaded then this will mess up evaluation, so raise Error.
+    #         raise RuntimeError("Flow could not be loaded. " "Perhaps there is a mismatch in the architectures.")
+        
+    #     trans_op = getattr(self, "transition_operator", None)
+    #     if (self.use_ais or self.loss_type in LOSSES_USING_AIS):
+    #         if trans_op is not None and "trans_op" in checkpoint:
+    #             try:
+    #                 trans_op.load_state_dict(checkpoint["trans_op"])
+    #             except RuntimeError:
+    #                 warnings.warn(
+    #                     "Transition operator could not be loaded. "
+    #                     "Perhaps there is a mismatch in the architectures."
+    #                 )
+    #         elif "trans_op" in checkpoint:
+    #             warnings.warn(
+    #                 "Checkpoint contains transition operator state, but current model "
+    #                 "has no transition operator. Skipping trans_op load."
+    #             )
+
+    #     if getattr(self, "annealed_importance_sampler", None) is not None and trans_op is not None:
+    #         self.annealed_importance_sampler = AnnealedImportanceSampler(
+    #             base_distribution=self.flow,
+    #             target_log_prob=self.target_distribution.log_prob,
+    #             transition_operator=trans_op,
+    #             p_target=False,
+    #             alpha=self.alpha,
+    #             n_intermediate_distributions=self.n_intermediate_distributions,
+    #             distribution_spacing_type=self.ais_distribution_spacing,
+    #         )
