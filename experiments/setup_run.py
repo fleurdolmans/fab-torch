@@ -29,6 +29,9 @@ from experiments.make_flow import (
     make_wrapped_normflow_solvent_flow,
     make_coupled_spline_flow_nf,
     make_shared_water_spline_flow_nf,
+    make_perm_equi_spline_flow_nf,
+    make_perm_equi_cnf_flow_nf,
+    make_perm_equi_joint_spline_flow_nf
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -199,6 +202,12 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         flow = make_shared_water_spline_flow_nf(cfg, target)
     elif cfg.flow.type == "coupled-spline-nf":
         flow = make_coupled_spline_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-spline-nf":
+        flow = make_perm_equi_spline_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-cnf-nf":
+        flow = make_perm_equi_cnf_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-joint-spline-nf":
+        flow = make_perm_equi_joint_spline_flow_nf(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
     # elif cfg.flow.type == "circ-coup-nsf":
@@ -297,6 +306,246 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
     )
     return fab_model
 
+def run_initial_flow_sanity_test(fab_model, target, batch_size: int = 8):
+    """
+    Flow-only sanity checks in internal space.
+
+    Checks:
+      1. base sampling/logprob works
+      2. flow inverse(forward(x)) roundtrip in internal space
+      3. permutation equivariance over water blocks
+      4. logdet permutation invariance
+      5. base permutation invariance
+      6. sample stats
+
+    Assumes internal layout:
+      [solute(6) | water_1(6) | ... | water_W(6)]
+    """
+    print("\n=== INITIAL FLOW SANITY TEST ===")
+
+    flow = fab_model.flow
+    solute_dim = 6
+    water_block_dim = 6
+    n_waters = target.num_solvent_molecules
+
+    def permute_water_blocks(i, perm):
+        B = i.shape[0]
+        w = i[:, solute_dim:].view(B, n_waters, water_block_dim)
+        w_perm = w[:, perm, :]
+        return torch.cat([i[:, :solute_dim], w_perm.reshape(B, -1)], dim=-1)
+
+    def get_nf_model(flow):
+        if hasattr(flow, "_nf_model"):
+            return flow._nf_model
+        return flow
+
+    nf_model = get_nf_model(flow)
+
+    def run_forward_all(x):
+        z = x
+        total_logdet = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
+        for fl in nf_model.flows:
+            z, ld = fl(z)
+            total_logdet = total_logdet + ld
+        return z, total_logdet
+
+    def run_inverse_all(z):
+        x = z
+        total_logdet = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
+        for fl in reversed(nf_model.flows):
+            x, ld = fl.inverse(x)
+            total_logdet = total_logdet + ld
+        return x, total_logdet
+    
+    def wrap(x: torch.Tensor, L: float) -> torch.Tensor:
+        return torch.remainder(x, float(L))
+    def dist_pbc(p, q, L):
+        return torch.linalg.norm(mic(p - q, L), dim=-1)
+    
+    def mic(dx: torch.Tensor, L: float) -> torch.Tensor:
+        L_t = torch.as_tensor(float(L), device=dx.device, dtype=dx.dtype)
+        return dx - L_t * torch.round(dx / L_t)
+
+    with torch.no_grad():
+        # --------------------------------------------
+        # 1) pick internal test batch
+        # --------------------------------------------
+        if getattr(target, "val_data_i", None) is not None:
+            i = target.val_data_i[:batch_size].to(target.device).reshape(batch_size, -1)
+        elif getattr(target, "train_data_i", None) is not None:
+            i = target.train_data_i[:batch_size].to(target.device).reshape(batch_size, -1)
+        else:
+            raise ValueError("Need target.val_data_i or target.train_data_i for flow sanity test.")
+
+        print("internal batch shape:", tuple(i.shape))
+
+        # --------------------------------------------
+        # 2) base sampling/logprob
+        # --------------------------------------------
+        try:
+            z0, log_q0 = nf_model.q0(batch_size)
+            print("[BASE] sample shape:", tuple(z0.shape))
+            print("[BASE] log_prob shape:", tuple(log_q0.shape))
+            print("[BASE] sample mean/std:", z0.mean().item(), z0.std(unbiased=False).item())
+        except Exception as e:
+            print("[BASE] sampling/logprob failed:", repr(e))
+
+        # --------------------------------------------
+        # 3) full flow roundtrip
+        # --------------------------------------------
+        try:
+            z, ld_fwd = run_forward_all(i)
+            i_rec, ld_inv = run_inverse_all(z)
+
+            print("[FLOW] max |i - inv(fwd(i))|:", (i - i_rec).abs().max().item())
+            print("[FLOW] mean |i - inv(fwd(i))|:", (i - i_rec).abs().mean().item())
+            print("[FLOW] max |ld_fwd + ld_inv|:", (ld_fwd + ld_inv).abs().max().item())
+        except Exception as e:
+            print("[FLOW] roundtrip failed:", repr(e))
+
+        # --------------------------------------------
+        # 4) permutation equivariance of first layer
+        # --------------------------------------------
+        perm = torch.randperm(n_waters, device=i.device)
+        i_perm = permute_water_blocks(i, perm)
+
+        try:
+            fl0 = nf_model.flows[0]
+            z1, ld1 = fl0(i)
+            z2, ld2 = fl0(i_perm)
+
+            z1_expected = permute_water_blocks(z1, perm)
+
+            print("[FLOW layer 0] perm equiv max err:",
+                  (z2 - z1_expected).abs().max().item())
+            print("[FLOW layer 0] perm equiv mean err:",
+                  (z2 - z1_expected).abs().mean().item())
+            print("[FLOW layer 0] logdet perm inv max err:",
+                  (ld2 - ld1).abs().max().item())
+        except Exception as e:
+            print("[FLOW layer 0] permutation test failed:", repr(e))
+
+        # --------------------------------------------
+        # 5) permutation equivariance of whole flow
+        # --------------------------------------------
+        try:
+            z_full_1, ld_full_1 = run_forward_all(i)
+            z_full_2, ld_full_2 = run_forward_all(i_perm)
+
+            z_full_expected = permute_water_blocks(z_full_1, perm)
+
+            print("[FULL FLOW] perm equiv max err:",
+                  (z_full_2 - z_full_expected).abs().max().item())
+            print("[FULL FLOW] perm equiv mean err:",
+                  (z_full_2 - z_full_expected).abs().mean().item())
+            print("[FULL FLOW] logdet perm inv max err:",
+                  (ld_full_2 - ld_full_1).abs().max().item())
+        except Exception as e:
+            print("[FULL FLOW] permutation test failed:", repr(e))
+
+        # --------------------------------------------
+        # 6) base permutation invariance
+        # --------------------------------------------
+        try:
+            if hasattr(nf_model.q0, "log_prob"):
+                logq1 = nf_model.q0.log_prob(i)
+                logq2 = nf_model.q0.log_prob(i_perm)
+                print("[BASE] permutation invariance max err:",
+                      (logq1 - logq2).abs().max().item())
+                print("[BASE] permutation invariance mean err:",
+                      (logq1 - logq2).abs().mean().item())
+            else:
+                print("[BASE] no log_prob method; skipping permutation invariance test")
+        except Exception as e:
+            print("[BASE] permutation invariance test failed:", repr(e))
+
+        # --------------------------------------------
+        # 7) quick sample stats from current model
+        # --------------------------------------------
+        try:
+            if hasattr(flow, "sample_and_log_prob"):
+                samp, logq = flow.sample_and_log_prob((batch_size,))
+            elif hasattr(nf_model, "sample"):
+                samp, logq = nf_model.sample(batch_size)
+            else:
+                raise RuntimeError("No sample method found")
+
+            print("[FLOW sample] shape:", tuple(samp.shape))
+            print("[FLOW sample] mean/std:", samp.mean().item(), samp.std(unbiased=False).item())
+
+            # oxygen norms in internal space
+            O = samp[:, solute_dim:].view(batch_size, n_waters, 6)[..., 0:3]
+            O_norm = torch.linalg.norm(O, dim=-1)
+
+            print("[FLOW sample] O norm median:",
+                  O_norm.median().item(),
+                  "p10:", torch.quantile(O_norm.reshape(-1), 0.10).item(),
+                  "p90:", torch.quantile(O_norm.reshape(-1), 0.90).item(),
+                  "max:", O_norm.max().item())
+        except Exception as e:
+            print("[FLOW sample] sampling stats failed:", repr(e))
+        
+        # [FLOW sample] already sampled in internal space as `samp`
+        x_samp, _ = target.coordinate_transform.forward(samp)
+        x_samp = x_samp.view(batch_size, -1, 3)
+        L = float(target.box_length_nm)
+        x_samp_w = wrap(x_samp, L)
+
+        # oxygen positions
+        O_idx = [3 + 3 * k for k in range(target.num_solvent_molecules)]
+        O = x_samp_w[:, O_idx, :]  # (B, W, 3)
+
+        # min O-O
+        min_oo = []
+        for i in range(target.num_solvent_molecules):
+            for j in range(i + 1, target.num_solvent_molecules):
+                dij = dist_pbc(O[:, i, :], O[:, j, :], L)
+                min_oo.append(dij)
+        min_oo = torch.stack(min_oo, dim=1).min(dim=1).values
+
+        # solute atoms
+        solute = x_samp_w[:, :3, :]  # (B,3,3)
+
+        # min solute-O
+        min_solO = []
+        for i in range(target.num_solvent_molecules):
+            for a in range(3):
+                d = dist_pbc(O[:, i, :], solute[:, a, :], L)
+                min_solO.append(d)
+        min_solO = torch.stack(min_solO, dim=1).min(dim=1).values
+
+        # hydrogens
+        H_idx = []
+        for k in range(target.num_solvent_molecules):
+            base = 3 + 3 * k
+            H_idx.extend([base + 1, base + 2])
+        H = x_samp_w[:, H_idx, :]
+
+        # min solute-H
+        min_solH = []
+        for h in range(H.shape[1]):
+            for a in range(3):
+                d = dist_pbc(H[:, h, :], solute[:, a, :], L)
+                min_solH.append(d)
+        min_solH = torch.stack(min_solH, dim=1).min(dim=1).values
+
+        print("[FLOW sample distances] min O-O median", min_oo.median().item(),
+            "p10", torch.quantile(min_oo, 0.1).item(),
+            "p90", torch.quantile(min_oo, 0.9).item(),
+            "min", min_oo.min().item())
+
+        print("[FLOW sample distances] min solute-O median", min_solO.median().item(),
+            "p10", torch.quantile(min_solO, 0.1).item(),
+            "p90", torch.quantile(min_solO, 0.9).item(),
+            "min", min_solO.min().item())
+
+        print("[FLOW sample distances] min solute-H median", min_solH.median().item(),
+            "p10", torch.quantile(min_solH, 0.1).item(),
+            "p90", torch.quantile(min_solH, 0.9).item(),
+            "min", min_solH.min().item())
+
+    print("=== END INITIAL FLOW SANITY TEST ===\n")
+
 
 def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, target: TargetDistribution):
     """Setup model and train."""
@@ -329,17 +578,7 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
         pathlib.Path(save_path).mkdir(parents=True, exist_ok=True)
 
     n_iterations = cfg.training.n_iterations
-    # n_iterations = get_n_iterations(
-    #     n_training_iter=cfg.training.n_iterations,
-    #     n_flow_forward_pass=cfg.training.n_flow_forward_pass,
-    #     batch_size=cfg.training.batch_size,
-    #     loss_type=cfg.fab.loss_type,
-    #     n_transition_operator_inner_steps=cfg.fab.transition_operator.n_inner_steps,
-    #     n_intermediate_ais_dist=cfg.fab.n_intermediate_distributions,
-    #     transition_operator_type=cfg.fab.transition_operator.type,
-    #     use_buffer=cfg.training.buffer.user,
-    #     min_buffer_length=cfg.training.buffer.min_length,
-    # )
+
     print(f"Running for {n_iterations} iterations.")
     cfg.training.n_iterations = n_iterations
 
@@ -353,6 +592,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     print(f" Model with {num_model_params} parameters")
     print(fab_model.flow)
     logger.write({"num_parameters": num_model_params})
+
+    run_initial_flow_sanity_test(fab_model, target, batch_size=min(8, cfg.evaluation.n_eval if hasattr(cfg.evaluation, "n_eval") else 8))
 
     # 2) Initialize optimizer and its parameters
     #  Taken from ALDP's train.py.
@@ -418,30 +659,30 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
     # 5) Load checkpointed model
     if chkpt_dir is not None:
         map_location = "cuda" if torch.cuda.is_available() and cfg.training.use_gpu else "cpu"
-        fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location)
+        fab_model.load(os.path.join(chkpt_dir, "model.pt"), map_location, partial_flow_load=cfg.training.transfer_learning)
         
         if cfg.training.load_optimizer_state:
             opt_state = torch.load(os.path.join(chkpt_dir, "optimizer.pt"), map_location)
             optimizer.load_state_dict(opt_state)
 
-    # 6) Create buffer if needed
     buffer = None
+    # 6) Create buffer if needed
     if cfg.training.buffer.use:
         print("Setting up buffer...")
         buffer_time = time.time()
         # Only use buffer when specified or when continuing the same run
-        auto_fill_buffer = not (cfg.training.continue_same_run or cfg.training.buffer.load_buffer)
-        buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=auto_fill_buffer)
+        buffer = setup_buffer(cfg, fab_model, auto_fill_buffer=not cfg.training.buffer.load_buffer)
 
     
-
-    # 7) If continuing same run, overwrite prefresh buffer by loading saved buffer
-    if chkpt_dir is not None and cfg.training.continue_same_run and buffer is not None:
+    # 7) If load_buffer, load saved buffer
+    if cfg.training.buffer.load_buffer:
         buffer.load(path=os.path.join(chkpt_dir, "buffer.pt"))
         assert buffer.can_sample, (
             "If a buffer is loaded, it is expected to contain enough samples to sample from."
         )
-        print(f"\n\n**************** Loaded checkpoint: {chkpt_dir}*******************\n\n")
+    print(f"\n\n**************** Loaded checkpoint: {chkpt_dir}*******************\n\n")
+
+
 
     if buffer is not None:
         print(f" Initialised buffer with {buffer.get_buffer_size()} points.")
@@ -498,7 +739,8 @@ def setup_trainer_and_run_flow(cfg: DictConfig, setup_plotter: SetupPlotterFn, t
             warmup_scheduler=warmup_scheduler,
             warmup_iters=warmup_iters,
             overlap_penalty=cfg.training.overlap_penalty,
-            mixing=cfg.training.mixing
+            mixing=cfg.training.mixing,
+            n_pretraining=cfg.training.n_pretraining,
         )
 
     print("Starting training...")

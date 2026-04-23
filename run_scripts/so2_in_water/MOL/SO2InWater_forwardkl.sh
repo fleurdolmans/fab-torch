@@ -1,11 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_water_water
+#SBATCH --job-name=slurm_so2_water
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
+
 set -euo pipefail
 
 PROJECT_NAME="fab-torch"
@@ -16,7 +17,7 @@ MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
 
 CONDA_ENV="bgsol"
 
-SOLUTE="water"
+SOLUTE="so2"
 SOLVENT="water"
 JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
 
@@ -46,16 +47,18 @@ cat > "${SLURM}" <<EOF
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_h100
-#SBATCH --time=00:30:00
+#SBATCH --partition=gpu_a100
+#SBATCH --time=00:05:00
 
 module purge
 module load 2025
 module load Anaconda3/2025.06-1
 
 source \$(conda info --base)/etc/profile.d/conda.sh
-conda deactivate
 conda activate ${CONDA_ENV}
+
+python -c "import sys, hydra; print('PY', sys.executable, 'hydra', hydra.__version__)"
+python -c "import numpy; from openmm import app; print('numpy', numpy.__version__, 'openmm app OK')"
 
 export PYTHONPATH="${LOGS_DIR}/${PROJECT_NAME}:\$PYTHONPATH"
 export HYDRA_FULL_ERROR=1
@@ -69,34 +72,25 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} \\
-  target.solute_xml_path=null target.simulation_version=v10\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=coupled-spline-nf\\
+  flow.hidden_units=128 flow.base.type=structured-solute-gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf\\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=5e-5 training.wd=1e-6 training.batch_size=256 evaluation.eval_batch_size=64\\
-  training.max_grad_norm=10 training.warmup_iter=100 training.n_pretraining=100\\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500\\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1 
+  training.lr=5e-5 training.wd=1e-6 training.batch_size=502 evaluation.eval_batch_size=128\\
+  training.max_grad_norm=10 training.warmup_iter=100 \\
+  training.overlap_penalty=50 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
+  training.n_iterations=600 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=600\\
+  evaluation.n_eval=12 evaluation.n_plots=12 evaluation.n_checkpoints=1 
 EOF
-
-# python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
-#   --config-name SoluteInSolvent \\
-#   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.boundary_condition=pbc\\
-#   target.solute_xml_path=null target.simulation_version=v4\\
-#   target.box_length_nm=2.5 target.num_solvent_molecules=522 target.internal_constraints=hbonds target.rigid_water=true \\
-#   fab.loss_type=forward_kl fab.use_ais=false \\
-#   flow.blocks=12 flow.hidden_units=256 \\
-#   training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false \\
-#   evaluation.n_eval=100 evaluation.n_plots=100 evaluation.n_checkpoints=1
-
 
 chmod +x "${SLURM}"
 
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
+# training.n_pretraining=100
+# flow.type=coupled-spline-nf
+# 

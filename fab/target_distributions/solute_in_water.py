@@ -22,9 +22,11 @@ from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
 from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
-from fab.transforms.global_3point_spherical_transform_pbc import PBCGlobal3PointSphericalTransform, PBCGlobal3PointSphericalTransform2
-from fab.transforms.global_3point_spherical_transform_pbc_sorted import PBCGlobal3PointSphericalTransformSorted, PBCGlobal3PointSphericalTransformSorted2
+from fab.transforms.global_3point_spherical_transform_pbc import PBCRigidWaterTorusSO3Transform, PBCGlobal3PointSphericalTransform, PBCGlobal3PointSphericalTransform2, PBCGlobal3PointSphericalTransform3, PBCFixedSoluteTransform
+from fab.transforms.global_3point_spherical_transform_pbc_sorted import PBCGlobal3PointSphericalTransformSorted, PBCGlobal3PointSphericalTransformSorted2, PBCFixedSoluteTransformSorted
+from fab.transforms.global_3point_spherical_transform_pbc_old import PBCFixedSoluteRadialWaterTransform, PBCFixedSoluteSequentialOOTransform
 from fab.transforms.transform_pbc import PBCPreprocessTransform
+from fab.utils.numerical import effective_sample_size
 
 
 
@@ -150,54 +152,68 @@ class TriatomicInWaterSys(TestSystem):
                     constraints=constraints_dict[self.internal_constraints],
                     rigidWater=self.rigid_water,
                 )
-                nb = None
+                for j, f in enumerate(self.system.getForces()):
+                    print(
+                        j,
+                        type(f).__name__,
+                        getattr(f, "usesPeriodicBoundaryConditions", lambda: "n/a")(),
+                        getattr(f, "getExceptionsUsePeriodicBoundaryConditions", lambda: "n/a")(),
+                    )
+
                 for force in self.system.getForces():
                     if isinstance(force, mm.HarmonicBondForce):
                         force.setUsesPeriodicBoundaryConditions(True)
+                    if isinstance(force, mm.HarmonicAngleForce):
+                        force.setUsesPeriodicBoundaryConditions(True)
+                    if isinstance(force, mm.PeriodicTorsionForce):
+                        force.setUsesPeriodicBoundaryConditions(True)
                     if isinstance(force, mm.NonbondedForce):
                         force.setExceptionsUsePeriodicBoundaryConditions(True)
-                        nb = force
                 
-                if nb is None:
-                    raise RuntimeError("No NonbondedForce found in system.")
+                # if nb is None:
+                #     raise RuntimeError("No NonbondedForce found in system.")
                 
-                nb_coul = mm.NonbondedForce()
-                nb_coul.setName("CoulombForce")
-                nb_lj = mm.NonbondedForce()
-                nb_lj.setName("LennardJonesForce")
+                # nb_coul = mm.NonbondedForce()
+                # nb_coul.setName("CoulombForce")
+                # nb_lj = mm.NonbondedForce()
+                # nb_lj.setName("LennardJonesForce")
 
-                for f in (nb_coul, nb_lj):
-                    f.setNonbondedMethod(nb.getNonbondedMethod())
-                    f.setCutoffDistance(nb.getCutoffDistance())
-                    try:
-                        f.setUseDispersionCorrection(nb.getUseDispersionCorrection())
-                    except Exception:
-                        pass
-                    try:
-                        f.setEwaldErrorTolerance(nb.getEwaldErrorTolerance())
-                    except Exception:
-                        pass
-                    f.setExceptionsUsePeriodicBoundaryConditions(True)
-                for i in range(nb.getNumParticles()):
-                    q, sigma, epsilon = nb.getParticleParameters(i)
+                # for f in (nb_coul, nb_lj):
+                #     f.setNonbondedMethod(nb.getNonbondedMethod())
+                #     f.setCutoffDistance(nb.getCutoffDistance())
+                #     try:
+                #         f.setUseDispersionCorrection(nb.getUseDispersionCorrection())
+                #     except Exception:
+                #         pass
+                #     try:
+                #         f.setEwaldErrorTolerance(nb.getEwaldErrorTolerance())
+                #     except Exception:
+                #         pass
+                #     f.setExceptionsUsePeriodicBoundaryConditions(True)
+                # for i in range(nb.getNumParticles()):
+                #     q, sigma, epsilon = nb.getParticleParameters(i)
 
-                    nb_coul.addParticle(q, sigma, 0.0 * epsilon)
-                    nb_lj.addParticle(0.0 * q, sigma, epsilon)
+                #     nb_coul.addParticle(q, sigma, 0.0 * epsilon)
+                #     nb_lj.addParticle(0.0 * q, sigma, epsilon)
                                     
-                for i in range(nb.getNumExceptions()):
-                    p1, p2, q, sigma, epsilon = nb.getExceptionParameters(i)
+                # for i in range(nb.getNumExceptions()):
+                #     p1, p2, q, sigma, epsilon = nb.getExceptionParameters(i)
 
                     
-                    nb_coul.addException(p1, p2, q, sigma, 0.0 * epsilon)
-                    nb_lj.addException(p1, p2, 0.0 * q, sigma, epsilon)
+                #     nb_coul.addException(p1, p2, q, sigma, 0.0 * epsilon)
+                #     nb_lj.addException(p1, p2, 0.0 * q, sigma, epsilon)
                 
 
-                self.system.addForce(nb_coul)
-                self.system.addForce(nb_lj)
+                # self.system.addForce(nb_coul)
+                # self.system.addForce(nb_lj)
 
                 for j, force in enumerate(self.system.getForces()):
                     force.setForceGroup(j)
                     print(f"[ForceGroup] group={j} type={type(force).__name__} name={force.getName()}")
+                
+                print("system num forces:", self.system.getNumForces())
+                for j, f in enumerate(self.system.getForces()):
+                    print("SYSTEM", j, type(f).__name__, f.getName(), f.getForceGroup())
                 
             else:
                 raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'pbc'.")
@@ -315,7 +331,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
         platform_name: str = None,
         platform_properties: Optional[Dict[str, str]] = None,
         energy_mode: str = "full",
-        transform_version: str = "v1"
+        transform_version: str = "v1",
+        curriculum_type: Optional[str] = None,
+        curriculum_lambda: float = 1.0,
+        curriculum_soft_energy_cut: float = 1.0
     ):
         super(SoluteInWater, self).__init__()
 
@@ -334,6 +353,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.box_length_nm = box_length_nm
         self.energy_mode = energy_mode
         self.transform_version = transform_version
+        self.curriculum_type = curriculum_type
+        self.curriculum_lambda = curriculum_lambda
+        self.curriculum_soft_energy_cut = curriculum_soft_energy_cut
 
         if self.energy_mode == "full":
             force_groups = None
@@ -347,14 +369,23 @@ class SoluteInWater(nn.Module, TargetDistribution):
             raise ValueError(f"Unknown energy_mode: {self.energy_mode}")
 
         if self.boundary_condition == "pbc":
-            if self.transform_version == "v1" or self.transform_version == "v1_sorted":
-                self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-
-            if self.transform_version == "v2" or self.transform_version == "v2_sorted":
+            fixed_list = ["fixed", "fixed_sorted", "fixed_radial_water", "fixed_sequential_oo"]
+            if self.transform_version == "v2" or self.transform_version == "v2_sorted" or self.transform_version == "so2_rigid_gauge":
                 # self.internal_dim = self.cartesian_dim                    # for cartesian flow
                 self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+            elif self.transform_version == "v3":
+                self.internal_dim = 9 + 6 * self.num_solvent_molecules 
+            
+            elif self.transform_version in fixed_list:
+                self.internal_dim = 6 * self.num_solvent_molecules          # for internal cooridinate flow
+            else:
+                if self.transform_version != "v1" and self.transform_version != "v1_sorted":
+                    print(f"Unknown transform_version: {self.transform_version}. Using 'v1' as default.")
+                self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
+
         else:
             self.internal_dim = self.cartesian_dim - 6
+        
         print(f"Internal dim: {self.internal_dim}")
         self.logger = logger
         self.save_dir = save_dir
@@ -457,12 +488,55 @@ class SoluteInWater(nn.Module, TargetDistribution):
                     transform_data=self.transform_data.to(device),
                     internal_dim=self.internal_dim
                 )
+            
+            elif self.transform_version == "v3":
+                self.coordinate_transform = PBCGlobal3PointSphericalTransform3(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    internal_dim=self.internal_dim
+                )
+            elif self.transform_version == "rigid_torus":
+                self.coordinate_transform = PBCRigidWaterTorusSO3Transform(
+                    L=self.box_length_nm,
+                    transform_data=self.transform_data.to(device)
+                )
+            elif self.transform_version == "fixed":
+                self.coordinate_transform = PBCFixedSoluteTransform(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device)
+                )
+            elif self.transform_version == "fixed_sorted":
+                self.coordinate_transform = PBCFixedSoluteTransformSorted(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    internal_dim=self.internal_dim
+                )
             elif self.transform_version == "v2_sorted":
                 self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted2(
                     L=self.box_length_nm,
                     system=self.system,
                     transform_data=self.transform_data.to(device),
                     internal_dim=self.internal_dim
+                )
+            elif self.transform_version == "fixed_radial_water":
+                self.coordinate_transform = PBCFixedSoluteRadialWaterTransform(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    r_min=0.28,                  # 0.26–0.32
+                    sort_waters_by_radius=True,
+                )
+            elif self.transform_version == "fixed_sequential_oo":
+                self.coordinate_transform = PBCFixedSoluteSequentialOOTransform(
+                    L=self.box_length_nm,
+                    system=self.system,
+                    transform_data=self.transform_data.to(device),
+                    r_min=0.28,
+                    oo_min=0.20,
+                    sort_waters_by_radius=True,
                 )
             
             else:
@@ -535,7 +609,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 energy_cut=energy_cut,
                 energy_max=energy_max,
                 transform=self.coordinate_transform, 
-                force_groups=force_groups          
+                force_groups=force_groups,
+                curriculum_type=self.curriculum_type,
+                curriculum_lambda=self.curriculum_lambda,
+                curriculum_soft_energy_cut=self.curriculum_soft_energy_cut
             )
 
     # @staticmethod
@@ -663,10 +740,17 @@ class SoluteInWater(nn.Module, TargetDistribution):
             assert flow, (
                 "Flow model must be provided for generating evaluation samples if none are provided."
             )
+
             # num_flow_samples = len(target_data_i)  # Use same number of Flow and MD samples.
             num_flow_samples = target_data_i_eval.shape[0]  # match n_eval
             with torch.no_grad():
-                flow_samples, _ = flow.sample_and_log_prob((num_flow_samples,))
+                flow_samples, flow_log_q = flow.sample_and_log_prob((num_flow_samples,))
+                log_p = self.log_prob(flow_samples)
+                log_w = log_p - flow_log_q
+                n_clipped = getattr(self.p, "n_clipped", 0)
+                # These ESS values will be spurious if the Flow and/or Flow+AIS is missing modes.
+                summary_dict["eval_ess_flow"] = effective_sample_size(log_w, normalised=False).item()
+                summary_dict["flow_frac_clipped"] = n_clipped / float(num_flow_samples)
         else:  # Samples provided (can be Flow or Flow+AIS samples).
             flow_samples = samples
 
@@ -711,68 +795,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 json.dump(summary_dict, f)
         else:
             warnings.warn("No summary metrics were computed.")
+    
 
         return summary_dict
-    
-    # def find_bad_frames_bisect(
-    #     self,
-    #     X: torch.Tensor,
-    #     name: str,
-    #     chunk_size: int = 8192,
-    #     msg_substring: str = "Found rotation around axis with x=0 outside of coordinate setup.",
-    #     max_bad: int | None = None,
-    #     ):
-
-    #     """
-    #     Find indices of frames in X that cause coordinate_transform.inverse() to raise a specific ValueError.
-    #     Uses chunk testing + bisection to avoid O(N) per-frame calls.
-    #     """
-    #     assert X.ndim == 2, f"{name}: expected (n_frames, dim), got {tuple(X.shape)}"
-    #     if X.shape[1] != self.cartesian_dim:
-    #         raise ValueError(
-    #             f"{name}: dim mismatch: X.shape[1]={X.shape[1]} vs cartesian_dim={self.cartesian_dim}"
-    #         )
-
-    #     X = X.to(self.device)
-    #     n = X.shape[0]
-    #     bad = []
-
-    #     def fails(i0: int, i1: int) -> bool:
-    #         try:
-    #             with torch.no_grad():
-    #                 _ = self.coordinate_transform.inverse(X[i0:i1])
-    #             return False
-    #         except ValueError as e:
-    #             if msg_substring in str(e):
-    #                 return True
-    #             raise  # other errors should still surface
-
-    #     print("Finding bad frames via bisection...")
-    #     # 1) coarse scan
-    #     failing_ranges = []
-    #     for i0 in range(0, n, chunk_size):
-    #         i1 = min(n, i0 + chunk_size)
-    #         if fails(i0, i1):
-    #             failing_ranges.append((i0, i1))
-
-    #     # 2) bisect failing ranges to isolate failing frames
-    #     stack = failing_ranges[:]
-    #     while stack:
-    #         i0, i1 = stack.pop()
-    #         if i1 - i0 == 1:
-    #             bad.append(i0)
-    #             if max_bad is not None and len(bad) >= max_bad:
-    #                 break
-    #             continue
-    #         mid = (i0 + i1) // 2
-    #         if fails(i0, mid):
-    #             stack.append((i0, mid))
-    #         if fails(mid, i1):
-    #             stack.append((mid, i1))
-
-    #     bad = sorted(set(bad))
-    #     print(f"[{name}] total={n} bad={len(bad)} rate={len(bad)/max(1,n):.3e}")
-    #     if bad:
-    #         print(f"[{name}] first bad indices: {bad[:20]}")
-    #     return bad
     

@@ -7,53 +7,62 @@ hydra:
   searchpath:
       - file://${oc.env:MAIN_DIR}/config
   run:
-    dir: ${node.output_dir}/SoluteIn${target.solvent_name}/${target.solute_name}_in_${target.solvent_name}/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
+    dir: ${node.output_dir}/LJ/MD_training/${now:%Y-%m-%d}/${now:%H-%M-%S_%f} # Default Hydra output dir: all run output will be stored in subfolders of this.
   job:
     chdir: true
 
-target:                               # Properties of molecular system
-  solute_name: water                  # Name of the solute molecule. Default is water.
-  solvent_name: water                 # Name of solvent molecules (currently only water is supported).
-  cartesian_dim: 459                  # System dimension: 3 * (3 + 3 * num_solvent_molecules) for water in water (xyz).
-  num_solvent_molecules: 50           # Number of solvent molecules to simulate. 
-  temperature: 300                    # Double, temperature of the system
-  energy_cut: 1.e+8                   # Double, energy level at which regularization shall be applied
-  energy_max: 1.e+20                  # Double, maximum level at which energies will be clamped
-  n_threads: 1                        # Int, number of threads to be used, number of cores if null (ONLY ON CPU/Reference))
-  solute_pdb_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.pdb           # Filepath to solvent pdb
-  solute_xml_path: ${node.data_dir}/molecules/solutes/${target.solute_name}.xml           # Filepath to solvent xml. Not needed for water solute, fill in null in that case.
-  solute_inpcrd_path: null            # Filepath to solvent inpcrd; currently unused.
-  solute_prmtop_path: null            # Filepath to solvent prmtop; currently unused.
+target:                                         # Properties of particle system
+  temperature: 100                              # Double, temperature of the system
+  energy_cut: 1.e+12                             # Double, energy level at which regularization shall be applied
+  energy_max: 1.e+24                            # Double, maximum level at which energies will be clamped
+  n_threads: 1                                  # Int, number of threads to be used, number of cores if null (ONLY ON CPU/Reference))
+  switch_nm: 0.5                                # Switching distance; tau = 0.2 ps -> gamma = 1/tau = 5 ps^-1
 
-  # Below properties for molecule systems
-  boundary_condition: droplet         # Boundary conditions to use: "pbc" or "droplet".
-  internal_constraints: "none"        # "none" or "hbonds": "none" for non-rigid water molecules.
-  rigid_water: false                  # Rigid water molecules true/false.
+  # PBC system parameters
+  transform_version: v1                         # which transform to use: v1, v1_sorted, v2, v2_sorted
+  cartesian_dim: 300                            # System dimension: 3 * (n_solvent + n_solute) (xyz).
+  n_solvent: 99                                 # Number of solvent particles to simulate.                       
+  box_length_nm: 1.69                           # Length of the box
+  nonbonded_cutoff_nm: 0.8                      # Nonbonded cutoff in nm; should be larger than the largest possible distance between two particles in the box 
+  grid_spacing_nm: 0.36                         # Minimum distance between particles during initialization in nm; should be smaller than the solvent size to avoid large overlaps. 
+
+  # solvent LJ params
+  solvent_sigma_nm: 0.34                        # Solvent particles size parameter in nm.
+  solvent_epsilon_kjmol: 0.996                  # Solvent particles energy parameter in kJ/mol.
+  solvent_mass_amu: 39.9                        # Solvent particle mass in atomic mass units (amu).
+
+  # one fixed solute
+  solute_positions_nm:
+    - [0.90, 0.90, 0.90]
+
+  solute_sigma_nm: 0.30                         # Solute particle size parameter in nm.
+  solute_epsilon_kjmol: 0.996                   # Solute particle energy parameter in kJ/mol.
+  solute_mass_amu: 39.9                          # Solutes masses in atomic mass units (amu);kept fixed.
+
+  constrain_solutes: true
+  solute_solute_interaction: false
+
+  # Nosé–Hoover collision frequency.
+  # OpenMM docs suggest using a larger value for initial equilibration.
+  nose_hoover_collision_ps: 25.0
+  solid: false
 
 
-  # Only used for PBC simulations.   
-  transform_version: v1               # which transform to use: v1, v1_sorted, v2, v2_sorted
-  nonbonded_cutoff_nm: 1.0            # Nonbonded cutoff in nm           
-  box_length_nm: 2.5                  # Length of the box = (num_solvent_molecules / 33.4)^(1/3) (Liquid water density ≈ 33.4 water molecules / nm^3)
-    
-  # Only used for droplet simulations.                 
-  external_constraints: true
-  constraint_radius: 0.3     #0.8     # Radius of the constraint sphere around the center in nm. Should be rounded to whole Angstrom.
-  constraint_force: 10000.0           # Force constant of the spherical droplet constraint in kJ/mol/nm^2
-    
   # MD simulation parameters
-  equi_steps: 1e4                     # Equilibration steps.
-  burnin_steps: 1e5                   # Burn-in steps.
-  num_steps: 1e7                      # Total number of steps to simulate after equilibration and burn-in.
-  femtoseconds_per_timestep: 0.5      # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
-  save_interval: 10                   # Save every this many steps. Total frames saved is num_steps / save_interval.
+  femtoseconds_per_timestep: 1.5                # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
+  gradient_steps: 5e4                           # Gradient steps.
+  nh_steps: 5e5                                 # Nosé–Hoover steps; should be large enough to equilibrate the system at the target temperature. 
+  burnin_steps: 5e5                             # Burn-in steps.
+  production_steps: 7_000_000                   # Production steps; 10.5 ns at dt = 1.5 fs = 7,000,000 steps
+  save_interval: 7e4                            # Save every this many steps. Total frames saved is num_steps / save_interval.
+  diagnostics_filename: run_statistics.txt      # Where to store MD diagnostics plots.
 
   # Filepaths to load samples from
-  simulation_version: v1              # Version name for the simulation; used in output filenames.
-  md_data_dir: ${node.data_dir}/molecules/md/${target.solute_name}/${target.boundary_condition}/${target.simulation_version}/      # Directory where MD data is stored.
-  samples_file: traj_${target.solute_name}In${target.solvent_name}.h5
-  train_samples_path: ${target.md_data_dir}/${target.samples_file}
-  val_samples_path: ${target.md_data_dir}/${target.samples_file}
+  base_state: v1                                # Base state MD simulation
+  target_state: v2                              # Target state MD simulation
+  samples_file: traj_lj_particles.h5
+  train_samples_path: ${node.data_dir}/LJ/md/${target.base_state}/${target.samples_file}
+  val_samples_path: ${node.data_dir}/LJ/md/${target.target_state}/${target.samples_file}
   test_samples_path: null
   platform_name: CUDA                 # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
@@ -61,29 +70,40 @@ target:                               # Properties of molecular system
   curriculum_type: null
   curriculum_lambda: 1.0
   curriculum_soft_energy_cut: 0.0
+  seed: 0
 
 
 flow:                                 # Properties of the flow model
-  # solvent_flow: true                  # Bool, specifies model: this should be `true` for solute-solvent settings.
-  # use_snf: false                      # Bool, flag whether to use Stochastic Flow; should be false when using `solvent_flow`.
-  # resampled_base: false               # Bool, flag whether to use resampled base distribution; should be false when using `solvent_flow`.
-  # type: circ-coup-nsf                 # String, type of the flow: "circ-coup-nsf", "circ-ar-nsf"
-  type: coupled-spline-nf                 # String, type of the flow: "flat-coupled-spline-nf", "shared-water-spline-nf"
+  type: realnvp                       # String, type of flow model; currently only supports 'realnvp'
   base:
     type: gauss-uni
     params: null
     learn_mean_var: false             # Bool, flag whether to learn mean and variance of base distribution.
-  layers: 36                          # Int, number of layers of the flow; only used if blocks_per_layer is not specified.
-  blocks: 36  # 12                    # Int, somewhat confusingly, this is the number of LAYERS, which is the same as the number of blocks if blocks_per_layer=1.
-                                      #  If blocks_per_layer > 1, then blocks = blocks_per_layer * layers.
-  blocks_per_layer: 1                 # Int, number of blocks per layer
-  hidden_units: 512  # 256            # Int, number of hidden units of the NN in neural spline layers
+    shell_radii_nm: [0.34, 0.42, 0.52]
+    # shell_weights: [0.40, 0.50, 0.62]
+    
+    # shell_weights: [0.20, 0.45, 0.35]
+    shell_weights: [0.45, 0.35, 0.20]
+    component_sigma_unit: 0.018
+    n_directions: 48
+    add_uniform_component: false
+    crowding_strength: 20.0
+    crowding_sigma_nm: 0.08
+    hard_core_nm: 0.26
+    hard_core_strength: 10.0
+    image_range: 1
+    uniform_weight: 0.10 
+
+  n_layers: 36                        # Int, number of layers of the flow;
+  layer_nodes_per_dim: 1              # Int, layer nodes per dimension
+  hidden_units: 256                   # Int, number of hidden units of the NN in neural spline layers
+  n_hidden_conditioner: 2
   num_bins: 8                         # Int, number of bins of the neural splines
   init_identity: True                 # Bool, flag whether to initialize layers as identity map
   dropout: 0.                         # Float, dropout probability for the NN layers
                                       # For below: if specified, a permutation, and a affine coupling layer
   circ_shift: random                  # String, whether to shift circular coordinates, can be none, constant, or random
-  actnorm: False                      # Bool, flag whether to include an ActNorm layers
+  act_norm: False                      # Bool, flag whether to include an ActNorm layers
   mixing: null                        # String, how features are mixed
   tail_bound: 4.0                     # Float, tail bound for spline flows; assumes data is roughly standardized to unit variance.
   group_size: 6                       # Int, size of groups for coupling layers; should be 6 for solvent flows (corresponding to xyz of each molecule)
@@ -106,7 +126,7 @@ training:                             # Properties of the training procedure
   only_test_run: false                # Bool, whether to only run a test run (for debugging) and then return, or to run the full training procedure.
   seed: 0                             # Int, seed to be used for the random number generator
   num_workers: 4                      # Int, number of workers to be used for data loading
-  # Only for we continueing same are new stage run
+  # Only for when we continueing same with new stage run
   checkpoint_load_dir: null           # Checkpoint dir to load from if continuing training
   load_optimizer_state: false         # Use optimizer from checkpoint model; only set to true we continueing same run
   latest_run: false                   # Wheter to pick the latest run in the load folder defined by checkpoint_load_dir or use a specific run
@@ -118,7 +138,7 @@ training:                             # Properties of the training procedure
   tlimit: null                        # Int, time limit of run in seconds
   use_gpu: true
   use_64_bit: true
-  lr: 5.e-4                           # Double, learning rate
+  lr: 7.e-5                           # Double, learning rate
   wd: 1.e-5                           # Double, regularization parameter
   optimizer: adam                     # String, name of the optimizer
   lr_scheduler:
@@ -145,7 +165,11 @@ training:                             # Properties of the training procedure
   
   # Only for reverse kl
   mixing: 0.0                         # Rate of MD sample to include into the loss; TODO currently only implemented from reverse kl side!!
-  overlap_penalty: 0.0                # Rate to which we penalize overlap in the data.
+  overlap:                # Rate to which we penalize overlap in the data.
+    penalty: 0.0                     # Penalty for overlap; currently implemented as a hard penalty on the energy of the system when particles are closer than a certain distance.
+    dist_ssolv: 0.31                  # Distance under which we consider particles to be overlapping in nm; should be smaller than solvent size to avoid penalizing valid configurations.
+    dist_solute: 0.31                 # Distance under which we consider solute and solvent particles to be overlapping in nm; should be smaller than solvent size to avoid penalizing valid configurations.
+  save_traj: false                    # Whether to save a trajectory of the flow samples during training.
 
 evaluation:
   eval_mode: "val"                    # String, mode of evaluation, can be "val" or "test"
@@ -160,8 +184,8 @@ evaluation:
 
 logger:
   wandb:
-    name: ${target.boundary_condition}_${target.simulation_version}_${fab.loss_type}_dim${target.cartesian_dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
-    project: ${target.boundary_condition}_${fab.loss_type}_${target.solute_name}_in_${target.solvent_name}
+    name: LJ_B${target.base_state}_T${target.target_state}_${fab.loss_type}_dim${target.cartesian_dim}_nl${flow.n_layers}
+    project: LJ_${fab.loss_type}
     entity: ${user.wandb.entity}
 #  pandas_logger:
 #    save_period: 100                 # how often to save the pandas dataframe as a csv

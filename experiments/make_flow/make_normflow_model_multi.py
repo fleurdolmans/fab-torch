@@ -345,14 +345,56 @@ class SoluteSplineCoupling(nf.flows.Flow):
         z_out[:, self.transform_idx] = x_t
         return z_out, log_det
 
+def make_structured_diag_gaussian_from_target(target, learn_mean_var: bool = True, eps: float = 1e-3):
+    """
+    Create a diagonal Gaussian base initialized from target internal-coordinate statistics.
+    """
+    import normflows as nf
+    import torch
+
+    dim = target.internal_dim
+
+    # Prefer train data, then val, then transform_data mapped to i-space
+    if getattr(target, "train_data_i", None) is not None:
+        data_i = target.train_data_i
+    elif getattr(target, "val_data_i", None) is not None:
+        data_i = target.val_data_i
+    else:
+        # fallback: use single reference transformed point
+        with torch.no_grad():
+            ref_x = target.transform_data.reshape(1, -1).to(target.device)
+            data_i, _ = target.coordinate_transform.inverse(ref_x)
+
+    data_i = data_i.detach()
+    mean = data_i.mean(dim=0)
+    std = data_i.std(dim=0).clamp_min(eps)
+
+    base = nf.distributions.DiagGaussian(dim, trainable=learn_mean_var)
+
+    # normflows stores loc/log_scale as parameters in many versions
+    with torch.no_grad():
+        if hasattr(base, "loc"):
+            base.loc.copy_(mean)
+        if hasattr(base, "log_scale"):
+            base.log_scale.copy_(torch.log(std))
+
+    return base
+
 def make_shared_water_spline_flow_nf(cfg: DictConfig, target):
     dim = target.internal_dim
 
     if cfg.flow.base.type == "gauss":
         base = nf.distributions.DiagGaussian(dim, trainable=cfg.flow.base.learn_mean_var)
+    elif cfg.flow.base.type == "structured-gauss":
+        base = make_structured_diag_gaussian_from_target(
+            target,
+            learn_mean_var=cfg.flow.base.learn_mean_var,
+        )
     else:
-        raise NotImplementedError("Only gaussian base implemented.")
-
+        raise NotImplementedError(
+            "Supported base types: 'gauss', 'structured-gauss'."
+        )
+        
     solute_dim = target.internal_dim - 6 * target.num_solvent_molecules
     assert solute_dim in (3, 6)
 

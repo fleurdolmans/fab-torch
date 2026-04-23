@@ -26,7 +26,7 @@ class TransformedBoltzmann(nn.Module):
     Boltzmann distribution with respect to transformed variables, uses OpenMM to get energy and forces.
     """
 
-    def __init__(self, sim_context, temperature, energy_cut, energy_max, transform, force_groups):
+    def __init__(self, sim_context, temperature, energy_cut, energy_max, transform, force_groups, curriculum_type, curriculum_lambda, curriculum_soft_energy_cut):
         """
         Constructor
         :param sim_context: Context of the simulation object used for energy
@@ -35,6 +35,9 @@ class TransformedBoltzmann(nn.Module):
         :param energy_cut: Energy at which logarithm is applied
         :param energy_max: Maximum energy
         :param transform: Coordinate transformation
+        :param curriculum_type: Type of curriculum
+        :param curriculum_lambda: Lambda parameter for curriculum
+        :param curriculum_soft_energy_cut: Soft energy cut parameter for curriculum
         """
         super().__init__()
         # Save input parameters
@@ -47,12 +50,42 @@ class TransformedBoltzmann(nn.Module):
         self.openmm_energy = OpenMMEnergyInterface.apply
         self.regularize_energy = regularize_energy
         self.force_groups = force_groups
+        self.curriculum_type = curriculum_type
+        self.curriculum_lambda = curriculum_lambda
+        self.curriculum_soft_energy_cut = curriculum_soft_energy_cut
 
-        self.norm_energy = lambda pos: self.regularize_energy(
-            self.openmm_energy(pos, self.sim_context, temperature, self.force_groups)[:, 0], self.energy_cut, self.energy_max, 
-        )
+        # self.norm_energy = lambda pos: self.regularize_energy(
+        #     self.openmm_energy(pos, self.sim_context, temperature, self.force_groups)[:, 0], self.energy_cut, self.energy_max, 
+        # )
+        self.n_clipped = 0
+        self.norm_energy = lambda pos: self.curriculum_energy(self.openmm_energy(pos, self.sim_context, temperature, self.force_groups)[:, 0])
+
 
         self.transform = transform
+
+    def curriculum_energy(self, energy: torch.Tensor) -> torch.Tensor:
+        if self.curriculum_type is None:
+            energy_reg, n_clipped = self.regularize_energy(energy, self.energy_cut, self.energy_max)
+
+        elif self.curriculum_type == "temperature":
+            # lambda scaling: <1 means effectively higher temperature / flatter target
+            energy = self.curriculum_lambda * energy
+            energy_reg, n_clipped = self.regularize_energy(energy, self.energy_cut, self.energy_max)
+
+        elif self.curriculum_type == "soft_cut":
+            soft_cut = torch.tensor(
+                self.curriculum_soft_energy_cut,
+                device=energy.device,
+                dtype=energy.dtype,
+            )
+            energy_reg, n_clipped = self.regularize_energy(energy, soft_cut, self.energy_max)
+
+        else:
+            raise ValueError(f"Unknown curriculum_type: {self.curriculum_type}")
+        
+        self.n_clipped = n_clipped
+        return energy_reg
+
 
     def log_prob(self, z):
         """
@@ -61,9 +94,6 @@ class TransformedBoltzmann(nn.Module):
         z, log_det = self.transform(z)  # I --> X
         energy_term = -self.norm_energy(z)
 
-        if torch.rand(1).item() < 0.01:
-            U = (-energy_term).detach().cpu()
-            print("[Boltzmann] U(kBT) mean", U.mean().item(), "max", U.max().item(), "min", U.min().item())
         #  UNITS: We add logdetjac to energy, because energy is essentially log probability.
         #   Energy has units of kJ/mol by default (openMM). If we divide energy by N_A kBT = R * T,
         #   we get kJ/mol / (kJ/mol) = unitless!
@@ -270,16 +300,17 @@ def regularize_energy(energy, energy_cut, energy_max):
     # Check whether energy finite
     energy_finite = torch.isfinite(energy)
 
-    
-    ## Cap the energy at energy_max
-    # energy = torch.where(energy < energy_max, energy, energy_max)
-    ## Make it logarithmic above energy cut and linear below
-    # energy = torch.where(energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut)
-    # energy = torch.where(energy_finite, energy, torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
+    n_clipped = (energy >= energy_cut).sum().item() # count clipped values (before clipping!)
 
-    # Soft cap
-    energy = smooth_min(energy, energy_max)
-    energy = torch.where(energy < energy_cut, energy, energy_cut + torch.log1p((energy - energy_cut).clamp_min(0.0)))
+    # Cap the energy at energy_max
+    energy = torch.where(energy < energy_max, energy, energy_max)
+    # Make it logarithmic above energy cut and linear below
+    energy = torch.where(energy < energy_cut, energy, torch.log(energy - energy_cut + 1) + energy_cut)
+    energy = torch.where(energy_finite, energy, torch.tensor(np.nan, dtype=energy.dtype, device=energy.device))
+
+    # # Soft cap
+    # energy = smooth_min(energy, energy_max)
+    # energy = torch.where(energy < energy_cut, energy, energy_cut + torch.log1p((energy - energy_cut).clamp_min(0.0)))
     
-    energy = torch.where(energy_finite, energy, torch.full_like(energy, float("nan")))
-    return energy
+    # energy = torch.where(energy_finite, energy, torch.full_like(energy, float("nan")))
+    return energy, n_clipped

@@ -1,0 +1,87 @@
+# Config file specifying the setup of a Boltzmann Generator
+hydra:
+  searchpath:
+    - file://${oc.env:MAIN_DIR}/config
+
+defaults:
+  - entry 
+  - _self_
+
+simulation_version: v1                                                            # Version name for the simulation; used in output filenames.
+out_dir: ${node.data_dir}/LJ/md/${simulation_version}/      # Where to store resulting MD frames.
+
+create_md: true                               # Run the MD simulation true/false.
+validate_md: true                             # Validate the MD simulation true/false.
+
+platform_name: CUDA                           # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
+device_index: 0
+
+temperature: 100.0                            # Temperature in Kelvin.
+femtoseconds_per_timestep: 1.5                # Timestep size in femtoseconds (e.g., 0.5 means a timestep is 0.5fs)
+# switch_nm: 0.5                                # Switching distance; tau = 0.2 ps -> gamma = 1/tau = 5 ps^-1
+seed: 0
+
+# MD simulation parameters
+gradient_steps: 5e4                           # Gradient steps.
+nh_steps: 5e5                                 # Nosé–Hoover steps; should be large enough to equilibrate the system at the target temperature. 
+burnin_steps: 5e5                             # Burn-in steps.
+production_steps: 7_000_000                   # Production steps; 10.5 ns at dt = 1.5 fs = 7,000,000 steps
+save_interval: 7e3                            # Save every this many steps. Total frames saved is num_steps / save_interval.
+diagnostics_filename: run_statistics.txt      # Where to store MD diagnostics plots.
+
+
+box_length_nm: 1.20
+nonbonded_cutoff_nm: 0.55
+switch_nm: 0.40
+
+solvent_sigma_nm: 0.34
+solvent_epsilon_kjmol: 0.996
+solvent_mass_amu: 39.9
+
+solute_sigma_nm: 0.34
+solute_epsilon_kjmol: 0.996
+solute_mass_amu: 0.0
+constrain_solutes: true
+solute_solute_interaction: false
+
+# # PBC system parameters
+n_solvent: 31                                 # Number of solvent particles to simulate.                       
+# box_length_nm: 1.16                           # Length of the box
+# nonbonded_cutoff_nm: 0.52                      # Nonbonded cutoff in nm; should be larger than the largest possible distance between two particles in the box 
+grid_spacing_nm: 0.20                         # Minimum distance between particles during initialization in nm; should be smaller than the solvent size to avoid large overlaps. 
+
+# # solvent LJ params
+# solvent_sigma_nm: 0.34                        # Solvent particles size parameter in nm.
+# solvent_epsilon_kjmol: 0.996                 # Solvent particles energy parameter in kJ/mol.
+# solvent_mass_amu: 39.9                        # Solvent particle mass in atomic mass units (amu).
+
+# # # two fixed solutes
+# solute_positions_nm:
+#   - [0.54, 0.90, 0.90]
+#   - [0.90, 0.90, 0.90]
+
+# # solute_sigma_nm: [0.38, 0.30]                 # Solute particle A and B sizes parameter in nm.
+# # solute_epsilon_kjmol: [0.997, 0.997]          # Solute particle A and B energy parameters in kJ/mol.
+# # solute_mass_amu: 0.0   
+
+# # one fixed solute
+solute_positions_nm:
+  - [0.60, 0.60, 0.60]
+
+solid: False                                       # Whether to initialize the system in a solid-like configuration (true/false); if false, initializes in a random configuration.  
+
+# solute_sigma_nm: 0.38                         # Solute particle size parameter in nm.
+# solute_epsilon_kjmol: 0.996                   # Solute particle energy parameters in kJ/mol.
+# solute_mass_amu: 0.0                          # Solute mass in atomic mass units (amu);kept fixed.
+
+# constrain_solutes: true
+# solute_solute_interaction: false
+
+# Nosé–Hoover collision frequency.
+# OpenMM docs suggest using a larger value for initial equilibration.
+nose_hoover_collision_ps: 25.0
+
+
+plot:
+  md_diagnostics: true                      # Plot MD diagnostics after simulation true/false.
+  show: false                               # Show plots interactively true/false.

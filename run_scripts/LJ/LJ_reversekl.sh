@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_so2_water
+#SBATCH --job-name=slurm_lj_reversekl
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
 #SBATCH --partition=staging
@@ -16,10 +16,7 @@ BASE_DIR="${SCRATCH:-$HOME}"
 MAIN_DIR="${BASE_DIR}/${PROJECT_NAME}"
 
 CONDA_ENV="bgsol"
-
-SOLUTE="so2"
-SOLVENT="water"
-JOB_NAME="${SOLUTE}_in_${SOLVENT}_test"
+JOB_NAME="LJ_test"
 
 # Launch dir
 LAUNCH_DIR=${MAIN_DIR}/launch
@@ -41,14 +38,14 @@ mkdir -p "${LOGS_DIR}/logs"   # ensure GPU job logs dir exists
 cat > "${SLURM}" <<EOF
 #!/bin/bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.out
-#SBATCH --error=${LOGS_DIR}/logs/slurm-${SOLUTE}-%j.err
+#SBATCH --output=${LOGS_DIR}/logs/slurm-LJ-%j.out
+#SBATCH --error=${LOGS_DIR}/logs/slurm-LJ-%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
-#SBATCH --partition=gpu_a100
-#SBATCH --time=00:30:00
+#SBATCH --partition=gpu_h100
+#SBATCH --time=01:40:00
 
 module purge
 module load 2025
@@ -70,27 +67,27 @@ nvidia-smi
 
 # We are essentially just using the loss_type and use_ais arguments when doing reverse KL training.
 
-python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
-  --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
-  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
-  target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e10 \\
-  target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.type=coupled-spline-nf \\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3 \\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=64 \\
-  training.max_grad_norm=5 training.warmup_iter=10 \\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-10/17-22-37_980802 \\
-  training.overlap_penalty=0 training.mixing=0.5 training.energy_mode=full target.transform_version=v1\\
-  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500 \\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
+python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run_LJ.py \\
+  --config-name LJ \\
+  target.base_state=v10 target.target_state=v10 target.solid=false\\
+  target.solute_sigma_nm=0.38 target.solvent_sigma_nm=0.34 target.n_solvent=32\\
+  target.energy_cut=1.e+20 target.energy_max=1.e+30 target.temperature=100\\
+  fab.loss_type=flow_reverse_kl fab.use_ais=false \\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/LJ/MD_training/2026-04-18/14-37-42_995342 \\
+  flow.hidden_units=128 flow.base.type=multishell-torus flow.base.learn_mean_var=false flow.type=lj_torus_spline\\
+  flow.n_layers=6 flow.layer_nodes_per_dim=4 flow.hidden_units=128 flow.num_bins=8 \\
+  training.lr=1e-5 training.wd=1e-6 training.batch_size=64 evaluation.eval_batch_size=32\\
+  training.max_grad_norm=10 training.warmup_iter=50 \\
+  training.overlap.penalty=1.0 training.overlap.dist_ssolv=0.32 training.overlap.dist_solute=0.35 training.mixing=0.2 training.energy_mode=full target.transform_version=v4\\
+  training.n_iterations=200 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=200\\
+  evaluation.n_eval=4 evaluation.n_plots=4 evaluation.n_checkpoints=1 
 EOF
-
-
 
 chmod +x "${SLURM}"
 
 echo "Submitting GPU job: ${SLURM}"
 
+
 sbatch ${SLURM}
+
+# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/LJ/MD_training/2026-04-20/12-31-20_576657 \\
