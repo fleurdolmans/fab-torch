@@ -984,9 +984,13 @@ class PeriodicSolventFeatureExtractor(nn.Module):
 
         self.feature_dim = 6 + 2 + n_rbf_ss + n_rbf_su
 
-    def forward(self, u: torch.Tensor):
+    def forward(self, u: torch.Tensor, channel_mask=None):
         """
         u: (B, N, 3) in [0,1)
+        channel_mask: optional bool tensor broadcastable to (3,); the same
+                      dimensions are zeroed in the stored solute positions so
+                      that solute-solvent distances are computed in the same
+                      frozen-coordinate subspace as the solvent positions.
 
         returns:
             feats: (B, N, F)
@@ -998,7 +1002,10 @@ class PeriodicSolventFeatureExtractor(nn.Module):
 
         L = torch.as_tensor(self.box_length_nm, device=device, dtype=dtype)
         solute_nm = self.solute_positions_nm.to(device=device, dtype=dtype)
-        solute_u = wrap_unit(solute_nm / L)
+        solute_u = wrap_unit(solute_nm / L)   # (K, 3)
+        if channel_mask is not None:
+            cm = channel_mask.view(3).to(device=device, dtype=torch.bool)
+            solute_u = solute_u.masked_fill(cm.view(1, 3), 0.0)
 
         angle = 2.0 * math.pi * u
         periodic_embed = torch.cat([torch.sin(angle), torch.cos(angle)], dim=-1)
@@ -1152,7 +1159,7 @@ class PeriodicParticleSplineCoupling(nn.Module):
         mask = self.channel_mask.to(device=u.device)
         u_frozen = u.masked_fill(mask, 0.0)
 
-        feats, d_ss = self.feature_extractor(u_frozen)
+        feats, d_ss = self.feature_extractor(u_frozen, channel_mask=mask)
         raw_params = self.conditioner(feats, d_ss)  # (B,N, 3*params_per_dim)
 
         B, N, _ = raw_params.shape
@@ -1198,7 +1205,7 @@ class PeriodicParticleSplineCoupling(nn.Module):
         mask = self.channel_mask.to(device=y.device)
         y_frozen = y.masked_fill(mask, 0.0)
 
-        feats, d_ss = self.feature_extractor(y_frozen)
+        feats, d_ss = self.feature_extractor(y_frozen, channel_mask=mask)
         raw_params = self.conditioner(feats, d_ss)
 
         B, N, _ = raw_params.shape
