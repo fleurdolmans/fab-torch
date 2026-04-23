@@ -1032,6 +1032,109 @@ class PeriodicSolventFeatureExtractor(nn.Module):
 
 
 # ============================================================
+# Cross-group feature extractor for particle-group split coupling
+# ============================================================
+
+class CrossGroupFeatureExtractor(nn.Module):
+    """
+    Per-active-particle features using own frozen coordinates AND frozen group's full 3D positions.
+
+    Key improvement over PeriodicSolventFeatureExtractor:
+      - Cross-group distances d_ab use the frozen group's ACTUAL active-dimension coordinate,
+        providing richer conditioning than the 2D-projected within-group distances.
+
+    forward(u_active, u_frozen):
+        u_active: (B, N_A, 3)  — active coord zeroed, own frozen coords present
+        u_frozen: (B, N_F, 3)  — ALL 3 coords available (not coord-masked)
+    Returns:
+        feats: (B, N_A, F)
+        d_aa:  (B, N_A, N_A) within-active MIC distances in nm
+    """
+
+    def __init__(
+        self,
+        box_length_nm: float,
+        solute_positions_nm: torch.Tensor,
+        n_rbf_aa: int = 16,
+        n_rbf_ab: int = 16,
+        n_rbf_su: int = 16,
+        rbf_aa_max_nm: Optional[float] = None,
+        rbf_ab_max_nm: Optional[float] = None,
+        rbf_su_max_nm: Optional[float] = None,
+        crowding_alpha: float = 12.0,
+    ):
+        super().__init__()
+        self.box_length_nm = float(box_length_nm)
+        self.crowding_alpha = float(crowding_alpha)
+
+        solute_positions_nm = torch.as_tensor(solute_positions_nm, dtype=torch.float64)
+        if solute_positions_nm.ndim != 2 or solute_positions_nm.shape[1] != 3:
+            raise ValueError("solute_positions_nm must have shape (n_solute, 3)")
+        self.register_buffer("solute_positions_nm", solute_positions_nm)
+
+        if rbf_aa_max_nm is None:
+            rbf_aa_max_nm = 0.5 * self.box_length_nm
+        if rbf_ab_max_nm is None:
+            rbf_ab_max_nm = 0.5 * self.box_length_nm
+        if rbf_su_max_nm is None:
+            rbf_su_max_nm = 0.5 * self.box_length_nm
+
+        self.rbf_aa = RBFFeatures(n_rbf=n_rbf_aa, r_max=float(rbf_aa_max_nm))
+        self.rbf_ab = RBFFeatures(n_rbf=n_rbf_ab, r_max=float(rbf_ab_max_nm))
+        self.rbf_su = RBFFeatures(n_rbf=n_rbf_su, r_max=float(rbf_su_max_nm))
+
+        self.feature_dim = 6 + 2 + n_rbf_aa + n_rbf_ab + n_rbf_su
+
+    def forward(self, u_active: torch.Tensor, u_frozen: torch.Tensor):
+        """
+        u_active: (B, N_A, 3) in [0,1) — active coord zeroed
+        u_frozen: (B, N_F, 3) in [0,1) — ALL 3 coords, NOT coord-masked
+
+        Returns:
+            feats: (B, N_A, F)
+            d_aa:  (B, N_A, N_A) within-active MIC distances in nm
+        """
+        B, N_A, _ = u_active.shape
+        device = u_active.device
+        dtype = u_active.dtype
+
+        L = torch.as_tensor(self.box_length_nm, device=device, dtype=dtype)
+
+        # Own periodic embedding (uses frozen coords of active particles)
+        angle = 2.0 * math.pi * u_active
+        periodic_embed = torch.cat([torch.sin(angle), torch.cos(angle)], dim=-1)  # (B, N_A, 6)
+
+        # Within-active-group MIC distances (active coord zeroed → 2D projected)
+        du_aa = mic_unit(u_active[:, :, None, :] - u_active[:, None, :, :])   # (B,N_A,N_A,3)
+        dx_aa = L * du_aa
+        d_aa = torch.linalg.norm(dx_aa, dim=-1)                                # (B,N_A,N_A)
+
+        eye_aa = torch.eye(N_A, device=device, dtype=torch.bool).view(1, N_A, N_A)
+        d_aa_masked = d_aa.masked_fill(eye_aa, float("inf"))
+        d_nn_aa = d_aa_masked.min(dim=-1).values                                # (B, N_A)
+        crowding_aa = torch.exp(-self.crowding_alpha * d_aa).masked_fill(eye_aa, 0.0).sum(dim=-1)  # (B, N_A)
+        rbf_aa = self.rbf_aa(d_aa).masked_fill(eye_aa.unsqueeze(-1), 0.0).sum(dim=2)              # (B, N_A, n_rbf_aa)
+
+        # Cross-group MIC distances: active to frozen (frozen has FULL 3D coords — key improvement)
+        du_ab = mic_unit(u_active[:, :, None, :] - u_frozen[:, None, :, :])    # (B,N_A,N_F,3)
+        dx_ab = L * du_ab
+        d_ab = torch.linalg.norm(dx_ab, dim=-1)                                # (B,N_A,N_F)
+        rbf_ab = self.rbf_ab(d_ab).sum(dim=2)                                   # (B, N_A, n_rbf_ab)
+
+        # Active to solute distances
+        solute_nm = self.solute_positions_nm.to(device=device, dtype=dtype)
+        solute_u = wrap_unit(solute_nm / L)                                     # (K, 3)
+        du_as = mic_unit(u_active[:, :, None, :] - solute_u.view(1, 1, -1, 3)) # (B,N_A,K,3)
+        dx_as = L * du_as
+        d_as = torch.linalg.norm(dx_as, dim=-1)                                # (B,N_A,K)
+        rbf_as = self.rbf_su(d_as).sum(dim=2)                                   # (B, N_A, n_rbf_su)
+
+        scalar = torch.stack([d_nn_aa, crowding_aa], dim=-1)                    # (B, N_A, 2)
+        feats = torch.cat([periodic_embed, scalar, rbf_aa, rbf_ab, rbf_as], dim=-1)  # (B, N_A, F)
+        return feats, d_aa
+
+
+# ============================================================
 # Equivariant message-passing conditioner
 # ============================================================
 
@@ -1242,6 +1345,171 @@ class PeriodicParticleSplineCoupling(nn.Module):
 
         logdet = logabsdet.sum(dim=(-1, -2))
         return x, logdet
+
+
+# ============================================================
+# Hybrid particle-group + coordinate-split coupling
+# ============================================================
+
+class HybridGroupCoordSplineCoupling(nn.Module):
+    """
+    Coupling layer combining particle-group split and coordinate-dimension split.
+
+    Active group (group_mask=True particles): their active coordinate dimension
+    is updated with an RQ spline conditioned on:
+      - Their own frozen (non-active) coordinates  [per-particle differentiation]
+      - The frozen group's FULL 3D positions        [richer cross-group distances]
+
+    Key improvement over pure coordinate-split (PeriodicParticleSplineCoupling):
+      Cross-group distances use the frozen group's actual value of the active-dimension
+      coordinate, so d_ab includes x_B in the x-layer (not just yz-projected distances).
+
+    Accepts and returns u: (B, N, 3) — same interface as PeriodicParticleSplineCoupling,
+    so WrappedTorusSplineFlow can be reused unchanged.
+    """
+
+    def __init__(
+        self,
+        feature_extractor: "CrossGroupFeatureExtractor",
+        conditioner: TorusEquivariantSplineConditioner,
+        channel_mask: Sequence[int],
+        group_mask,   # (N,) bool tensor or list: True for active particle group
+        num_bins: int = 8,
+        min_bin_width: float = 1e-3,
+        min_bin_height: float = 1e-3,
+        min_derivative: float = 1e-3,
+    ):
+        super().__init__()
+        if len(channel_mask) != 3:
+            raise ValueError("channel_mask must have length 3")
+
+        self.feature_extractor = feature_extractor
+        self.conditioner = conditioner
+        self.num_bins = int(num_bins)
+        self.tail_bound = 0.5
+        self.min_bin_width = float(min_bin_width)
+        self.min_bin_height = float(min_bin_height)
+        self.min_derivative = float(min_derivative)
+
+        coord_mask = torch.as_tensor(channel_mask, dtype=torch.bool).view(1, 1, 3)
+        self.register_buffer("channel_mask", coord_mask)
+
+        grp_mask = torch.as_tensor(group_mask, dtype=torch.bool)  # (N,)
+        self.register_buffer("group_mask", grp_mask)
+
+        self.active_idx = [i for i, v in enumerate(channel_mask) if v == 1]
+        self.n_active = len(self.active_idx)
+        self.params_per_dim = 3 * self.num_bins - 1
+
+    def center_unit(self, u: torch.Tensor) -> torch.Tensor:
+        return wrap_unit(u) - 0.5
+
+    def uncenter_unit(self, x: torch.Tensor) -> torch.Tensor:
+        return wrap_unit(x + 0.5)
+
+    def _compute_params(self, u: torch.Tensor):
+        """
+        Compute spline parameters from frozen inputs only.
+
+        All inputs used for conditioning are frozen (unchanged in both forward and inverse),
+        so these params are identical in the forward and inverse passes — ensuring invertibility.
+        """
+        group_mask = self.group_mask.to(device=u.device)
+        coord_mask = self.channel_mask.to(device=u.device)
+
+        group_idx = torch.where(group_mask)[0]    # (N_A,)
+        frozen_idx = torch.where(~group_mask)[0]  # (N_F,)
+
+        u_active = u[:, group_idx, :]   # (B, N_A, 3)
+        u_frozen = u[:, frozen_idx, :]  # (B, N_F, 3) — full 3D, NOT coord-masked
+
+        # Zero the active coordinate in the active group (frozen part of coord-split)
+        u_active_masked = u_active.masked_fill(coord_mask, 0.0)  # (B, N_A, 3)
+
+        feats, d_aa = self.feature_extractor(u_active_masked, u_frozen)  # (B, N_A, F)
+        raw_params = self.conditioner(feats, d_aa)  # (B, N_A, 3 * params_per_dim)
+
+        B, N_A, _ = raw_params.shape
+        raw_params = raw_params.view(B, N_A, 3, self.params_per_dim)
+
+        active = torch.as_tensor(self.active_idx, device=u.device, dtype=torch.long)
+        params = raw_params[:, :, active, :]  # (B, N_A, n_active, params_per_dim)
+
+        widths = params[..., :self.num_bins]
+        heights = params[..., self.num_bins:2 * self.num_bins]
+        derivatives = params[..., 2 * self.num_bins:]
+
+        return widths, heights, derivatives, group_idx, u_active
+
+    def forward(self, u: torch.Tensor):
+        """u: (B, N, 3) in [0,1)"""
+        param = next(self.conditioner.parameters())
+        u = u.to(device=param.device, dtype=param.dtype)
+        u = wrap_unit(u)
+
+        widths, heights, derivatives, group_idx, u_active = self._compute_params(u)
+
+        u_a = u_active[..., self.active_idx]   # (B, N_A, n_active)
+        u_a_c = self.center_unit(u_a)
+
+        y_a_c, logabsdet = unconstrained_rational_quadratic_spline(
+            inputs=u_a_c,
+            unnormalized_widths=widths,
+            unnormalized_heights=heights,
+            unnormalized_derivatives=derivatives,
+            inverse=False,
+            tails="linear",
+            tail_bound=self.tail_bound,
+            min_bin_width=self.min_bin_width,
+            min_bin_height=self.min_bin_height,
+            min_derivative=self.min_derivative,
+        )
+
+        y_a = self.uncenter_unit(y_a_c)
+
+        y = u.clone()
+        y_active = u_active.clone()
+        y_active[..., self.active_idx] = y_a
+        y[:, group_idx, :] = wrap_unit(y_active)
+
+        logdet = logabsdet.sum(dim=(-1, -2))  # sum over N_A particles × n_active dims
+        return y, logdet
+
+    def inverse(self, y: torch.Tensor):
+        """y: (B, N, 3) in [0,1)"""
+        param = next(self.conditioner.parameters())
+        y = y.to(device=param.device, dtype=param.dtype)
+        y = wrap_unit(y)
+
+        # Feature computation identical to forward (uses only frozen info — unchanged in inverse)
+        widths, heights, derivatives, group_idx, y_active = self._compute_params(y)
+
+        y_a = y_active[..., self.active_idx]   # (B, N_A, n_active)
+        y_a_c = self.center_unit(y_a)
+
+        x_a_c, logabsdet = unconstrained_rational_quadratic_spline(
+            inputs=y_a_c,
+            unnormalized_widths=widths,
+            unnormalized_heights=heights,
+            unnormalized_derivatives=derivatives,
+            inverse=True,
+            tails="linear",
+            tail_bound=self.tail_bound,
+            min_bin_width=self.min_bin_width,
+            min_bin_height=self.min_bin_height,
+            min_derivative=self.min_derivative,
+        )
+
+        x_a = self.uncenter_unit(x_a_c)
+
+        x = y.clone()
+        x_active = y_active.clone()
+        x_active[..., self.active_idx] = x_a
+        x[:, group_idx, :] = wrap_unit(x_active)
+
+        logdet = logabsdet.sum(dim=(-1, -2))
+        return x, logdet
+
 
 class SimpleTorusSplineConditioner(nn.Module):
     """
@@ -2069,6 +2337,58 @@ def make_lj_flow(cfg, target):
             base=base,
             box_length=L,
         )
+
+    elif flow_type == "lj_particle_group_spline":
+        # Hybrid particle-group + coordinate-split coupling.
+        # Cycles through 6 layer types: (coord=x/y/z) × (group=A/B), then repeats.
+        # Group A = even solvent indices, Group B = odd solvent indices.
+        # In each layer the active group's active coordinate is updated conditioned on:
+        #   - own frozen (non-active) coordinates  [per-particle differentiation]
+        #   - frozen group's FULL 3D positions      [includes active-dim coord of frozen group]
+        N = int(target.n_solvent)
+        group_mask_A = torch.arange(N) % 2 == 0   # (N,) True for even indices
+        group_mask_B = torch.arange(N) % 2 == 1   # (N,) True for odd indices
+
+        feature_extractor = CrossGroupFeatureExtractor(
+            box_length_nm=L,
+            solute_positions_nm=target.system.solute_positions_nm,
+            n_rbf_aa=16,
+            n_rbf_ab=16,
+            n_rbf_su=16,
+        )
+
+        # 6-step cycle: (channel_mask, group_mask)
+        cycle = [
+            ([1, 0, 0], group_mask_A), ([1, 0, 0], group_mask_B),
+            ([0, 1, 0], group_mask_A), ([0, 1, 0], group_mask_B),
+            ([0, 0, 1], group_mask_A), ([0, 0, 1], group_mask_B),
+        ]
+
+        params_per_dim = 3 * num_bins - 1
+        layers = []
+
+        for i in range(n_layers):
+            coord_mask, grp_mask = cycle[i % len(cycle)]
+            conditioner = TorusEquivariantSplineConditioner(
+                feature_dim=feature_extractor.feature_dim,
+                hidden_dim=hidden_dim,
+                out_dim=3 * params_per_dim,
+                n_interaction_blocks=2,
+            )
+            layers.append(
+                HybridGroupCoordSplineCoupling(
+                    feature_extractor=feature_extractor,
+                    conditioner=conditioner,
+                    channel_mask=coord_mask,
+                    group_mask=grp_mask,
+                    num_bins=num_bins,
+                    min_bin_width=1e-3,
+                    min_bin_height=1e-3,
+                    min_derivative=1e-3,
+                )
+            )
+
+        return WrappedTorusSplineFlow(layers=layers, base=base)
 
     elif flow_type == "realnvp":
         flows = []
