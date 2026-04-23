@@ -356,7 +356,7 @@ class FixedSoluteUnitTorusTransform(nn.Module):
 
         returns:
             x_full: (B, 3*(n_solute+n_solvent)) in nm
-            logdet: zeros
+            logdet: (B,) = 3*n_solvent*log(L)
         """
         if u_flat.ndim != 2 or u_flat.shape[1] != self.internal_dim:
             raise ValueError(
@@ -371,7 +371,8 @@ class FixedSoluteUnitTorusTransform(nn.Module):
         solute_nm = solute_nm.unsqueeze(0).expand(B, -1, -1)
 
         x_full = torch.cat([solute_nm, solvent_nm], dim=1)
-        logdet = torch.zeros(B, device=u.device, dtype=u.dtype)
+        log_scale = 3 * self.n_solvent * math.log(self.box_length_nm)
+        logdet = torch.full((B,), log_scale, device=u.device, dtype=u.dtype)
         return x_full.reshape(B, -1), logdet
 
     def inverse(self, x_full: torch.Tensor):
@@ -380,7 +381,7 @@ class FixedSoluteUnitTorusTransform(nn.Module):
 
         returns:
             u_flat: (B, 3*n_solvent) in [0,1)
-            logdet: zeros
+            logdet: (B,) = -3*n_solvent*log(L)
         """
         if x_full.ndim != 2 or x_full.shape[1] != self.cartesian_dim:
             raise ValueError(
@@ -392,5 +393,6 @@ class FixedSoluteUnitTorusTransform(nn.Module):
         solvent_nm = x[:, self.n_solute:, :]
         u = wrap_unit(box_to_unit(solvent_nm, self.box_length_nm))
 
-        logdet = torch.zeros(B, device=x.device, dtype=x.dtype)
+        log_scale = -3 * self.n_solvent * math.log(self.box_length_nm)
+        logdet = torch.full((B,), log_scale, device=x.device, dtype=x.dtype)
         return u.reshape(B, -1), logdet

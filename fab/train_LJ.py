@@ -166,11 +166,11 @@ class TrainerLJ:
             dx = self.mic(Xi[:, :, None, :] - solvent[:, None, :, :], L_t)
             d = torch.linalg.norm(dx, dim=-1)  # (B, ci, n_solvent)
 
-            rows = torch.arange(ci, device=x_flat.device)
-            cols = rows + i0
-            mask_self = torch.zeros((ci, n_solvent), device=x_flat.device, dtype=torch.bool)
-            mask_self[rows, cols] = True
-            d = d.masked_fill(mask_self.unsqueeze(0), 1e9)
+            # mask lower triangle (j <= i) to count each pair {i,j} exactly once
+            global_row = torch.arange(i0, i1, device=x_flat.device).view(ci, 1)
+            col = torch.arange(n_solvent, device=x_flat.device).view(1, n_solvent)
+            mask_lower_tri = col <= global_row  # (ci, n_solvent), True where j <= i (incl. diagonal)
+            d = d.masked_fill(mask_lower_tri.unsqueeze(0), 1e9)
 
             pen = F.softplus(k * (r0_t - d)) / k
             solv_solv_pen_per_batch = solv_solv_pen_per_batch + pen.sum(dim=(1, 2))
