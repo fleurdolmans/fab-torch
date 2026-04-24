@@ -11,7 +11,7 @@ from nflows.transforms.splines.rational_quadratic import (
     unconstrained_rational_quadratic_spline,
 )
 
-from ..make_base.base_LJ import UnitTorusPeriodicBase, HardCoreRandomPlacementBase, ExactTorusSoluteMixtureBase, GaussianUnitTorusBase, ShellTorusSoluteBase, MultiShellAutoregressiveTorusBase
+from ..make_base.base_LJ import UnitTorusPeriodicBase, HardCoreRandomPlacementBase, ExactTorusSoluteMixtureBase, GaussianUnitTorusBase, ShellTorusSoluteBase, MultiShellAutoregressiveTorusBase, MultiShellIIDTorusBase
 
 import math
 import torch
@@ -2083,7 +2083,7 @@ def make_lj_flow(cfg, target):
     base_type = cfg.flow.base.type
     flow_type = cfg.flow.type
 
-    if flow_type == "lj_torus_spline" or flow_type == "lj_torus_spline_noF":
+    if flow_type in ("lj_torus_spline", "lj_torus_spline_noF", "lj_particle_group_spline"):
         if base_type == "uniform":
             base = UniformUnitTorusBase(dim=dim)
         elif base_type == "gauss-uni":
@@ -2138,6 +2138,22 @@ def make_lj_flow(cfg, target):
                 dtype=torch.get_default_dtype(),
             )
 
+
+        elif base_type == "multishell-iid-torus":
+            base = MultiShellIIDTorusBase(
+                n_solvent=target.n_solvent,
+                box_length_nm=target.box_length_nm,
+                solute_positions_nm=target.system.solute_positions_nm,
+                shell_radii_nm=cfg.flow.base.shell_radii_nm,
+                shell_weights=cfg.flow.base.shell_weights,
+                component_sigma_unit=float(getattr(cfg.flow.base, "component_sigma_unit", 0.018)),
+                n_directions=int(getattr(cfg.flow.base, "n_directions", 48)),
+                image_range=int(getattr(cfg.flow.base, "image_range", 1)),
+                add_uniform_component=bool(getattr(cfg.flow.base, "add_uniform_component", False)),
+                uniform_weight=float(getattr(cfg.flow.base, "uniform_weight", 0.10)),
+                device=str(target.device),
+                dtype=torch.get_default_dtype(),
+            )
 
         elif base_type == "hardcore-random":
             def wrap_centered(x, L):

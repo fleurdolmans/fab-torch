@@ -1219,3 +1219,201 @@ class MultiShellAutoregressiveTorusBase(nn.Module):
         u = self.sample(n)
         log_q = self.log_prob(u)
         return u, log_q
+
+
+class MultiShellIIDTorusBase(nn.Module):
+    """
+    Permutation-equivariant multi-shell IID base on unit-torus solvent coords for v4.
+
+    Each solvent particle is independently sampled from the *same* mixture of
+    wrapped-Gaussian components placed on multiple shells around the solute(s):
+
+        q(u_1, ..., u_N) = prod_i q(u_i)     [IID — permutation equivariant]
+
+        q(u_i) = sum_k w_k * WrappedNormal3D(u_i; c_k, sigma_unit)
+                 [+ w_uniform * Uniform(u_i)]
+
+    Component centers c_k are on Fibonacci-sphere directions at each shell radius
+    around each solute site.  Weights w_k ∝ site_weight * shell_weight / n_directions.
+
+    Unlike MultiShellAutoregressiveTorusBase:
+    - No crowding penalty → permutation equivariant, exact IID factorisation
+    - No sequential per-particle loop → fully batched O(B*N*K) log_prob / sample
+    - Base samples CAN be overlapping; the flow + overlap penalty corrects this
+    """
+
+    def __init__(
+        self,
+        n_solvent: int,
+        box_length_nm: float,
+        solute_positions_nm,
+        shell_radii_nm: Sequence[float] = (0.34, 0.42, 0.52),
+        shell_weights: Optional[Sequence[float]] = None,
+        component_sigma_unit: float = 0.018,
+        n_directions: int = 48,
+        image_range: int = 1,
+        add_uniform_component: bool = False,
+        uniform_weight: float = 0.10,
+        site_weights=None,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__()
+        self.n_solvent = int(n_solvent)
+        self.dim = 3 * self.n_solvent
+        self.shape = (self.dim,)
+        self.box_length_nm = float(box_length_nm)
+        self.component_sigma_unit = float(component_sigma_unit)
+        self.n_directions = int(n_directions)
+        self.image_range = int(image_range)
+        self.add_uniform_component = bool(add_uniform_component)
+        self.uniform_weight = float(uniform_weight)
+
+        self.register_buffer("_dummy", torch.zeros(1, device=device, dtype=dtype))
+
+        solute_positions_nm = torch.as_tensor(solute_positions_nm, device=device, dtype=dtype)
+        if solute_positions_nm.ndim != 2 or solute_positions_nm.shape[1] != 3:
+            raise ValueError("solute_positions_nm must have shape (n_solute, 3)")
+        if solute_positions_nm.shape[0] == 0:
+            raise ValueError("Need at least one solute site.")
+        self.register_buffer("solute_u", wrap_unit(solute_positions_nm / self.box_length_nm))
+
+        n_sites = self.solute_u.shape[0]
+        if site_weights is None:
+            site_weights = torch.ones(n_sites, device=device, dtype=dtype)
+        else:
+            site_weights = torch.as_tensor(site_weights, device=device, dtype=dtype)
+            if site_weights.shape != (n_sites,):
+                raise ValueError(f"site_weights must have shape ({n_sites},)")
+
+        shell_radii_nm_t = torch.as_tensor(shell_radii_nm, device=device, dtype=dtype)
+        if shell_radii_nm_t.ndim != 1 or shell_radii_nm_t.numel() == 0:
+            raise ValueError("shell_radii_nm must be a non-empty 1D sequence")
+
+        if shell_weights is None:
+            shell_weights_t = torch.ones_like(shell_radii_nm_t)
+        else:
+            shell_weights_t = torch.as_tensor(shell_weights, device=device, dtype=dtype)
+            if shell_weights_t.shape != shell_radii_nm_t.shape:
+                raise ValueError("shell_weights must match shell_radii_nm shape")
+        shell_weights_t = shell_weights_t / shell_weights_t.sum()
+
+        dirs = fibonacci_sphere(self.n_directions, device=device, dtype=dtype)
+        self.register_buffer("shell_dirs", dirs)
+
+        # Build component centers and base weights (same construction as autoregressive version)
+        centers = []
+        comp_base_weights = []
+        for s in range(n_sites):
+            c = self.solute_u[s]
+            site_w = site_weights[s]
+            for r_nm, r_w in zip(shell_radii_nm_t, shell_weights_t):
+                r_unit = r_nm / self.box_length_nm
+                shell_centers = wrap_unit(c.view(1, 3) + r_unit * dirs)  # (D, 3)
+                centers.append(shell_centers)
+                w = torch.full(
+                    (self.n_directions,),
+                    fill_value=(site_w * r_w / self.n_directions).item(),
+                    device=device,
+                    dtype=dtype,
+                )
+                comp_base_weights.append(w)
+
+        centers_t = torch.cat(centers, dim=0)              # (K, 3)
+        comp_weights_t = torch.cat(comp_base_weights)       # (K,)
+        comp_weights_t = comp_weights_t / comp_weights_t.sum()
+
+        self.register_buffer("component_centers", centers_t)
+        self.n_components = centers_t.shape[0]
+
+        # Final mixture probabilities (components + optional uniform)
+        if self.add_uniform_component:
+            all_w = torch.cat([comp_weights_t, torch.tensor([self.uniform_weight], device=device, dtype=dtype)])
+        else:
+            all_w = comp_weights_t
+        self.register_buffer("mix_probs", all_w / all_w.sum())
+
+        self._wn = WrappedNormal1D(sigma=self.component_sigma_unit, image_range=self.image_range)
+
+    @property
+    def device(self):
+        return self._dummy.device
+
+    @property
+    def dtype(self):
+        return self._dummy.dtype
+
+    def _component_log_prob(self, u: torch.Tensor) -> torch.Tensor:
+        """
+        u: (B, 3)  →  log q_k(u) for each component k,  shape (B, K)
+        Identical to MultiShellAutoregressiveTorusBase._component_log_prob.
+        """
+        u = wrap_unit(u)
+        centers = self.component_centers.to(device=u.device, dtype=u.dtype)
+        B, K = u.shape[0], centers.shape[0]
+        lp_x = self._wn.log_prob(u[:, None, 0].expand(B, K), centers[None, :, 0].expand(B, K))
+        lp_y = self._wn.log_prob(u[:, None, 1].expand(B, K), centers[None, :, 1].expand(B, K))
+        lp_z = self._wn.log_prob(u[:, None, 2].expand(B, K), centers[None, :, 2].expand(B, K))
+        return lp_x + lp_y + lp_z  # (B, K)
+
+    def _log_prob_single(self, u: torch.Tensor) -> torch.Tensor:
+        """
+        u: (B, 3)  →  log q(u): (B,)  using fixed (non-crowded) weights
+        """
+        mix_probs = self.mix_probs.to(device=u.device, dtype=u.dtype)
+        lp_comp = self._component_log_prob(u)                                  # (B, K)
+        lp_terms = lp_comp + safe_log(mix_probs[:self.n_components])[None, :]  # (B, K)
+
+        if self.add_uniform_component:
+            lp_uni = torch.full(
+                (u.shape[0], 1),
+                fill_value=safe_log(mix_probs[-1]).item(),
+                device=u.device,
+                dtype=u.dtype,
+            )
+            lp_terms = torch.cat([lp_terms, lp_uni], dim=1)
+
+        return logsumexp(lp_terms, dim=1)  # (B,)
+
+    def log_prob(self, u_flat: torch.Tensor) -> torch.Tensor:
+        """u_flat: (B, 3*N)  →  log q: (B,)"""
+        u_flat = wrap_unit(u_flat)
+        B = u_flat.shape[0]
+        u = u_flat.view(B, self.n_solvent, 3)
+        lp = self._log_prob_single(u.reshape(B * self.n_solvent, 3))  # (B*N,)
+        return lp.view(B, self.n_solvent).sum(dim=1)                   # (B,)
+
+    def sample(self, n: int) -> torch.Tensor:
+        """Returns (n, 3*n_solvent). All particles sampled IID in one batched call."""
+        M = n * self.n_solvent
+        mix_probs = self.mix_probs.to(device=self.device, dtype=self.dtype)
+        idx = torch.multinomial(mix_probs, num_samples=M, replacement=True)  # (M,)
+
+        u = torch.empty(M, 3, device=self.device, dtype=self.dtype)
+
+        if self.add_uniform_component:
+            is_uniform = idx == self.n_components
+            idx_shell = torch.where(~is_uniform)[0]
+            idx_uni = torch.where(is_uniform)[0]
+        else:
+            idx_shell = torch.arange(M, device=self.device)
+            idx_uni = idx.new_empty(0)
+
+        if idx_shell.numel() > 0:
+            centers_sel = self.component_centers[idx[idx_shell]]  # (n_shell, 3)
+            noise = self.component_sigma_unit * torch.randn(
+                idx_shell.numel(), 3, device=self.device, dtype=self.dtype
+            )
+            u[idx_shell] = wrap_unit(centers_sel + noise)
+
+        if idx_uni.numel() > 0:
+            u[idx_uni] = torch.rand(idx_uni.numel(), 3, device=self.device, dtype=self.dtype)
+
+        return u.view(n, self.dim)
+
+    def forward(self, n: int):
+        u = self.sample(n)
+        log_q = self.log_prob(u)
+        return u, log_q
+
+    __call__ = forward
