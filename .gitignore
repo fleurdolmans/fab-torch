@@ -16,3 +16,7 @@ experiments/solvation/config/entry.yaml
 
 # Macbook file
 .DS_Store
+
+# Ignore trained model files
+boltzmann_generators_solute/Notebooks/Trained_models/
+boltzmann_generators_solute_3D_equi/Notebooks/Trained_models/
