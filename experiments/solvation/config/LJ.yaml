@@ -87,10 +87,6 @@ flow:                                 # Properties of the flow model
     component_sigma_unit: 0.018
     n_directions: 48
     add_uniform_component: false
-    crowding_strength: 20.0
-    crowding_sigma_nm: 0.08
-    hard_core_nm: 0.26
-    hard_core_strength: 10.0
     image_range: 1
     uniform_weight: 0.10 
 
