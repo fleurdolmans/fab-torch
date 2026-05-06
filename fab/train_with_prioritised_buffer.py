@@ -159,7 +159,7 @@ class PrioritisedBufferTrainer:
             plot_iter = list(np.linspace(0, n_iterations, n_plot + 1, dtype="int")[1:])
         if tlimit is not None:
             assert n_checkpoints is not None, "Time limited specified but no checkpoints are " "being saved."
-        if start_time is not None:
+        if start_time is None:
             start_time = time()
 
         if start_iter >= n_iterations:
