@@ -20,13 +20,13 @@ def MC_estimate_true_expectation(
 def effective_sample_size(log_w: torch.Tensor, normalised=False):
     # effective sample size, see https://arxiv.org/abs/1602.03572
     assert len(log_w.shape) == 1
-    print("N:", log_w.shape[0])
-    print("min/max log_w:", log_w.min().item(), log_w.max().item())
+    # print("N:", log_w.shape[0])
+    # print("min/max log_w:", log_w.min().item(), log_w.max().item())
     if not normalised:
         log_w = F.softmax(log_w, dim=0)
     
-    print("max weight:", log_w.max().item())
-    print("top 5 weights:", torch.topk(log_w, 5).values.detach().cpu().numpy())
+    # print("max weight:", log_w.max().item())
+    # print("top 5 weights:", torch.topk(log_w, 5).values.detach().cpu().numpy())
       
     ess = 1 / torch.sum(log_w ** 2) 
     return ess / log_w.shape[0]

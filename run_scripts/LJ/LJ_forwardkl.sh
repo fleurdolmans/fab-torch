@@ -75,9 +75,9 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run_LJ.py \\
   fab.loss_type=forward_kl fab.use_ais=false \\
   flow.hidden_units=128 flow.base.type=shell-torus flow.base.learn_mean_var=false flow.type=lj_torus_spline\\
   flow.n_layers=6 flow.layer_nodes_per_dim=4 flow.hidden_units=128 flow.num_bins=8\\
-  training.lr=7e-5 training.wd=1e-6 training.batch_size=64 evaluation.eval_batch_size=32\\
-  training.max_grad_norm=1 training.warmup_iter=100 \\
-  training.overlap.penalty=100.0 training.overlap.dist_ssolv=0.31 training.overlap.dist_solute=0.31 training.mixing=0.0 training.energy_mode=full target.transform_version=v4\\
+  training.lr=1e-5 training.wd=1e-6 training.batch_size=64 evaluation.eval_batch_size=32\\
+  training.max_grad_norm=10 training.warmup_iter=100 \\
+  training.overlap.penalty=10.0 training.overlap.dist_ssolv=0.31 training.overlap.dist_solute=0.35 training.mixing=0.0 training.energy_mode=full target.transform_version=v4\\
   training.n_iterations=600 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=600\\
   evaluation.n_eval=12 evaluation.n_plots=12 evaluation.n_checkpoints=1 
 EOF
