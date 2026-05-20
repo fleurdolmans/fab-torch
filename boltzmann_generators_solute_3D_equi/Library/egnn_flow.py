@@ -159,8 +159,7 @@ class RadialCouplingLayer(nn.Module):
                  param_head: nn.Module,
                  frozen_idx: torch.Tensor, active_idx: torch.Tensor,
                  num_bins: int, tail_bound: float = 4.0,
-                 l_box: float | None = None,
-                 r_min: float = 0.0):
+                 l_box: float | None = None):
         super().__init__()
         self.egnn_frozen = egnn_frozen
         self.cross_cond = cross_cond
@@ -170,8 +169,6 @@ class RadialCouplingLayer(nn.Module):
         self.num_bins = num_bins
         self.tail_bound = tail_bound
         self.l_box = l_box
-        self.r_min = float(r_min)
-        self._log_r_min = math.log(r_min) if r_min > 0.0 else None
         self._ppc = 3 * num_bins - 1          # params per coordinate (log r scalar)
 
     def _get_spline_params(self, x: torch.Tensor):
@@ -246,19 +243,7 @@ class RadialCouplingLayer(nn.Module):
             tail_bound=self.tail_bound,
         )
 
-        if self._log_r_min is not None:
-            # Enforce a physical minimum distance from the solute.
-            # When clamped the map is degenerate (many latent values → same r_min),
-            # so we zero the logdet contribution for those entries rather than
-            # propagating an incorrect Jacobian.
-            is_clamped = log_r < self._log_r_min          # (B, N_B, 1)
-            log_r = log_r.clamp(min=self._log_r_min)
-            logdet_normal = logabsdet + 3.0 * (log_r - log_r_new)
-            logdet_per_particle = torch.where(
-                is_clamped, torch.zeros_like(logdet_normal), logdet_normal
-            )
-        else:
-            logdet_per_particle = logabsdet + 3.0 * (log_r - log_r_new)
+        logdet_per_particle = logabsdet + 3.0 * (log_r - log_r_new)
 
         r = torch.exp(log_r)
         logdet = logdet_per_particle.sum(dim=(1, 2))

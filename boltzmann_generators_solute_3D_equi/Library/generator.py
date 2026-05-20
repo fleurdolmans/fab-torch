@@ -161,7 +161,6 @@ def build_egnn_solute_flow_3d(
     tail_bound: float = 4.0,
     l_box: float | None = None,
     att_heads: int = 4,
-    r_min_factor: float = 0.5,
     prior_sigma_r: float = 0.40,
 ):
     """
@@ -184,9 +183,6 @@ def build_egnn_solute_flow_3d(
     tail_bound    : float  spline covers [-tail_bound, tail_bound] on log(r)
     l_box         : float or None  PBC box half-width (None = no PBC)
     att_heads     : int    cross-group attention heads in CrossGroupConditioner
-    r_min_factor  : float  each RadialCouplingLayer clamps generated r to at
-                           least r_min_factor * system.sigma.  Set to 0 to
-                           disable.  Default 0.5 gives r_min = 0.5*sigma.
     prior_sigma_r : float  std of log(r) in the SphericalPrior.  Default 0.40
                            (covers full PBC box with l_box=2.0 at 95%).
 
@@ -215,7 +211,6 @@ def build_egnn_solute_flow_3d(
     N_B = len(group_B)
 
     ppc = 3 * num_bins - 1               # RQ spline params per scalar
-    r_min = r_min_factor * system.sigma if r_min_factor > 0.0 else 0.0
 
     def _make_radial_layer(frozen_idx, active_idx, n_frozen, n_active):
         egnn_f = EGNN(
@@ -248,7 +243,6 @@ def build_egnn_solute_flow_3d(
             num_bins=num_bins,
             tail_bound=tail_bound,
             l_box=l_box,
-            r_min=r_min,
         )
 
     def _make_angular_layer(frozen_idx, active_idx, n_frozen, n_active):
