@@ -90,7 +90,7 @@ nvidia-smi
 #     --mc_cache "\$SAVE_DIR/md/xtraj.npy" \\
 #     --save_dir "\$SAVE_DIR"
 
-# Stage 1: ML
+# Stage 2: ML + KL
 
 MD_CACHE="/home/fdolmans/HDD/data/LJ2/md/xtraj.npy"
 MODEL_CACHE="/home/fdolmans/fab-torch/launch/2026-05-08_17-19-24.434/results/stage2_ml_kl/ckpt_ep0030.pt"
