@@ -202,30 +202,36 @@ class GaussianPrior:
 class SphericalPrior:
     """Prior for the equivariant flow: log-normal radii, uniform directions.
 
-    For each particle i, samples r_i = exp(log_r_i) where log_r_i ~ N(0, sigma_r²),
-    and u_i ~ Uniform(S²) independently.  The resulting Cartesian position is
-    x_i = r_i * u_i.
+    For each particle i, samples r_i = exp(log_r_i) where
+    log_r_i ~ N(mu_r, sigma_r²), and u_i ~ Uniform(S²) independently.
+    The resulting Cartesian position is x_i = r_i * u_i.
 
-    Advantages over GaussianPrior for the equivariant (r, u) flow:
-      - r_i is always strictly positive (no density at r = 0).
-      - The prior is explicitly factored into a radial and an angular part,
-        matching the flow's internal (r, u) decomposition.
-      - The log-normal distribution for r covers the physically relevant range
-        without the chi-3 density spike near r = 0 from a Cartesian Gaussian.
+    The Cartesian density has a mode at r_mode = exp(mu_r - 3*sigma_r²).
+    Setting mu_r = log(sigma_LJ) + 3*sigma_r² places the mode at the LJ
+    contact distance, which aligns the prior with the MC distribution.
+
+    For PBC systems with l_box=2.0, use sigma_r=0.40 so that the 95%
+    sample range [exp(mu_r - 2*sigma_r), exp(mu_r + 2*sigma_r)] covers
+    the full Cartesian distance range [sigma_LJ, sqrt(3)*l_box] ≈ [1.1, 3.46].
 
     Parameters
     ----------
     n_particles : int   number of particles (36 for the solute system).
-    sigma_r     : float std of log(r_i).  sigma_r=1 places the bulk of the
-                        radial mass in r ∈ [e^{-2}, e^2] ≈ [0.14, 7.4].
+    sigma_r     : float std of log(r_i).  Default 0.40 for PBC l_box=2.0.
+    mu_r        : float mean of log(r_i).  Set via
+                        mu_r = log(sigma_LJ) + 3*sigma_r**2 in the factory.
+                        Default 0.0 (backwards compatible).
     """
 
-    def __init__(self, n_particles: int, sigma_r: float = 1.0):
+    def __init__(self, n_particles: int, sigma_r: float = 1.0,
+                 mu_r: float = 0.0):
         self.n_particles = int(n_particles)
         self.dim         = self.n_particles * 3
         self.sigma_r     = float(sigma_r)
+        self.mu_r        = float(mu_r)
         # Normalisation constant for log p(x_i):
-        # log p(x_i) = -0.5*(log_r/sigma_r)^2 - 3*log_r - _log_norm_particle
+        # log p(x_i) = -0.5*((log_r - mu_r)/sigma_r)^2 - 3*log_r - _log_norm_particle
+        # mu_r shifts the distribution but does not change the normalisation.
         self._log_norm_particle = (math.log(self.sigma_r)
                                    + 0.5 * math.log(2.0 * math.pi)
                                    + math.log(4.0 * math.pi))
@@ -234,9 +240,9 @@ class SphericalPrior:
         if isinstance(shape, int):
             shape = (shape,)
         n = shape[0]
-        # Radial: log_r ~ N(0, sigma_r^2), so r = exp(log_r) > 0 always.
+        # Radial: log_r ~ N(mu_r, sigma_r^2), so r = exp(log_r) > 0 always.
         log_r = (torch.randn(n, self.n_particles, 1, device=device, dtype=dtype)
-                 * self.sigma_r)                                    # (n, N, 1)
+                 * self.sigma_r + self.mu_r)                        # (n, N, 1)
         r = torch.exp(log_r)                                       # (n, N, 1)
         # Angular: u ~ Uniform(S^2) via normalised i.i.d. N(0,1) vectors.
         gauss = torch.randn(n, self.n_particles, 3, device=device, dtype=dtype)
@@ -249,7 +255,7 @@ class SphericalPrior:
         Derivation (change of variables (log_r, u) → x = exp(log_r)*u):
           |det J_{(log_r,u)→x}| = exp(3*log_r) = r^3
           log p(x_i) = log p(log_r_i) + log p(u_i) - 3*log_r_i
-                     = -0.5*(log_r/sigma_r)^2 - 3*log_r - _log_norm_particle
+                     = -0.5*((log_r - mu_r)/sigma_r)^2 - 3*log_r - _log_norm_particle
 
         z : (B, N*3)
         Returns (B,)
@@ -257,7 +263,7 @@ class SphericalPrior:
         B = z.shape[0]
         x = z.reshape(B, self.n_particles, 3)          # (B, N, 3)
         log_r = torch.log(x.norm(dim=-1).clamp(min=1e-8))  # (B, N)
-        log_p = (-0.5 * (log_r / self.sigma_r).pow(2)
+        log_p = (-0.5 * ((log_r - self.mu_r) / self.sigma_r).pow(2)
                  - 3.0 * log_r
                  - self._log_norm_particle)             # (B, N)
         return log_p.sum(dim=-1)                        # (B,)

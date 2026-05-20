@@ -1,4 +1,5 @@
 import copy
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -161,7 +162,7 @@ def build_egnn_solute_flow_3d(
     l_box: float | None = None,
     att_heads: int = 4,
     r_min_factor: float = 0.5,
-    prior_sigma_r: float = 1.0,
+    prior_sigma_r: float = 0.40,
 ):
     """
     Build an E(n)-equivariant normalizing flow for the 3D PBC solute system.
@@ -186,7 +187,8 @@ def build_egnn_solute_flow_3d(
     r_min_factor  : float  each RadialCouplingLayer clamps generated r to at
                            least r_min_factor * system.sigma.  Set to 0 to
                            disable.  Default 0.5 gives r_min = 0.5*sigma.
-    prior_sigma_r : float  std of log(r) in the SphericalPrior.  Default 1.0.
+    prior_sigma_r : float  std of log(r) in the SphericalPrior.  Default 0.40
+                           (covers full PBC box with l_box=2.0 at 95%).
 
     Returns
     -------
@@ -279,7 +281,12 @@ def build_egnn_solute_flow_3d(
         layers.append(_make_radial_layer(group_B, group_A, N_B, N_A))
         layers.append(_make_angular_layer(group_B, group_A, N_B, N_A))
 
-    prior = SphericalPrior(n_particles=n_particles, sigma_r=prior_sigma_r)
+    # mu_r places the Cartesian mode at r = system.sigma (LJ contact distance):
+    #   mode = exp(mu_r - 3*sigma_r^2) = system.sigma
+    #   => mu_r = log(system.sigma) + 3*sigma_r^2
+    mu_r = math.log(system.sigma) + 3.0 * prior_sigma_r ** 2
+    prior = SphericalPrior(n_particles=n_particles, sigma_r=prior_sigma_r,
+                           mu_r=mu_r)
 
     return EGNNEquivariantFlow(
         layers=layers,
