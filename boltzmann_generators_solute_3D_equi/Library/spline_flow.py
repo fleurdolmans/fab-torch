@@ -199,6 +199,70 @@ class GaussianPrior:
         return -0.5 * (z / self.sigma).pow(2).sum(-1) + self._log_norm
 
 
+class SphericalPrior:
+    """Prior for the equivariant flow: log-normal radii, uniform directions.
+
+    For each particle i, samples r_i = exp(log_r_i) where log_r_i ~ N(0, sigma_r²),
+    and u_i ~ Uniform(S²) independently.  The resulting Cartesian position is
+    x_i = r_i * u_i.
+
+    Advantages over GaussianPrior for the equivariant (r, u) flow:
+      - r_i is always strictly positive (no density at r = 0).
+      - The prior is explicitly factored into a radial and an angular part,
+        matching the flow's internal (r, u) decomposition.
+      - The log-normal distribution for r covers the physically relevant range
+        without the chi-3 density spike near r = 0 from a Cartesian Gaussian.
+
+    Parameters
+    ----------
+    n_particles : int   number of particles (36 for the solute system).
+    sigma_r     : float std of log(r_i).  sigma_r=1 places the bulk of the
+                        radial mass in r ∈ [e^{-2}, e^2] ≈ [0.14, 7.4].
+    """
+
+    def __init__(self, n_particles: int, sigma_r: float = 1.0):
+        self.n_particles = int(n_particles)
+        self.dim         = self.n_particles * 3
+        self.sigma_r     = float(sigma_r)
+        # Normalisation constant for log p(x_i):
+        # log p(x_i) = -0.5*(log_r/sigma_r)^2 - 3*log_r - _log_norm_particle
+        self._log_norm_particle = (math.log(self.sigma_r)
+                                   + 0.5 * math.log(2.0 * math.pi)
+                                   + math.log(4.0 * math.pi))
+
+    def sample(self, shape, device=None, dtype=torch.float32):
+        if isinstance(shape, int):
+            shape = (shape,)
+        n = shape[0]
+        # Radial: log_r ~ N(0, sigma_r^2), so r = exp(log_r) > 0 always.
+        log_r = (torch.randn(n, self.n_particles, 1, device=device, dtype=dtype)
+                 * self.sigma_r)                                    # (n, N, 1)
+        r = torch.exp(log_r)                                       # (n, N, 1)
+        # Angular: u ~ Uniform(S^2) via normalised i.i.d. N(0,1) vectors.
+        gauss = torch.randn(n, self.n_particles, 3, device=device, dtype=dtype)
+        u = gauss / gauss.norm(dim=-1, keepdim=True).clamp(min=1e-8)  # (n, N, 3)
+        return (r * u).reshape(n, -1)                              # (n, N*3)
+
+    def log_prob(self, z: torch.Tensor) -> torch.Tensor:
+        """Log-density of z under the spherical prior in Cartesian coordinates.
+
+        Derivation (change of variables (log_r, u) → x = exp(log_r)*u):
+          |det J_{(log_r,u)→x}| = exp(3*log_r) = r^3
+          log p(x_i) = log p(log_r_i) + log p(u_i) - 3*log_r_i
+                     = -0.5*(log_r/sigma_r)^2 - 3*log_r - _log_norm_particle
+
+        z : (B, N*3)
+        Returns (B,)
+        """
+        B = z.shape[0]
+        x = z.reshape(B, self.n_particles, 3)          # (B, N, 3)
+        log_r = torch.log(x.norm(dim=-1).clamp(min=1e-8))  # (B, N)
+        log_p = (-0.5 * (log_r / self.sigma_r).pow(2)
+                 - 3.0 * log_r
+                 - self._log_norm_particle)             # (B, N)
+        return log_p.sum(dim=-1)                        # (B,)
+
+
 # ---------------------------------------------------------------------------
 # Uniform prior on [-bound, bound]^dim
 # ---------------------------------------------------------------------------

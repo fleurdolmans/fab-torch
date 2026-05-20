@@ -160,6 +160,8 @@ def build_egnn_solute_flow_3d(
     tail_bound: float = 4.0,
     l_box: float | None = None,
     att_heads: int = 4,
+    r_min_factor: float = 0.5,
+    prior_sigma_r: float = 1.0,
 ):
     """
     Build an E(n)-equivariant normalizing flow for the 3D PBC solute system.
@@ -172,15 +174,19 @@ def build_egnn_solute_flow_3d(
 
     Parameters
     ----------
-    system      : SoluteSimulationPBC3D
-    n_particles : int  number of SOLVENT particles (36)
-    n_blocks    : int  A-B coupling cycles; total layers = n_blocks * 4
-    egnn_hidden : int  hidden width of EGNN MLPs
-    egnn_layers : int  number of EGNN message-passing layers per conditioner
-    num_bins    : int  RQ spline bins for the radial transformation
-    tail_bound  : float  spline covers [-tail_bound, tail_bound] on log(r)
-    l_box       : float or None  PBC box half-width (None = no PBC)
-    att_heads   : int  cross-group attention heads in CrossGroupConditioner
+    system        : SoluteSimulationPBC3D
+    n_particles   : int    number of SOLVENT particles (36)
+    n_blocks      : int    A-B coupling cycles; total layers = n_blocks * 4
+    egnn_hidden   : int    hidden width of EGNN MLPs
+    egnn_layers   : int    number of EGNN message-passing layers per conditioner
+    num_bins      : int    RQ spline bins for the radial transformation
+    tail_bound    : float  spline covers [-tail_bound, tail_bound] on log(r)
+    l_box         : float or None  PBC box half-width (None = no PBC)
+    att_heads     : int    cross-group attention heads in CrossGroupConditioner
+    r_min_factor  : float  each RadialCouplingLayer clamps generated r to at
+                           least r_min_factor * system.sigma.  Set to 0 to
+                           disable.  Default 0.5 gives r_min = 0.5*sigma.
+    prior_sigma_r : float  std of log(r) in the SphericalPrior.  Default 1.0.
 
     Returns
     -------
@@ -197,7 +203,7 @@ def build_egnn_solute_flow_3d(
     from egnn import EGNN, CrossGroupConditioner, CrossGroupEquivariant
     from egnn_flow import (RadialCouplingLayer, AngularCouplingLayer,
                            EGNNEquivariantFlow)
-    from spline_flow import GaussianPrior
+    from spline_flow import SphericalPrior
 
     # ---- Particle groups: even / odd index split ----
     all_idx = torch.arange(n_particles)
@@ -207,6 +213,7 @@ def build_egnn_solute_flow_3d(
     N_B = len(group_B)
 
     ppc = 3 * num_bins - 1               # RQ spline params per scalar
+    r_min = r_min_factor * system.sigma if r_min_factor > 0.0 else 0.0
 
     def _make_radial_layer(frozen_idx, active_idx, n_frozen, n_active):
         egnn_f = EGNN(
@@ -239,6 +246,7 @@ def build_egnn_solute_flow_3d(
             num_bins=num_bins,
             tail_bound=tail_bound,
             l_box=l_box,
+            r_min=r_min,
         )
 
     def _make_angular_layer(frozen_idx, active_idx, n_frozen, n_active):
@@ -271,7 +279,7 @@ def build_egnn_solute_flow_3d(
         layers.append(_make_radial_layer(group_B, group_A, N_B, N_A))
         layers.append(_make_angular_layer(group_B, group_A, N_B, N_A))
 
-    prior = GaussianPrior(dim=n_particles * 3, sigma=1.0)
+    prior = SphericalPrior(n_particles=n_particles, sigma_r=prior_sigma_r)
 
     return EGNNEquivariantFlow(
         layers=layers,
