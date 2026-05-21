@@ -100,7 +100,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/boltzmann_generators_solute_3D_equi/Notebooks
     --mc_cache "\$MD_CACHE" \\
     --save_dir "\$SAVE_DIR" \\
     --metric_every 10 \\
-    --w_overlap 100.0 \\
+    --w_overlap 10.0 \\
     --plot_every 10 \\
     --checkpoint_every 10 \\
     --metric_samples 2048 \\

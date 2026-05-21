@@ -496,7 +496,7 @@ def parse_args():
     g.add_argument("--batch_size_kl", type=int,   default=256)
     g.add_argument("--w_ml",          type=float, default=0.8, help="ML weight in stage 2")
     g.add_argument("--w_kl",          type=float, default=0.2, help="KL weight in stage 2")
-    g.add_argument("--energy_cap",    type=float, default=5000.0)
+    g.add_argument("--energy_cap",    type=float, default=1000.0)
     g.add_argument("--n_kl_samples",  type=int,   default=50_000)
     g.add_argument("--patience_stage2",   type=int,   default=30)
     g.add_argument("--w_overlap",     type=float, default=50.0)
@@ -1255,7 +1255,7 @@ def main():
                     wandb_step=global_step,
                 )
 
-            if patience_ctr >= args.patience_ml:
+            if patience_ctr >= args.patience_stage1:
                 tqdm.write(f"\nStage 1 early stop at epoch {epoch + 1}")
                 break
         
@@ -1403,7 +1403,7 @@ def main():
                     wandb_step=global_step,
                 )
 
-            if patience_ctr >= args.patience_kl:
+            if patience_ctr >= args.patience_stage2:
                 tqdm.write(f"\nStage 2 early stop at epoch {epoch + 1}")
                 break
 
