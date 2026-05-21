@@ -469,13 +469,12 @@ class EGNNEquivariantFlow(nn.Module):
                 u_x,
                 energy_cap + torch.log1p(u_x - energy_cap),
             )
-        # loss = (u_x - logdet_inv).mean()
         loss = (u_x - logdet_inv).mean()
         if w_overlap > 0.0:
             loss = loss + w_overlap * overlap_penalty(
-                x_for_energy, self.system.dim, self.system.sigma
+                x_for_energy, (self.system.n_particles, 3), self.system.sigma
             )
-        return (u_x - logdet_inv).mean()
+        return loss
 
     # ------------------------------------------------------------------
     # Generation helpers
