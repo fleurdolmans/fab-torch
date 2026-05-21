@@ -49,7 +49,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=04:00:00
+#SBATCH --time=03:00:00
 
 set -euo pipefail
 
@@ -93,13 +93,14 @@ nvidia-smi
 # Stage 2: ML + KL
 
 MD_CACHE="/home/fdolmans/HDD/data/LJ2/md/xtraj.npy"
-MODEL_CACHE="/home/fdolmans/fab-torch/launch/2026-05-08_17-19-24.434/results/stage2_ml_kl/ckpt_ep0030.pt"
+MODEL_CACHE="/home/fdolmans/fab-torch/launch/2026-05-20_19-56-03.646/results/stage1_ml/ckpt_ep0125.pt"
 python ${LOGS_DIR}/${PROJECT_NAME}/boltzmann_generators_solute_3D_equi/Notebooks/train_equivariant_3d.py \\
     --run_stage2 \\
     --stage1_checkpoint "\$MODEL_CACHE" \\
     --mc_cache "\$MD_CACHE" \\
     --save_dir "\$SAVE_DIR" \\
     --metric_every 10 \\
+    --w_overlap 100.0 \\
     --plot_every 10 \\
     --checkpoint_every 10 \\
     --metric_samples 2048 \\

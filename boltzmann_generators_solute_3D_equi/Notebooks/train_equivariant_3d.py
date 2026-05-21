@@ -387,7 +387,7 @@ def plot_3d_pbc_interactive(
 
 
 def train_epoch(flow, loader_x, loader_z, optimizer,
-                w_ml, w_kl, energy_cap, device, clip_grad):
+                w_ml, w_kl, energy_cap, device, clip_grad, w_overlap=None):
     """
     One full training epoch.
 
@@ -417,7 +417,7 @@ def train_epoch(flow, loader_x, loader_z, optimizer,
             ml_val = ml.item()
 
         if w_kl > 0 and batch_z is not None:
-            kl = flow.loss_KL(batch_z[0].to(device), energy_cap=energy_cap)
+            kl = flow.loss_KL(batch_z[0].to(device), energy_cap=energy_cap, w_overlap=w_overlap)
             loss = loss + w_kl * kl
             kl_val = kl.item()
 
@@ -485,20 +485,21 @@ def parse_args():
     # Stage 1 — ML
     g = p.add_argument_group("Stage 1 (ML / forward KL)")
     g.add_argument("--n_epochs_ml",   type=int,   default=300)
-    g.add_argument("--lr_ml",         type=float, default=3e-4)
+    g.add_argument("--lr_ml",         type=float, default=1e-4)
     g.add_argument("--batch_size_ml", type=int,   default=256)
-    g.add_argument("--patience_ml",   type=int,   default=40)
+    g.add_argument("--patience_stage1",   type=int,   default=40)
 
     # Stage 2 — KL
     g = p.add_argument_group("Stage 2 (KL / reverse KL fine-tuning)")
     g.add_argument("--n_epochs_kl",   type=int,   default=50)
-    g.add_argument("--lr_kl",         type=float, default=5e-6)
+    g.add_argument("--lr_kl",         type=float, default=1e-5)
     g.add_argument("--batch_size_kl", type=int,   default=256)
     g.add_argument("--w_ml",          type=float, default=0.8, help="ML weight in stage 2")
     g.add_argument("--w_kl",          type=float, default=0.2, help="KL weight in stage 2")
-    g.add_argument("--energy_cap",    type=float, default=1000.0)
+    g.add_argument("--energy_cap",    type=float, default=5000.0)
     g.add_argument("--n_kl_samples",  type=int,   default=50_000)
-    g.add_argument("--patience_kl",   type=int,   default=30)
+    g.add_argument("--patience_stage2",   type=int,   default=30)
+    g.add_argument("--w_overlap",     type=float, default=50.0)
 
     # Stage 3 — pure KL
     g = p.add_argument_group("Stage 3 (pure KL)")
@@ -598,7 +599,7 @@ def draw_box_3d(ax, L_BOX, color="gray", linestyle="--", linewidth=1):
         )
     return ax
 
-def position_density(xtraj, L_BOX, title, stride=20):
+def position_density(xtraj, L_BOX, title, stride=1):
     fig = plt.figure(figsize=(7, 7))
     ax = fig.add_subplot(111, projection="3d")
 
@@ -703,10 +704,8 @@ def evaluate_and_log(
         )
     ).detach().cpu().numpy()
 
-    # fin_ref = e_ref[np.isfinite(e_ref) & (e_ref < 1e4)]
-    # fin_gen = e_gen[np.isfinite(e_gen) & (e_gen < 1e4)]
-    fin_ref = e_ref[np.isfinite(e_ref)]
-    fin_gen = e_gen[np.isfinite(e_gen)]
+    fin_ref = e_ref[np.isfinite(e_ref) & (e_ref < 1e4)]
+    fin_gen = e_gen[np.isfinite(e_gen) & (e_gen < 1e4)]
 
     finite_frac = len(fin_gen) / n_eval
     overlap_frac = float((e_gen < -1e3).mean()) if len(e_gen) > 0 else float("nan")
@@ -883,15 +882,6 @@ def evaluate_and_log(
 
     # 3D HTML plots
     if make_3d:
-        fig_mc_3d = plot_3d_pbc_interactive(
-            x_ref_full[0],
-            l_box=args.l_box,
-            sigma=args.sigma,
-            title=f"{prefix}: MC reference configuration",
-            wrap=True,
-            show=False,
-        )
-        fig_mc_3d.write_html(eval_dir / f"{prefix}_mc_reference_pbc_3d.html")
 
         fig_gen_3d = plot_3d_pbc_interactive(
             x_gen_full_eval[0],
@@ -905,9 +895,6 @@ def evaluate_and_log(
 
         if use_wandb:
             wandb.log({
-                "Media/mc_reference_pbc_3d": wandb.Html(
-                    fig_mc_3d.to_html(include_plotlyjs="cdn")
-                ),
                 "Media/generated_pbc_3d": wandb.Html(
                     fig_gen_3d.to_html(include_plotlyjs="cdn")
                 ),
@@ -1184,6 +1171,7 @@ def main():
                 energy_cap=None,
                 device=device,
                 clip_grad=args.clip_grad,
+                w_overlap=args.w_overlap,
             )
             global_step += 1
 
@@ -1195,6 +1183,7 @@ def main():
                 "kl_loss": 0.0,
                 "grad_norm": grad_norm,
                 "learning_rate": optimizer_ml.param_groups[0]["lr"],
+                "w_overlap": args.w_overlap,
             }
 
             if (epoch + 1) % args.metric_every == 0:
@@ -1324,6 +1313,7 @@ def main():
                 energy_cap=args.energy_cap,
                 device=device,
                 clip_grad=args.clip_grad,
+                w_overlap=args.w_overlap,
             )
             global_step += 1
 
@@ -1337,6 +1327,8 @@ def main():
                 "learning_rate": optimizer_kl.param_groups[0]["lr"],
                 "w_ml": args.w_ml,
                 "w_kl": args.w_kl,
+                "w_overlap": args.w_overlap,
+
             }
 
             if (epoch + 1) % args.metric_every == 0:
@@ -1470,6 +1462,7 @@ def main():
                 energy_cap=args.energy_cap,
                 device=device,
                 clip_grad=args.clip_grad,
+                w_overlap=args.w_overlap,
             )
             global_step += 1
 
@@ -1483,6 +1476,7 @@ def main():
                 "learning_rate": optimizer_stage3.param_groups[0]["lr"],
                 "w_ml": 0.0,
                 "w_kl": 1.0,
+                "w_overlap": args.w_overlap,
             }
 
             if (epoch + 1) % args.metric_every == 0:

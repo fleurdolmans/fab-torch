@@ -71,7 +71,7 @@ export CUDA_VISIBLE_DEVICES=0
 export MAIN_DIR="${MAIN_DIR}"
 
 # Use job-local scratch if available, otherwise fallback to /tmp
-export SAVE_DIR="\${TMPDIR:-/tmp}/equivariant_3d"
+export SAVE_DIR="${LOGS_DIR}/results"
 mkdir -p "\$SAVE_DIR/md"
 
 echo "Running on host: \$(hostname)"
@@ -98,8 +98,8 @@ python ${LOGS_DIR}/${PROJECT_NAME}/boltzmann_generators_solute_3D_equi/Notebooks
     --mc_cache "\$MD_CACHE" \\
     --save_dir "\$SAVE_DIR" \\
     --metric_every 10 \\
-    --plot_every 10 \\
-    --checkpoint_every 10 \\
+    --plot_every 5 \\
+    --checkpoint_every 5 \\
     --metric_samples 2048 \\
     --eval_samples 2000 \\
     --wandb_group equivariant_3d \\

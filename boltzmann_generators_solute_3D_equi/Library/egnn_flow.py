@@ -343,6 +343,31 @@ class AngularCouplingLayer(nn.Module):
         x[:, self.active_idx, :] = x_active
         logdet = torch.zeros(B, device=y.device, dtype=y.dtype)
         return x, logdet
+    
+
+def overlap_penalty(x_flat, sys_dim, sigma):
+    """
+    Differentiable soft overlap penalty.
+
+    Parameters
+    ----------
+    x_flat : (B, N*D) tensor
+    sys_dim : tuple (N, D)
+    sigma : float — minimum allowed distance
+
+    Returns
+    -------
+    scalar — mean over batch of sum_{i<j} relu(sigma^2 - r_ij^2)^2
+    """
+    N, D = sys_dim
+    B = x_flat.shape[0]
+    coords = x_flat.reshape(B, N, D)
+    diff = coords.unsqueeze(2) - coords.unsqueeze(1)   # (B, N, N, D)
+    r2 = (diff * diff).sum(-1)                          # (B, N, N)
+    idx = torch.triu_indices(N, N, offset=1, device=x_flat.device)
+    r2_pairs = r2[:, idx[0], idx[1]]                   # (B, N*(N-1)/2)
+    return torch.relu(sigma ** 2 - r2_pairs).pow(2).sum(-1).mean()
+
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +468,12 @@ class EGNNEquivariantFlow(nn.Module):
                 u_x < energy_cap,
                 u_x,
                 energy_cap + torch.log1p(u_x - energy_cap),
+            )
+        # loss = (u_x - logdet_inv).mean()
+        loss = (u_x - logdet_inv).mean()
+        if w_overlap > 0.0:
+            loss = loss + w_overlap * overlap_penalty(
+                x_for_energy, self.system.dim, self.system.sigma
             )
         return (u_x - logdet_inv).mean()
 

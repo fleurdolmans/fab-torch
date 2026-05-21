@@ -59,6 +59,7 @@ class SoluteSimulationPBC3D:
         self.center_solute = bool(center_solute)
         self.k_center = float(k_center)
         self.periodic = True                 # flag consumed by MetropolisSampler
+        self.dim = 3 * self.n_particles
 
     # ------------------------------------------------------------------
     # Internal helper: minimum-image displacement
