@@ -345,6 +345,166 @@ class AngularCouplingLayer(nn.Module):
         return x, logdet
     
 
+# ---------------------------------------------------------------------------
+# Cartesian equivariant affine coupling layer
+# ---------------------------------------------------------------------------
+
+class CartesianEGNNAffineCoupling(nn.Module):
+    """
+    Equivariant affine coupling in Cartesian coordinates.
+
+    Replaces the Radial + Angular coupling pair with a single layer that
+    transforms all three Cartesian coordinates and produces a non-zero
+    log-determinant from BOTH the scale and (implicitly) the shift.
+
+    Transform
+    ---------
+    Forward:  x_b' = exp(s_b) * x_b + t
+    Inverse:  x_b  = exp(-s_b) * (x_b' - t)
+
+    where
+      s_b : per-active-particle invariant scale scalar
+            from CrossGroupConditioner conditioned on u_b = x_b/||x_b||
+            (u_b is unchanged by a pure scale, so conditioning on it is
+            consistent between forward and inverse — see proof in inverse())
+      t   : global equivariant shift vector  (B, 3), same for all active particles
+            = sum_a  tanh(MLP(h_a)) * v_a
+            where v_a is the EGNN equivariant coordinate update for frozen particle a
+            Depends ONLY on the frozen group → identical in forward and inverse.
+
+    Log-determinant
+    ---------------
+    logdet = 3 * sum_b(s_b)   (non-zero → both scale and shift networks receive
+                                gradient from the ML/forward-KL loss)
+
+    Equivariance proof
+    ------------------
+    Under global rotation R and fixed frozen group A:
+      s_b   : invariant (depends on ||x_b||, distances to frozen group) → unchanged ✓
+      t     : equivariant (weighted sum of equivariant EGNN vectors v_a → R@t) ✓
+      x_b'  = exp(s_b) * x_b + t
+      R@x_b'= exp(s_b) * R@x_b + R@t  ✓
+
+    Parameters
+    ----------
+    egnn            : EGNN with update_coords=True — outputs (h_a, v_a)
+    cross_cond      : CrossGroupConditioner — aggregates h_a → per-active context
+    scale_head      : MLP: (B, N_B, d) → (B, N_B, 1)  scale logit s_b
+    shift_weight_net: MLP: (B, N_A, d) → (B, N_A, 1)  scalar weight w_a for shift
+    frozen_idx      : (N_A,) particle indices of frozen group
+    active_idx      : (N_B,) particle indices of active group
+    l_box           : float or None — PBC box half-width
+    """
+
+    def __init__(self, egnn: EGNN, cross_cond: CrossGroupConditioner,
+                 scale_head: nn.Module, shift_weight_net: nn.Module,
+                 frozen_idx: torch.Tensor, active_idx: torch.Tensor,
+                 l_box: float | None = None):
+        super().__init__()
+        self.egnn = egnn
+        self.cross_cond = cross_cond
+        self.scale_head = scale_head
+        self.shift_weight_net = shift_weight_net
+        self.register_buffer("frozen_idx", frozen_idx)
+        self.register_buffer("active_idx", active_idx)
+        self.l_box = l_box
+
+    def _get_scale_and_shift(self, x: torch.Tensor,
+                              x_inter: torch.Tensor | None = None):
+        """
+        Compute s_b (scale) and t (shift) from the frozen group.
+
+        Parameters
+        ----------
+        x       : (B, N, 3) full configuration; frozen group used for EGNN
+        x_inter : (B, N_B, 3) or None
+            If None (forward pass): active positions x_b are used directly
+            to extract u_b = x_b / ||x_b||.
+            If given (inverse pass): should be exp(s_b)*x_b (i.e. x_b' - t),
+            whose direction equals u_b from the forward pass.
+
+        Returns
+        -------
+        s_b : (B, N_B)   per-particle scale logits
+        t   : (B, 3)     global equivariant shift
+        """
+        pos_a = x[:, self.frozen_idx, :]   # (B, N_A, 3) — frozen, unchanged
+
+        h_a, v_a = self.egnn(pos_a)        # (B, N_A, d), (B, N_A, 3)
+
+        # --- Global equivariant shift: t = sum_a w_a * v_a ---
+        w_a = self.shift_weight_net(h_a)   # (B, N_A, 1)
+        t = (w_a * v_a).sum(dim=1)         # (B, 3) equivariant
+
+        # --- Per-particle scale conditioned on u_b ---
+        # Use x_inter if given (inverse pass); otherwise use active positions (forward)
+        pos_b_for_u = x[:, self.active_idx, :] if x_inter is None else x_inter
+        u_b = pos_b_for_u / pos_b_for_u.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+        ctx_b = self.cross_cond(h_a, pos_a, u_b)   # (B, N_B, d)
+        s_b = self.scale_head(ctx_b).squeeze(-1)    # (B, N_B)
+
+        return s_b, t
+
+    def forward(self, x: torch.Tensor):
+        """x: (B, N, 3) → y: (B, N, 3),  logdet: (B,)"""
+        B = x.shape[0]
+        s_b, t = self._get_scale_and_shift(x)          # (B, N_B), (B, 3)
+
+        pos_b = x[:, self.active_idx, :]               # (B, N_B, 3)
+        t_exp = t.unsqueeze(1)                         # (B, 1, 3) → broadcasts
+
+        x_b_new = torch.exp(s_b).unsqueeze(-1) * pos_b + t_exp  # (B, N_B, 3)
+
+        logdet = 3.0 * s_b.sum(dim=1)                 # (B,)
+
+        y = x.clone()
+        y[:, self.active_idx, :] = x_b_new
+        return y, logdet
+
+    def inverse(self, y: torch.Tensor):
+        """
+        y: (B, N, 3) → x: (B, N, 3),  logdet: (B,)
+
+        Inverse proof:
+          y_b = exp(s_b) * x_b + t
+          1. Compute t from frozen group (same as forward, pos_a unchanged).
+          2. x_inter = y_b - t = exp(s_b) * x_b
+          3. u_b_inter = x_inter / ||x_inter||
+                       = (exp(s_b) * x_b) / ||exp(s_b) * x_b||
+                       = x_b / ||x_b|| = u_b  (direction preserved by scale) ✓
+          4. Compute s_b from CrossGroupConditioner(h_a, pos_a, u_b_inter)
+             = same s_b as forward ✓
+          5. x_b = exp(-s_b) * x_inter ✓
+        """
+        B = y.shape[0]
+
+        pos_a = y[:, self.frozen_idx, :]               # frozen group unchanged
+        h_a, v_a = self.egnn(pos_a)
+
+        # Step 1: global shift (same computation as forward)
+        w_a = self.shift_weight_net(h_a)
+        t = (w_a * v_a).sum(dim=1)                     # (B, 3)
+
+        # Step 2: remove shift → x_inter = exp(s_b) * x_b
+        pos_b_prime = y[:, self.active_idx, :]         # (B, N_B, 3)
+        x_inter = pos_b_prime - t.unsqueeze(1)         # (B, N_B, 3)
+
+        # Steps 3+4: recover s_b using u_b from x_inter (= u_b from forward)
+        u_b = x_inter / x_inter.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+        ctx_b = self.cross_cond(h_a, pos_a, u_b)
+        s_b = self.scale_head(ctx_b).squeeze(-1)       # (B, N_B)
+
+        # Step 5: reverse scale
+        x_b = torch.exp(-s_b).unsqueeze(-1) * x_inter  # (B, N_B, 3)
+
+        logdet = -3.0 * s_b.sum(dim=1)                 # (B,)
+
+        x = y.clone()
+        x[:, self.active_idx, :] = x_b
+        return x, logdet
+
+
 def overlap_penalty(x_flat, sys_dim, sigma):
     """
     Differentiable soft overlap penalty.

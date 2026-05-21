@@ -39,8 +39,13 @@ def _scatter_add(src: torch.Tensor, index: torch.Tensor,
 # ---------------------------------------------------------------------------
 
 def _min_image(diff: torch.Tensor, l_box: float) -> torch.Tensor:
-    """Minimum-image convention for PBC: diff → diff - L * round(diff/L)."""
-    return diff - l_box * torch.round(diff / l_box)
+    """Minimum-image convention for PBC: diff → diff - L * round(diff/L).
+
+    l_box is the half-box width; the full period is L = 2*l_box.
+    Consistent with potentials_pbc.py, sampling.py, and egnn_flow.py.
+    """
+    L = 2.0 * l_box
+    return diff - L * torch.round(diff / L)
 
 
 def _make_complete_edge_index(n: int, batch_size: int, device) -> torch.Tensor:

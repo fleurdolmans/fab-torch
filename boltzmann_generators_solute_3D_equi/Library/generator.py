@@ -292,6 +292,136 @@ def build_egnn_solute_flow_3d(
 
 
 # ---------------------------------------------------------------------------
+# Cartesian E(n)-equivariant flow factory
+# ---------------------------------------------------------------------------
+
+def build_egnn_cartesian_flow_3d(
+    system,
+    n_particles: int = 36,
+    n_blocks: int = 16,
+    egnn_hidden: int = 64,
+    egnn_layers: int = 3,
+    l_box: float | None = None,
+    att_heads: int = 4,
+    prior_sigma: float = 1.2,
+):
+    """
+    Build a Cartesian E(n)-equivariant normalizing flow for the 3D PBC solute system.
+
+    Replaces the RadialCoupling + AngularCoupling pair with a single
+    CartesianEGNNAffineCoupling per half-block:
+
+        x_b' = exp(s_b) * x_b + t
+
+    where s_b is a per-active-particle invariant scale (non-zero log-det)
+    and t is a global equivariant shift from the frozen group EGNN.
+
+    Advantages over the spherical (radial+angular) architecture:
+      - Both scale and shift networks receive gradient from the ML loss
+        (logdet = 3 * sum_b s_b is non-zero, unlike the zero-logdet angular layer)
+      - Works in native Cartesian coordinates (no PBC/spherical mismatch)
+      - Single EGNN forward pass per coupling (shared h_a and v_a for s and t)
+      - update_coords=True gives the EGNN its equivariant vector output
+
+    Parameters
+    ----------
+    system        : SoluteSimulationPBC3D
+    n_particles   : int    number of SOLVENT particles (36)
+    n_blocks      : int    A-B coupling cycles; total layers = n_blocks * 2
+                           Default 16 (= 32 layers) to match the 32-layer spherical flow
+    egnn_hidden   : int    hidden width of EGNN and conditioner MLPs
+    egnn_layers   : int    number of EGNN message-passing layers per conditioner
+    l_box         : float or None  PBC box half-width (None = no PBC)
+    att_heads     : int    cross-group attention heads in CrossGroupConditioner
+    prior_sigma   : float  std of isotropic Gaussian prior in Cartesian coordinates
+                           Rule of thumb: l_box / sqrt(3) ≈ 1.15 for l_box=2.0
+
+    Returns
+    -------
+    EGNNEquivariantFlow  (drop-in for the spherical flow in training.py)
+    """
+    import sys
+    from pathlib import Path
+    _LIB = Path(__file__).resolve().parent
+    if str(_LIB) not in sys.path:
+        sys.path.insert(0, str(_LIB))
+
+    import torch
+    import torch.nn as nn
+    from egnn import EGNN, CrossGroupConditioner
+    from egnn_flow import CartesianEGNNAffineCoupling, EGNNEquivariantFlow
+    from spline_flow import GaussianPrior
+
+    # ---- Particle groups: even / odd index split (same as spherical flow) ----
+    all_idx = torch.arange(n_particles)
+    group_A = all_idx[all_idx % 2 == 0]   # 0,2,4,...,34  (18 particles)
+    group_B = all_idx[all_idx % 2 == 1]   # 1,3,5,...,35  (18 particles)
+    N_A = len(group_A)
+    N_B = len(group_B)
+
+    def _make_layer(frozen_idx, active_idx, n_frozen, n_active):
+        # Single EGNN shared for scale conditioning and equivariant shift
+        egnn = EGNN(
+            n_particles=n_frozen,
+            hidden_features=egnn_hidden,
+            out_features=egnn_hidden,
+            n_layers=egnn_layers,
+            update_coords=True,    # needed for equivariant shift vectors v_a
+            l_box=l_box,
+        )
+        cross_cond = CrossGroupConditioner(
+            feature_dim=egnn_hidden,
+            n_heads=att_heads,
+            l_box=l_box,
+        )
+        # scale_head: context_b (B, N_B, d) → s_b (B, N_B, 1)
+        # Zero-init last layer → exp(s_b) = 1, identity at init
+        scale_head = nn.Sequential(
+            nn.Linear(egnn_hidden, egnn_hidden),
+            nn.SiLU(),
+            nn.Linear(egnn_hidden, 1),
+        )
+        nn.init.zeros_(scale_head[-1].weight)
+        nn.init.zeros_(scale_head[-1].bias)
+
+        # shift_weight_net: h_a (B, N_A, d) → w_a (B, N_A, 1)
+        # Tanh bounds weights; zero-init layer before Tanh → t = 0 at init
+        shift_weight_net = nn.Sequential(
+            nn.Linear(egnn_hidden, egnn_hidden),
+            nn.SiLU(),
+            nn.Linear(egnn_hidden, 1),
+            nn.Tanh(),
+        )
+        nn.init.zeros_(shift_weight_net[-2].weight)
+        nn.init.zeros_(shift_weight_net[-2].bias)
+
+        return CartesianEGNNAffineCoupling(
+            egnn=egnn,
+            cross_cond=cross_cond,
+            scale_head=scale_head,
+            shift_weight_net=shift_weight_net,
+            frozen_idx=frozen_idx,
+            active_idx=active_idx,
+            l_box=l_box,
+        )
+
+    layers = []
+    for _ in range(n_blocks):
+        layers.append(_make_layer(group_A, group_B, N_A, N_B))
+        layers.append(_make_layer(group_B, group_A, N_B, N_A))
+
+    prior = GaussianPrior(dim=n_particles * 3, sigma=prior_sigma)
+
+    return EGNNEquivariantFlow(
+        layers=layers,
+        prior=prior,
+        system=system,
+        n_particles=n_particles,
+        fixed_solute=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # RealNVP  (CUDA / GPU version — identical logic, tensors on device)
 # ---------------------------------------------------------------------------
 

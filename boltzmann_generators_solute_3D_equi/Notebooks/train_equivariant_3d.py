@@ -55,6 +55,7 @@ from potentials_pbc import SoluteSimulationPBC3D          # noqa: E402
 from build_system   import build_solute_coords_3d_rsa     # noqa: E402
 from sampling       import MetropolisSampler               # noqa: E402
 from generator      import build_egnn_solute_flow_3d       # noqa: E402
+from generator      import build_egnn_cartesian_flow_3d   # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -475,12 +476,23 @@ def parse_args():
 
     # Flow architecture
     g = p.add_argument_group("Flow architecture")
-    g.add_argument("--n_blocks",    type=int,   default=8)
+    g.add_argument("--flow_arch",   type=str,   default="cartesian",
+                   choices=["cartesian", "spherical"],
+                   help="cartesian: CartesianEGNNAffineCoupling (Change 1); "
+                        "spherical: original RadialCoupling+AngularCoupling")
+    g.add_argument("--n_blocks",    type=int,   default=16,
+                   help="Coupling blocks. cartesian uses 2 layers/block; "
+                        "spherical uses 4. Default 16 gives 32 layers for both.")
     g.add_argument("--egnn_hidden", type=int,   default=64)
     g.add_argument("--egnn_layers", type=int,   default=3)
-    g.add_argument("--num_bins",    type=int,   default=8,   help="RQ spline bins")
-    g.add_argument("--tail_bound",  type=float, default=4.0)
+    g.add_argument("--num_bins",    type=int,   default=8,
+                   help="RQ spline bins (spherical flow only)")
+    g.add_argument("--tail_bound",  type=float, default=4.0,
+                   help="Spline tail bound on log(r) (spherical flow only)")
     g.add_argument("--att_heads",   type=int,   default=4)
+    g.add_argument("--prior_sigma", type=float, default=1.2,
+                   help="Gaussian prior std for Cartesian flow. "
+                        "Rule of thumb: l_box/sqrt(3) ≈ 1.15 for l_box=2.0")
 
     # Stage 1 — ML
     g = p.add_argument_group("Stage 1 (ML / forward KL)")
@@ -1132,17 +1144,31 @@ def main():
 
     # ----------------------------------------------------------- 4. Build flow
     print("\n=== 4. Building flow ===")
-    flow = build_egnn_solute_flow_3d(
-        system=system,
-        n_particles=args.n_solvent,
-        n_blocks=args.n_blocks,
-        egnn_hidden=args.egnn_hidden,
-        egnn_layers=args.egnn_layers,
-        num_bins=args.num_bins,
-        tail_bound=args.tail_bound,
-        l_box=args.l_box,
-        att_heads=args.att_heads,
-    ).to(device)
+    print(f"Flow architecture: {args.flow_arch}")
+
+    if args.flow_arch == "cartesian":
+        flow = build_egnn_cartesian_flow_3d(
+            system=system,
+            n_particles=args.n_solvent,
+            n_blocks=args.n_blocks,
+            egnn_hidden=args.egnn_hidden,
+            egnn_layers=args.egnn_layers,
+            l_box=args.l_box,
+            att_heads=args.att_heads,
+            prior_sigma=args.prior_sigma,
+        ).to(device)
+    else:  # "spherical"
+        flow = build_egnn_solute_flow_3d(
+            system=system,
+            n_particles=args.n_solvent,
+            n_blocks=args.n_blocks,
+            egnn_hidden=args.egnn_hidden,
+            egnn_layers=args.egnn_layers,
+            num_bins=args.num_bins,
+            tail_bound=args.tail_bound,
+            l_box=args.l_box,
+            att_heads=args.att_heads,
+        ).to(device)
 
     n_params = sum(p.numel() for p in flow.parameters())
     print(f"Parameters: {n_params:,}  |  Coupling layers: {len(flow.coupling_layers)}")
