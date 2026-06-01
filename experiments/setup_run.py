@@ -208,7 +208,7 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         flow = make_perm_equi_cnf_flow_nf(cfg, target)
     elif cfg.flow.type == "perm-equi-joint-spline-nf":
         flow = make_perm_equi_joint_spline_flow_nf(cfg, target)
-    elif cfg.flow.type == "coup-nsf":
+    elif cfg.flow.type == "coup-nsf" or cfg.flow.type == "circ-coup-nsf":   
         flow = make_wrapped_normflow_solvent_flow(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
