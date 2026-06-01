@@ -385,7 +385,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
 
         else:
-            self.internal_dim = self.cartesian_dim - 6
+            if self.transform_version is None:
+                self.internal_dim = self.cartesian_dim
+            else:
+                self.internal_dim = self.cartesian_dim - 6
         
         print(f"Internal dim: {self.internal_dim}")
         self.logger = logger
@@ -466,7 +469,10 @@ class SoluteInWater(nn.Module, TargetDistribution):
             f"coordinates in current system ({self.cartesian_dim})."
         )
         if self.boundary_condition == "droplet":
-            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+            if self.transform_version is None:
+                self.coordinate_transform = None
+            else:
+                self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.boundary_condition == "pbc":
             # self.coordinate_transform = PBCPreprocessTransform(
             #     L=self.box_length_nm,
@@ -475,7 +481,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
             #     anchor_idx=0,
             #     do_center=False,
             # )
-            if self.transform_version == "v1_sorted":
+            if self.transform_version is None:
+                self.coordinate_transform = None
+            elif self.transform_version == "v1_sorted":
                 self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted(
                         L=self.box_length_nm,
                         system=self.system,
@@ -551,34 +559,31 @@ class SoluteInWater(nn.Module, TargetDistribution):
         else:
             raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
         
-        # if self.boundary_condition == "droplet":
-        # Transform MD data to internal coordinates (X --> I): these are the coordinates that we feed into the flow on
-        #  its output end.
-        if self.train_data_x is not None:
-            # OH bonds are still ~0.1 nm apart
-            self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
-                self.train_data_x.reshape(-1, self.cartesian_dim)  # Transform expects flattened coordinates
-            )
-        if self.val_data_x is not None:
-            self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
-                self.val_data_x.reshape(-1, self.cartesian_dim)
-            )
-            
-        if self.test_data_x is not None:
-            self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
-                self.test_data_x.reshape(-1, self.cartesian_dim)
-            )
-        # else:
-        #     # PBC: I == X, logdet == 0
-        #     if self.train_data_x is not None:
-        #         self.train_data_i = self.train_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-        #         self.train_logdet_xi = torch.zeros(self.train_data_i.shape[0], device=self.device, dtype=self.train_data_i.dtype)
-        #     if self.val_data_x is not None:
-        #         self.val_data_i = self.val_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-        #         self.val_logdet_xi = torch.zeros(self.val_data_i.shape[0], device=self.device, dtype=self.val_data_i.dtype)
-        #     if self.test_data_x is not None:
-        #         self.test_data_i = self.test_data_x.reshape(-1, self.cartesian_dim).to(self.device)
-        #         self.test_logdet_xi = torch.zeros(self.test_data_i.shape[0], device=self.device, dtype=self.test_data_i.dtype)
+        # Transform MD data to internal coordinates (X --> I): coordinates fed into the flow.
+        # If coordinate_transform is None, I == X (identity/Cartesian flow), logdet == 0.
+        if self.coordinate_transform is None:
+            if self.train_data_x is not None:
+                self.train_data_i = self.train_data_x.reshape(-1, self.cartesian_dim)
+                self.train_logdet_xi = torch.zeros(self.train_data_i.shape[0], device=self.train_data_i.device, dtype=self.train_data_i.dtype)
+            if self.val_data_x is not None:
+                self.val_data_i = self.val_data_x.reshape(-1, self.cartesian_dim)
+                self.val_logdet_xi = torch.zeros(self.val_data_i.shape[0], device=self.val_data_i.device, dtype=self.val_data_i.dtype)
+            if self.test_data_x is not None:
+                self.test_data_i = self.test_data_x.reshape(-1, self.cartesian_dim)
+                self.test_logdet_xi = torch.zeros(self.test_data_i.shape[0], device=self.test_data_i.device, dtype=self.test_data_i.dtype)
+        else:
+            if self.train_data_x is not None:
+                self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
+                    self.train_data_x.reshape(-1, self.cartesian_dim)
+                )
+            if self.val_data_x is not None:
+                self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
+                    self.val_data_x.reshape(-1, self.cartesian_dim)
+                )
+            if self.test_data_x is not None:
+                self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
+                    self.test_data_x.reshape(-1, self.cartesian_dim)
+                )
 
         # Target distribution wrapper
         if n_threads > 1:

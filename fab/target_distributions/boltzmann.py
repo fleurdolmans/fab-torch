@@ -91,7 +91,10 @@ class TransformedBoltzmann(nn.Module):
         """
         Log prob of system given in internal coordinates (e.g., Normalising Flow output).
         """
-        z, log_det = self.transform(z)  # I --> X
+        if self.transform is not None:
+            z, log_det = self.transform(z)  # I --> X
+        else:
+            log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         energy_term = -self.norm_energy(z)
 
         #  UNITS: We add logdetjac to energy, because energy is essentially log probability.
@@ -106,7 +109,10 @@ class TransformedBoltzmann(nn.Module):
         Log prob of system given in internal coordinates (e.g., Normalising Flow output) and the associated
         log determinant of the Jacobian of the transformation from internal to Cartesian coordinates.
         """
-        z, log_det = self.transform(z)  # I --> X
+        if self.transform is not None:
+            z, log_det = self.transform(z)  # I --> X
+        else:
+            log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         return -self.norm_energy(z) + log_det, log_det
 
     def log_prob_x(self, x):
@@ -156,11 +162,17 @@ class TransformedBoltzmannParallel(nn.Module):
         self.transform = transform
 
     def log_prob(self, z):
-        z, log_det = self.transform(z)  # I --> X
+        if self.transform is not None:
+            z, log_det = self.transform(z)  # I --> X
+        else:
+            log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         return -self.norm_energy(z) + log_det
 
     def log_prob_and_jac(self, z):
-        z, log_det = self.transform(z)  # I --> X
+        if self.transform is not None:
+            z, log_det = self.transform(z)  # I --> X
+        else:
+            log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
         return -self.norm_energy(z) + log_det, log_det
 
     def log_prob_x(self, x):
