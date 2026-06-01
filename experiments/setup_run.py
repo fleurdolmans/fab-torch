@@ -208,6 +208,8 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         flow = make_perm_equi_cnf_flow_nf(cfg, target)
     elif cfg.flow.type == "perm-equi-joint-spline-nf":
         flow = make_perm_equi_joint_spline_flow_nf(cfg, target)
+    elif cfg.flow.type == "coup-nsf":
+        flow = make_wrapped_normflow_solvent_flow(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
     # elif cfg.flow.type == "circ-coup-nsf":
@@ -324,9 +326,11 @@ def run_initial_flow_sanity_test(fab_model, target, batch_size: int = 8):
     print("\n=== INITIAL FLOW SANITY TEST ===")
 
     flow = fab_model.flow
-    solute_dim = 6
-    water_block_dim = 6
     n_waters = target.num_solvent_molecules
+    # Droplet: 9 dims/water (3 atoms × 3 spherical); PBC: 6 dims/water (rigid-body)
+    water_block_dim = 9 if getattr(target, 'boundary_condition', 'pbc') == 'droplet' else 6
+    solute_dim = target.internal_dim - n_waters * water_block_dim
+
 
     def permute_water_blocks(i, perm):
         B = i.shape[0]

@@ -370,8 +370,9 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         if self.boundary_condition == "pbc":
             fixed_list = ["fixed", "fixed_sorted", "fixed_radial_water", "fixed_sequential_oo"]
-            if self.transform_version == "v2" or self.transform_version == "v2_sorted" or self.transform_version == "so2_rigid_gauge":
-                # self.internal_dim = self.cartesian_dim                    # for cartesian flow
+            if self.transform_version is None:
+                self.internal_dim = self.cartesian_dim                    # for cartesian flow
+            elif self.transform_version == "v2" or self.transform_version == "v2_sorted" or self.transform_version == "so2_rigid_gauge":
                 self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
             elif self.transform_version == "v3":
                 self.internal_dim = 9 + 6 * self.num_solvent_molecules 
