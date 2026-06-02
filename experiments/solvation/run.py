@@ -122,7 +122,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             figs.append(fig)
 
         # RDF and energies of flow samples vs MD samples
-        num_flow_samples = 10000
+        num_flow_samples = 500
         # num_flow_samples = 1000
         # num_flow_samples = 100
         with torch.no_grad():
