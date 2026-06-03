@@ -146,201 +146,9 @@ class ManifoldState:
     # water orientations as rotation matrices
     R: torch.Tensor        # (B, W, 3, 3)
 
-
-# ============================================================
-# Transform: Cartesian <-> translation-reduced manifold state
-# ============================================================
-
-class PBCRigidWaterTorusSO3Transform(nn.Module):
+class Global3PointRadialRotvecTransform(_BaseFlow):
     """
-    Translation-reduced transform for:
-      - one flexible triatomic solute
-      - rigid OHH waters
-      - cubic PBC box of edge length L
-
-    Forward/inverse are bijective on the intended physical support:
-      - solute bonded vectors remain in the principal MIC branch
-      - water geometry is rigid and labeled OHH
-      - water oxygen positions are torus-valued relative to atom 0
-
-    State:
-      solute : R^6
-      tau    : T^(3W)
-      R      : SO(3)^W
-    """
-
-    def __init__(self, L: float, transform_data: torch.Tensor, eps: float = 1e-8):
-        super().__init__()
-        self.L = float(L)
-        self.eps = float(eps)
-
-        assert transform_data.ndim == 2 and transform_data.shape[0] == 1
-        n_atoms = transform_data.shape[1] // 3
-        self.n_solute = 3
-        self.n_atoms_per_water = 3
-        self.n_waters = (n_atoms - self.n_solute) // self.n_atoms_per_water
-        self.n_atoms = n_atoms
-
-        # Reference water geometry from first water in transform_data
-        with torch.no_grad():
-            x0 = transform_data.reshape(1, n_atoms, 3).clone()
-            w0 = x0[:, self.n_solute:self.n_solute + 3, :][0]   # (3,3), OHH
-            O = w0[0:1]
-            rel = w0 - O
-
-            ref_H1 = rel[1].clone()
-            ref_H2 = rel[2].clone()
-
-            ref_frame = self.water_frame_from_rel_positions(
-                torch.stack([
-                    torch.zeros_like(ref_H1),
-                    ref_H1,
-                    ref_H2,
-                ], dim=0).unsqueeze(0)
-            )[0]
-
-        self.register_buffer("ref_H1", ref_H1)
-        self.register_buffer("ref_H2", ref_H2)
-        self.register_buffer("ref_frame", ref_frame)
-
-    def _L_tensor(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.as_tensor(self.L, device=x.device, dtype=x.dtype)
-
-    def mic(self, dx: torch.Tensor) -> torch.Tensor:
-        L = self._L_tensor(dx)
-        return dx - L * torch.round(dx / L)
-
-    def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
-        L = self._L_tensor(x)
-        return x - L * torch.floor(x / L)
-
-    def _normalize(self, v: torch.Tensor) -> torch.Tensor:
-        return v / torch.linalg.norm(v, dim=-1, keepdim=True).clamp_min(self.eps)
-
-    def water_frame_from_rel_positions(self, w_rel: torch.Tensor) -> torch.Tensor:
-        """
-        w_rel: (B,3,3), OHH with O at origin
-        returns frame with columns [e1, e2, n]
-        """
-        u1 = w_rel[:, 1, :]
-        u2 = w_rel[:, 2, :]
-
-        e1 = self._normalize(u1)
-        n = self._normalize(torch.cross(u1, u2, dim=-1))
-        e2 = self._normalize(torch.cross(n, e1, dim=-1))
-        return torch.stack([e1, e2, n], dim=-1)
-
-    def make_whole_solute(self, x_sol: torch.Tensor) -> torch.Tensor:
-        x0 = x_sol[:, 0:1, :]
-        d = self.mic(x_sol - x0)
-        return x0 + d
-
-    def make_whole_water(self, x_w: torch.Tensor) -> torch.Tensor:
-        O = x_w[:, 0:1, :]
-        d = self.mic(x_w - O)
-        return O + d
-
-    def cartesian_rel_to_tau(self, rel: torch.Tensor) -> torch.Tensor:
-        """
-        rel in principal MIC branch, shape (...,3), approximately in [-L/2,L/2)
-        tau in [-pi, pi)
-        """
-        return wrap_to_pi((2.0 * math.pi / self.L) * rel)
-
-    def tau_to_cartesian_rel(self, tau: torch.Tensor) -> torch.Tensor:
-        """
-        principal branch representative in [-L/2,L/2)
-        """
-        return (self.L / (2.0 * math.pi)) * tau
-
-    def inverse(self, x: torch.Tensor) -> Tuple[ManifoldState, torch.Tensor]:
-        """
-        Cartesian -> manifold state
-        x: (B, 3N)
-        returns state, logdet
-        """
-        B = x.shape[0]
-        x = x.view(B, self.n_atoms, 3)
-
-        # Translation gauge: anchor solute atom 0 as origin
-        sol = self.make_whole_solute(x[:, :3, :])   # (B,3,3)
-        origin = sol[:, 0:1, :]
-        x_rel = self.mic(x - origin)
-
-        # Flexible solute in anchored bond-vector coordinates
-        v1 = x_rel[:, 1, :]
-        v2 = x_rel[:, 2, :]
-        solute = torch.cat([v1, v2], dim=-1)
-
-        taus = []
-        Rs = []
-
-        F_ref = self.ref_frame.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)
-
-        for k in range(self.n_waters):
-            s = self.n_solute + 3 * k
-            w_rel_to_sol = x_rel[:, s:s + 3, :]      # (B,3,3), OHH
-
-            # make water whole relative to O
-            w = self.make_whole_water(w_rel_to_sol)
-
-            O_rel = w[:, 0, :]                       # oxygen rel to anchored solute atom 0
-            tau = self.cartesian_rel_to_tau(O_rel)
-
-            # rigid orientation as SO(3) element
-            w_rel = w - w[:, 0:1, :]
-            F_cur = self.water_frame_from_rel_positions(w_rel)
-            R = F_cur @ F_ref.transpose(-1, -2)
-            R = project_to_so3(R)
-
-            taus.append(tau)
-            Rs.append(R)
-
-        tau = torch.stack(taus, dim=1)              # (B,W,3)
-        R = torch.stack(Rs, dim=1)                  # (B,W,3,3)
-
-        logdet = torch.zeros(B, device=x.device, dtype=x.dtype)
-        return ManifoldState(solute=solute, tau=tau, R=R), logdet
-
-    def forward(self, state: ManifoldState) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Manifold state -> Cartesian
-        returns x_flat, logdet
-        """
-        B = state.solute.shape[0]
-        v1 = state.solute[:, 0:3]
-        v2 = state.solute[:, 3:6]
-
-        center = torch.full((B, 3), 0.5 * self.L, device=v1.device, dtype=v1.dtype)
-
-        x = torch.zeros((B, self.n_atoms, 3), device=v1.device, dtype=v1.dtype)
-        x[:, 0, :] = center
-        x[:, 1, :] = center + v1
-        x[:, 2, :] = center + v2
-
-        H1_ref = self.ref_H1.to(v1.device, v1.dtype)
-        H2_ref = self.ref_H2.to(v1.device, v1.dtype)
-
-        for k in range(self.n_waters):
-            O_rel = self.tau_to_cartesian_rel(state.tau[:, k, :])     # principal branch rep
-            Rk = state.R[:, k, :, :]
-
-            O_abs = center + O_rel
-            H1 = torch.einsum("bij,j->bi", Rk, H1_ref)
-            H2 = torch.einsum("bij,j->bi", Rk, H2_ref)
-
-            s = self.n_solute + 3 * k
-            x[:, s + 0, :] = O_abs
-            x[:, s + 1, :] = O_abs + H1
-            x[:, s + 2, :] = O_abs + H2
-
-        x = self.wrap_0L(x)
-        logdet = torch.zeros(B, device=x.device, dtype=x.dtype)
-        return x.view(B, -1), logdet
-
-class PBCGlobal3PointSphericalTransform(_BaseFlow):
-    """
-    Fixed-box PBC-safe transform for:
+    PBC coordinate transform for:
       - one flexible triatomic solute (atoms 0,1,2)
       - rigid water solvents in OHH ordering
 
@@ -350,8 +158,11 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
         v2 = MIC(x2 - x0)                          -> 3
 
       each water:
-        O_rel   = MIC(O - x0)                      -> 3
-        omega   = rigid-water rotation vector      -> 3
+        z_O  = radial latent of MIC(O - x0),        -> 3
+               z_O = rho * (O_rel / ||O_rel||)
+               where rho = (||O_rel|| - r_min) / r_scale
+               requires ||O_rel|| >= r_min
+        omega = rotation vector (axis * angle)      -> 3
 
     Total internal dim:
         6 + 6 * n_waters
@@ -359,12 +170,17 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
     Properties
     ----------
     - removes only global translation (atom 0 anchored in forward)
-    - keeps global rotation (important for fixed-box PBC)
+    - keeps global rotation (lab-frame encoding, appropriate for fixed-box PBC)
     - preserves water ordering (permutation symmetry can be handled by the flow)
     - locally invertible almost everywhere
     - not globally bijective because:
         * rotvec has SO(3) branch cut at angle pi
         * MIC has measure-zero half-box ambiguities
+        * oxygen positions with ||O_rel|| < r_min have no valid preimage
+
+    logdet accounts for:
+        * radial oxygen map (z_O <-> O_rel)
+        * SO(3) exponential map (omega <-> R)
     """
 
     def __init__(
@@ -407,9 +223,6 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
 
             self.ref_H1 = w_rel[1].clone()
             self.ref_H2 = w_rel[2].clone()
-
-            ref_cent = w_rel.mean(dim=0, keepdim=True)
-            self.ref_water_centered = (w_rel - ref_cent).clone()
 
         ref_w_rel = torch.stack(
             [
@@ -456,12 +269,26 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
 
         O_rel: (B,3)
         z_O:   (B,3)
+
+        Requires ||O_rel|| >= r_min.  Configurations that violate this have no
+        valid preimage; a warning is emitted and rho is clamped to eps.
         """
         r = torch.linalg.norm(O_rel, dim=-1, keepdim=True).clamp_min(self.eps)   # (B,1)
         u = O_rel / r                                                             # (B,3)
 
         # invert r = r_min + r_scale * rho
-        rho = ((r - self.oxygen_r_min) / self.oxygen_r_scale).clamp_min(self.eps) # (B,1)
+        rho_raw = (r - self.oxygen_r_min) / self.oxygen_r_scale                  # (B,1)
+        if (rho_raw < 0).any():
+            import warnings
+            n_bad = int((rho_raw < 0).sum().item())
+            warnings.warn(
+                f"oxygen_cartesian_to_latent: {n_bad} oxygen(s) closer than "
+                f"r_min={self.oxygen_r_min} to solute atom 0. "
+                "These configurations have no valid preimage; logdet will be incorrect.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        rho = rho_raw.clamp_min(self.eps)                                        # (B,1)
         z_O = rho * u                                                             # (B,3)
 
         # inverse logdet = - forward logdet
@@ -610,36 +437,25 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
 
         return w
 
-    # ------------------------------------------------------------------
-    # Kabsch: return column-vector rotation mapping reference -> target
-    # ------------------------------------------------------------------
-    @staticmethod
-    def kabsch_ref_to_target_colvec(X_ref: torch.Tensor, Y_tgt: torch.Tensor) -> torch.Tensor:
+    def so3_logdet_exp(self, omega: torch.Tensor) -> torch.Tensor:
         """
-        X_ref, Y_tgt: (B,N,3), centered row-stacked point clouds.
-        Returns R_col acting on column vectors so that ref -> target.
-        """
-        C = X_ref.transpose(1, 2) @ Y_tgt
-        U, S, Vh = torch.linalg.svd(C)
-        V = Vh.transpose(1, 2)
-        Ut = U.transpose(1, 2)
+        log |det J| for the SO(3) exponential map omega -> R(omega).
 
-        det = torch.det(V @ Ut)
-        D = torch.eye(3, device=X_ref.device, dtype=X_ref.dtype).unsqueeze(0).repeat(X_ref.shape[0], 1, 1)
-        D[:, 2, 2] = torch.where(det < 0, -1.0, 1.0)
+        For the change-of-variables from rotation vector omega in R^3 to the
+        orientation of a rigid body on SO(3), the Jacobian of the exponential
+        map contributes:
 
-        R_row = V @ D @ Ut
-        R_col = R_row.transpose(1, 2)
-        return R_col
+            log|det J_exp(omega)| = 2 * log(sin(theta/2) / (theta/2))
 
-    def water_rotation_from_positions(self, w_rel: torch.Tensor) -> torch.Tensor:
+        where theta = ||omega||.  This equals 0 at theta=0 and is negative for
+        theta > 0, reflecting volume contraction of the exponential map.
+
+        omega: (B,3)
+        returns: (B,)
         """
-        w_rel: (B,3,3), water coordinates relative to oxygen
-        returns R: (B,3,3), column-vector rotation mapping reference water -> current water
-        """
-        w_cent = w_rel - w_rel.mean(dim=1, keepdim=True)
-        X_ref = self.ref_water_centered.to(w_rel.device, w_rel.dtype).unsqueeze(0).expand(w_rel.shape[0], 3, 3)
-        return self.kabsch_ref_to_target_colvec(X_ref, w_cent)
+        theta = torch.linalg.norm(omega, dim=-1).clamp_min(1e-12)  # (B,)
+        half = 0.5 * theta
+        return 2.0 * (torch.log(torch.sin(half).clamp_min(1e-12)) - torch.log(half))
 
     # ------------------------------------------------------------------
     # inverse: Cartesian -> internal
@@ -696,6 +512,9 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
             R = torch.einsum("bij,bkj->bik", F_cur, F_ref)
             omega = self.rotmat_to_rotvec(R)
 
+            # SO(3) log-map Jacobian: inverse of the exp-map logdet
+            logdet = logdet - self.so3_logdet_exp(omega)
+
             pieces += [z_O, omega]
 
         i = torch.cat(pieces, dim=1)
@@ -739,6 +558,9 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
             O_rel, logdet_O = self.oxygen_latent_to_cartesian(z_O)
             logdet = logdet + logdet_O
 
+            # SO(3) exp-map Jacobian
+            logdet = logdet + self.so3_logdet_exp(omega)
+
             R = self.rotvec_to_rotmat(omega)
 
             O_abs = center + O_rel
@@ -753,654 +575,32 @@ class PBCGlobal3PointSphericalTransform(_BaseFlow):
         x = self.wrap_0L(x)
         return x.view(B, -1), logdet
 
-# class PBCGlobal3PointSphericalTransform(_BaseFlow):
-#     """
-#     Fixed-box PBC-safe transform for:
-#       - one flexible triatomic solute (atoms 0,1,2)
-#       - rigid water solvents in OHH ordering
 
-#     Internal coordinates:
-#       solute:
-#         v1 = MIC(x1 - x0)                          -> 3
-#         v2 = MIC(x2 - x0)                          -> 3
 
-#       each water:
-#         O_rel   = MIC(O - x0)                      -> 3
-#         omega   = rigid-water rotation vector      -> 3
 
-#     Total internal dim:
-#         6 + 6 * n_waters
-
-#     Properties
-#     ----------
-#     - removes only global translation (atom 0 anchored in forward)
-#     - keeps global rotation (important for fixed-box PBC)
-#     - preserves water ordering (permutation symmetry can be handled by the flow)
-#     - locally invertible almost everywhere
-#     - not globally bijective because:
-#         * rotvec has SO(3) branch cut at angle pi
-#         * MIC has measure-zero half-box ambiguities
-#     """
-
-#     def __init__(self, L: float, system=None, transform_data=None, internal_dim=None, eps: float = 1e-8):
-#         super().__init__()
-#         self.L = float(L)
-#         self.system = system
-#         self.transform_data = transform_data
-#         self.eps = eps
-
-#         assert transform_data is not None and transform_data.shape[0] == 1
-#         self.n_atoms = transform_data.shape[1] // 3
-#         self.n_solute = 3
-#         self.n_atoms_per_water = 3
-#         self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_water
-#         assert self.n_solute + 3 * self.n_waters == self.n_atoms
-
-#         expected_dim = 6 + 6 * self.n_waters
-#         self.internal_dim = expected_dim if internal_dim is None else internal_dim
-#         assert self.internal_dim == expected_dim, (self.internal_dim, expected_dim)
-
-#         # Build reference rigid-water geometry from transform_data
-#         with torch.no_grad():
-#             x0 = transform_data.reshape(1, self.n_atoms, 3).clone()
-#             w0 = x0[:, self.n_solute:self.n_solute + 3, :][0]   # (3,3), OHH
-#             O = w0[0:1]
-#             w_rel = w0 - O
-
-#             # Reference H vectors used in forward()
-#             self.ref_H1 = w_rel[1].clone()   # (3,)
-#             self.ref_H2 = w_rel[2].clone()   # (3,)
-
-#             # Centered reference cloud for Kabsch in inverse()
-#             ref_cent = w_rel.mean(dim=0, keepdim=True)
-#             self.ref_water_centered = (w_rel - ref_cent).clone()  # (3,3)
-        
-#         # Reference frame for labeled-water orientation
-#         ref_w_rel = torch.stack(
-#             [
-#                 torch.zeros_like(self.ref_H1),
-#                 self.ref_H1,
-#                 self.ref_H2,
-#             ],
-#             dim=0,
-#         ).unsqueeze(0)  # (1,3,3)
-
-#         self.ref_water_frame = self.water_frame_from_rel_positions(ref_w_rel)[0]  # (3,3)
-
-#     # ------------------------------------------------------------------
-#     # PBC helpers
-#     # ------------------------------------------------------------------
-#     def _normalize(self, v: torch.Tensor) -> torch.Tensor:
-#         return v / torch.linalg.norm(v, dim=-1, keepdim=True).clamp_min(self.eps)
-
-#     def water_frame_from_rel_positions(self, w_rel: torch.Tensor) -> torch.Tensor:
-#         """
-#         Build a deterministic labeled body frame for water from relative coordinates.
-
-#         Parameters
-#         ----------
-#         w_rel : (B,3,3)
-#             Water coordinates relative to oxygen, in OHH ordering:
-#             w_rel[:,0,:] = 0
-#             w_rel[:,1,:] = H1 - O
-#             w_rel[:,2,:] = H2 - O
-
-#         Returns
-#         -------
-#         F : (B,3,3)
-#             Frame matrix with columns [e1, e2, n], acting on column vectors.
-#         """
-#         u1 = w_rel[:, 1, :]   # H1 - O
-#         u2 = w_rel[:, 2, :]   # H2 - O
-
-#         e1 = self._normalize(u1)
-#         n = self._normalize(torch.cross(u1, u2, dim=1))
-#         e2 = self._normalize(torch.cross(n, e1, dim=1))
-
-#         F = torch.stack([e1, e2, n], dim=2)  # columns
-#         return F
-#     def _L_tensor(self, x: torch.Tensor, L: float = None) -> torch.Tensor:
-#         L = self.L if L is None else L
-#         return torch.as_tensor(L, device=x.device, dtype=x.dtype)
-
-#     def mic(self, dx: torch.Tensor, L: float = None) -> torch.Tensor:
-#         L_t = self._L_tensor(dx, L)
-#         return dx - L_t * torch.round(dx / L_t)
-
-#     def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
-#         L_t = self._L_tensor(x, self.L)
-#         return x - L_t * torch.floor(x / L_t)
-
-#     def make_whole_solute(self, x_sol: torch.Tensor) -> torch.Tensor:
-#         """
-#         x_sol: (B,3,3)
-#         Make solute whole relative to atom 0.
-#         """
-#         x0 = x_sol[:, 0:1, :]
-#         d = self.mic(x_sol - x0)
-#         return x0 + d
-
-#     def make_whole_water(self, x_w: torch.Tensor) -> torch.Tensor:
-#         """
-#         x_w: (B,3,3) with OHH ordering
-#         Make water whole relative to oxygen.
-#         """
-#         O = x_w[:, 0:1, :]
-#         d = self.mic(x_w - O)
-#         return O + d
-
-#     # ------------------------------------------------------------------
-#     # SO(3) helpers (column-vector convention)
-#     # ------------------------------------------------------------------
-#     def rotvec_to_rotmat(self, w: torch.Tensor) -> torch.Tensor:
-#         """
-#         w: (B,3)
-#         returns R: (B,3,3), acting on column vectors
-#         """
-#         B = w.shape[0]
-#         theta = torch.linalg.norm(w, dim=1, keepdim=True)  # (B,1)
-
-#         R = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).repeat(B, 1, 1)
-
-#         small = theta[:, 0] < 1e-8
-#         big = ~small
-
-#         if big.any():
-#             th = theta[big]
-#             k = w[big] / th.clamp_min(self.eps)
-
-#             kx, ky, kz = k[:, 0], k[:, 1], k[:, 2]
-#             K = torch.zeros((big.sum(), 3, 3), device=w.device, dtype=w.dtype)
-#             K[:, 0, 1] = -kz
-#             K[:, 0, 2] =  ky
-#             K[:, 1, 0] =  kz
-#             K[:, 1, 2] = -kx
-#             K[:, 2, 0] = -ky
-#             K[:, 2, 1] =  kx
-
-#             I = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).repeat(big.sum(), 1, 1)
-#             ct = torch.cos(th).view(-1, 1, 1)
-#             st = torch.sin(th).view(-1, 1, 1)
-#             R[big] = I + st * K + (1.0 - ct) * (K @ K)
-
-#         if small.any():
-#             ws = w[small]
-#             K = torch.zeros((small.sum(), 3, 3), device=w.device, dtype=w.dtype)
-#             K[:, 0, 1] = -ws[:, 2]
-#             K[:, 0, 2] =  ws[:, 1]
-#             K[:, 1, 0] =  ws[:, 2]
-#             K[:, 1, 2] = -ws[:, 0]
-#             K[:, 2, 0] = -ws[:, 1]
-#             K[:, 2, 1] =  ws[:, 0]
-#             I = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).repeat(small.sum(), 1, 1)
-#             R[small] = I + K
-
-#         return R
-
-#     def rotmat_to_rotvec(self, R: torch.Tensor) -> torch.Tensor:
-#         """
-#         R: (B,3,3), acting on column vectors
-#         returns w: (B,3)
-#         """
-#         B = R.shape[0]
-#         trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
-#         cos_theta = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0)
-#         theta = torch.acos(cos_theta)
-
-#         w = torch.zeros((B, 3), device=R.device, dtype=R.dtype)
-
-#         small = theta < 1e-6
-#         if small.any():
-#             A = 0.5 * (R[small] - R[small].transpose(1, 2))
-#             w[small, 0] = A[:, 2, 1]
-#             w[small, 1] = A[:, 0, 2]
-#             w[small, 2] = A[:, 1, 0]
-
-#         big = ~small
-#         if big.any():
-#             th = theta[big]
-#             denom = (2.0 * torch.sin(th)).clamp_min(self.eps)
-#             axis = torch.stack([
-#                 (R[big, 2, 1] - R[big, 1, 2]) / denom,
-#                 (R[big, 0, 2] - R[big, 2, 0]) / denom,
-#                 (R[big, 1, 0] - R[big, 0, 1]) / denom,
-#             ], dim=1)
-#             w[big] = axis * th.unsqueeze(1)
-
-#         return w
-
-#     # ------------------------------------------------------------------
-#     # Kabsch: return column-vector rotation mapping reference -> target
-#     # ------------------------------------------------------------------
-#     @staticmethod
-#     def kabsch_ref_to_target_colvec(X_ref: torch.Tensor, Y_tgt: torch.Tensor) -> torch.Tensor:
-#         """
-#         X_ref, Y_tgt: (B,N,3), centered row-stacked point clouds.
-#         Returns R_col acting on column vectors so that ref -> target.
-#         """
-#         C = X_ref.transpose(1, 2) @ Y_tgt
-#         U, S, Vh = torch.linalg.svd(C)
-#         V = Vh.transpose(1, 2)
-#         Ut = U.transpose(1, 2)
-
-#         det = torch.det(V @ Ut)
-#         D = torch.eye(3, device=X_ref.device, dtype=X_ref.dtype).unsqueeze(0).repeat(X_ref.shape[0], 1, 1)
-#         D[:, 2, 2] = torch.where(det < 0, -1.0, 1.0)
-
-#         R_row = V @ D @ Ut
-#         R_col = R_row.transpose(1, 2)
-#         return R_col
-
-#     def water_rotation_from_positions(self, w_rel: torch.Tensor) -> torch.Tensor:
-#         """
-#         w_rel: (B,3,3), water coordinates relative to oxygen
-#         returns R: (B,3,3), column-vector rotation mapping reference water -> current water
-#         """
-#         w_cent = w_rel - w_rel.mean(dim=1, keepdim=True)
-#         X_ref = self.ref_water_centered.to(w_rel.device, w_rel.dtype).unsqueeze(0).expand(w_rel.shape[0], 3, 3)
-#         return self.kabsch_ref_to_target_colvec(X_ref, w_cent)
-
-#     # ------------------------------------------------------------------
-#     # inverse: Cartesian -> internal
-#     # ------------------------------------------------------------------
-#     def inverse(self, x: torch.Tensor):
-#         """
-#         x: (B, 3*N) flattened Cartesian
-
-#         Returns
-#         -------
-#         i: (B, 6 + 6*n_waters)
-#         logdet_xi: (B,)
-#         """
-#         B = x.shape[0]
-#         x = x.view(B, self.n_atoms, 3)
-
-#         # Make solute whole, define atom 0 as anchor
-#         sol = self.make_whole_solute(x[:, :3, :])   # (B,3,3)
-#         origin = sol[:, 0:1, :]                     # (B,1,3)
-
-#         # Canonical MIC-relative coordinates to atom 0
-#         x_rel = self.mic(x - origin)                # (B,N,3)
-
-#         # Solute internal coordinates
-#         v1 = x_rel[:, 1, :]
-#         v2 = x_rel[:, 2, :]
-#         pieces = [v1, v2]
-
-#         logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
-
-#         # Reference water frame
-#         F_ref = self.ref_water_frame.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)
-
-#         # Waters
-#         for k in range(self.n_waters):
-#             s = self.n_solute + 3 * k
-
-#             # Water coordinates relative to solute atom 0
-#             w_rel_to_sol = x_rel[:, s:s + 3, :]     # (B,3,3), OHH
-
-#             # Make water whole relative to its oxygen
-#             w = self.make_whole_water(w_rel_to_sol)
-
-#             # Oxygen position relative to solute atom 0
-#             O_rel = w[:, 0, :]                      # (B,3)
-
-#             # Water orientation from deterministic labeled frame
-#             w_rel = w - w[:, 0:1, :]               # O at origin
-#             F_cur = self.water_frame_from_rel_positions(w_rel)  # (B,3,3)
-
-#             # Rotation mapping reference frame -> current frame
-#             R = torch.einsum("bij,bkj->bik", F_cur, F_ref)
-#             # equivalently: R = F_cur @ F_ref.transpose(1, 2)
-
-#             omega = self.rotmat_to_rotvec(R)
-
-#             pieces += [O_rel, omega]
-
-#         i = torch.cat(pieces, dim=1)
-#         return i, logdet
-
-#     def forward(self, i: torch.Tensor):
-#         """
-#         i: (B, 6 + 6*n_waters)
-
-#         Returns
-#         -------
-#         x: (B, 3*N) flattened Cartesian in [0, L)
-#         logdet_ix: (B,)
-#         """
-#         B = i.shape[0]
-#         assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
-
-#         # Solute internal coords
-#         v1 = i[:, 0:3]
-#         v2 = i[:, 3:6]
-
-#         center = torch.full((B, 3), 0.5 * self.L, device=i.device, dtype=i.dtype)
-
-#         x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
-#         x[:, 0, :] = center
-#         x[:, 1, :] = center + v1
-#         x[:, 2, :] = center + v2
-
-#         logdet = torch.zeros((B,), device=i.device, dtype=i.dtype)
-
-#         H1_ref = self.ref_H1.to(i.device, i.dtype)
-#         H2_ref = self.ref_H2.to(i.device, i.dtype)
-
-#         idx = 6
-#         for k in range(self.n_waters):
-
-#             O_rel = i[:, idx:idx + 3]
-#             omega = i[:, idx + 3:idx + 6]
-#             idx += 6
-
-#             R = self.rotvec_to_rotmat(omega)
-
-#             O_abs = center + O_rel
-#             H1 = torch.einsum("bij,j->bi", R, H1_ref)
-#             H2 = torch.einsum("bij,j->bi", R, H2_ref)
-
-#             s = self.n_solute + 3 * k
-#             x[:, s + 0, :] = O_abs
-#             x[:, s + 1, :] = O_abs + H1
-#             x[:, s + 2, :] = O_abs + H2
-
-#         x = self.wrap_0L(x)
-#         return x.view(B, -1), logdet
-
-# class PBCGlobal3PointSphericalTransform(nf.flows.Flow):
-#     """
-#     PBC + rigid-water-friendly coordinate transform.
-
-#     Internal coords i:
-#       - solute: v1 = x1-x0, v2 = x2-x0  (each MIC wrapped)  -> 6 dims
-#       - each water: O position relative to solute origin (MIC) -> 3 dims
-#                   + rotation vector omega (axis-angle)        -> 3 dims
-#         (H positions are reconstructed from O + omega and a fixed reference geometry)
-
-#     forward(i)  : i -> Cartesian x (flattened)
-#     inverse(x)  : Cartesian x -> i
-#     """
-#     def __init__(self, L: float, system=None, transform_data=None, internal_dim=None):
-#         super().__init__()
-#         self.L = float(L)
-#         self.system = system
-#         self.transform_data = transform_data
-
-#         assert transform_data is not None and transform_data.shape[0] == 1
-#         self.n_atoms = transform_data.shape[1] // 3
-#         self.n_solute = 3
-#         self.n_atoms_per_mol = 3
-#         self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_mol
-#         assert self.n_solute + 3 * self.n_waters == self.n_atoms
-
-#         # Build a reference rigid-water geometry in the "water body frame":
-#         # O at origin; two H vectors defined relative to O. We pull this from transform_data.
-#         with torch.no_grad():
-#             x0 = transform_data.reshape(1, self.n_atoms, 3).clone()  # (1,N,3)
-#             # Use first water (water index 0) from transform_data as reference
-#             w0_start = self.n_solute
-#             ref = x0[:, w0_start:w0_start+3, :]  # (1,3,3) = [O,H,H] in OpenMM's OHH ordering
-#             ref = ref[0]  # (3,3)
-#             ref_O = ref[0:1, :]
-#             ref_rel = ref - ref_O  # O at 0
-#             # Store reference H vectors (3,)
-#             self.ref_H1 = ref_rel[1].clone()
-#             self.ref_H2 = ref_rel[2].clone()
-
-#             # Also store reference water points for Kabsch (centered on centroid) to infer rotation from data
-#             ref_cent = ref_rel.mean(dim=0, keepdim=True)  # (1,3)
-#             self.ref_water_kabsch = (ref_rel - ref_cent).clone()  # (3,3)
-
-#         # Internal dimension: solute(6) + waters(6 each)
-#         # self.internal_dim = 6 + 6 * self.n_waters
-#         self.internal_dim = internal_dim
-#         # print("internal_dim  in transform:", self.internal_dim )
-
-#     # ---------- PBC helpers ----------
-#     def _L_tensor(self, x: torch.Tensor, L: float) -> torch.Tensor:
-#         # broadcastable tensor of L
-#         return torch.as_tensor(L, device=x.device, dtype=x.dtype)
-
-#     def mic(self, dx: torch.Tensor, L: float) -> torch.Tensor:
-#         L_t = self._L_tensor(dx, L)
-#         return dx - L_t * torch.round(dx / L_t)
-
-#     def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
-#         # wrap positions into [0, L)
-
-#         L_t = self._L_tensor(x, self.L)
-#         # wrapped = torch.remainder(x, L_t)
-#         wrapped = x - L_t * torch.floor(x / L_t)
-#         return wrapped
-
-#     def make_whole_solute(self, x_sol: torch.Tensor) -> torch.Tensor:
-#         # x_sol: (B,3,3)
-#         x0 = x_sol[:, 0:1, :]
-#         d = self.mic(x_sol - x0, self.L)
-#         return x0 + d
-
-#     def make_whole_water(self, x_w: torch.Tensor) -> torch.Tensor:
-#         # x_w: (B,3,3) with ordering [O,H,H]
-#         O = x_w[:, 0:1, :]
-#         d = self.mic(x_w - O, self.L)
-#         return O + d
-
-#     # ---------- SO(3) maps ----------
-#     def rotvec_to_rotmat(self, w: torch.Tensor) -> torch.Tensor:
-#         """
-#         w: (B,3) rotation vector (axis * angle)
-#         returns R: (B,3,3)
-#         """
-#         B = w.shape[0]
-#         theta = torch.linalg.norm(w, dim=1, keepdim=True).clamp_min(1e-12)  # (B,1)
-#         k = w / theta  # (B,3)
-
-#         kx, ky, kz = k[:, 0], k[:, 1], k[:, 2]
-#         K = torch.zeros((B, 3, 3), device=w.device, dtype=w.dtype)
-#         K[:, 0, 1] = -kz
-#         K[:, 0, 2] =  ky
-#         K[:, 1, 0] =  kz
-#         K[:, 1, 2] = -kx
-#         K[:, 2, 0] = -ky
-#         K[:, 2, 1] =  kx
-
-#         I = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).expand(B, 3, 3)
-#         ct = torch.cos(theta).view(B, 1, 1)
-#         st = torch.sin(theta).view(B, 1, 1)
-
-#         R = I + st * K + (1.0 - ct) * (K @ K)
-#         return R
-
-#     def rotmat_to_rotvec(self, R: torch.Tensor) -> torch.Tensor:
-#         """
-#         R: (B,3,3)
-#         returns w: (B,3)
-#         """
-#         # Robust log map for SO(3)
-#         B = R.shape[0]
-#         trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
-#         cos_theta = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0)
-#         theta = torch.acos(cos_theta)  # (B,)
-
-#         w = torch.zeros((B, 3), device=R.device, dtype=R.dtype)
-
-#         # For small angles, use first-order approximation
-#         small = theta < 1e-6
-#         if small.any():
-#             # vee(R - R^T)/2
-#             Rt = R[small].transpose(1, 2)
-#             A = (R[small] - Rt) * 0.5
-#             w[small, 0] = A[:, 2, 1]
-#             w[small, 1] = A[:, 0, 2]
-#             w[small, 2] = A[:, 1, 0]
-
-#         # For general case:
-#         big = ~small
-#         if big.any():
-#             th = theta[big]
-#             denom = (2.0 * torch.sin(th)).clamp_min(1e-12)
-#             wx = (R[big, 2, 1] - R[big, 1, 2]) / denom
-#             wy = (R[big, 0, 2] - R[big, 2, 0]) / denom
-#             wz = (R[big, 1, 0] - R[big, 0, 1]) / denom
-#             axis = torch.stack([wx, wy, wz], dim=1)
-#             w[big] = axis * th.unsqueeze(1)
-
-#         # Optional: keep theta in [0, pi] already guaranteed by acos.
-#         return w
-
-#     def so3_logdet_exp(self, w: torch.Tensor) -> torch.Tensor:
-#         """
-#         log |det J| for the SO(3) exponential map w (R^3) -> R (SO(3))
-#         Used as a measure correction if you want rotation vectors to represent Haar measure.
-#         Returns (B,) logdet contribution.
-#         """
-#         theta = torch.linalg.norm(w, dim=1).clamp_min(1e-12)  # (B,)
-#         half = 0.5 * theta
-#         # 2*log(sin(θ/2)/(θ/2))
-#         val = 2.0 * (torch.log(torch.sin(half).clamp_min(1e-12)) - torch.log(half))
-#         # At theta→0, limit is 0; above formula is stable with clamp_min.
-#         return val
-
-#     # ---------- Kabsch for water orientation from data ----------
-#     @staticmethod
-#     def kabsch_rotation(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
-#         """
-#         X: (B,3,3) current points (centered)
-#         Y: (B,3,3) reference points (centered)
-#         Returns R: (B,3,3) such that X @ R ≈ Y
-#         """
-#         C = X.transpose(1, 2) @ Y
-#         U, S, Vh = torch.linalg.svd(C)
-#         V = Vh.transpose(1, 2)
-#         Ut = U.transpose(1, 2)
-
-#         det = torch.det(V @ Ut)  # (B,)
-#         D = torch.eye(3, device=X.device, dtype=X.dtype).unsqueeze(0).repeat(X.shape[0], 1, 1)
-#         D[:, 2, 2] = torch.where(det < 0, -1.0, 1.0)
-
-#         R = V @ D @ Ut
-#         return R
-
-#     # ---------- nf API ----------
-#     def inverse(self, x: torch.Tensor):
-#         """
-#         x: (B, 3*N) flattened Cartesian
-#         Returns:
-#           i: (B, internal_dim)
-#           logdet_xi: (B,)
-#         """
-#         B = x.shape[0]
-#         x = x.view(B, self.n_atoms, 3)
-
-#         # Make solute whole and center on solute atom 0
-#         sol = self.make_whole_solute(x[:, :3, :])  # (B,3,3)
-#         origin = sol[:, 0:1, :]                    # (B,1,3)
-#         x_rel = self.mic(x - origin, self.L)       # (B,N,3) relative to solute atom0
-#         # x_rel = x - origin
-
-#         # Solute internal: two MIC bond vectors from atom0
-#         v1 = x_rel[:, 1, :]  # already mic-wrapped
-#         v2 = x_rel[:, 2, :]
-
-#         pieces = [v1, v2]
-
-#         logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
-
-#         # Waters: O position + rotation vector omega
-#         Yref = self.ref_water_kabsch.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)  # (B,3,3)
-#         for k in range(self.n_waters):
-#             s = self.n_solute + 3 * k
-#             w = x_rel[:, s:s+3, :]               # (B,3,3) [O,H,H] in solute-centered frame
-            
-#             w = self.make_whole_water(w)         # ensure H's are whole w.r.t O
-
-#             O = w[:, 0, :]                       # (B,3)
-
-#             # Infer orientation by Kabsch from reference geometry
-#             w_rel = w - w[:, 0:1, :]             # O at 0
-#             w_cent = w_rel - w_rel.mean(dim=1, keepdim=True)
-#             # R = self.kabsch_rotation(w_cent, Yref)  # (B,3,3)
-#             R = self.kabsch_rotation(Yref, w_cent)
-
-#             omega = self.rotmat_to_rotvec(R)     # (B,3)
-
-#             pieces += [O, omega]
-
-#             # Optional SO(3) exp-map Jacobian correction
-#             # logdet = logdet + self.so3_logdet_exp(omega)
-
-#         i = torch.cat(pieces, dim=1)  # (B, 6 + 6*n_waters)
-#         return i, logdet
-
-#     def forward(self, i: torch.Tensor):
-#         """
-#         i: (B, internal_dim)
-#         Returns:
-#           x: (B, 3*N) flattened Cartesian in [0,L)
-#           logdet_ix: (B,) such that log p_X = log p_I - logdet_ix (nf convention depends on usage)
-#         """
-#         B = i.shape[0]
-#         assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
-
-#         # Unpack solute
-#         v1 = i[:, 0:3]
-#         v2 = i[:, 3:6]
-
-#         # Place solute atom0 at box center (nice gauge choice for OpenMM)
-#         center = 0.5 * self.L
-#         x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
-#         x[:, 0, :] = center
-#         x[:, 1, :] = center + v1
-#         x[:, 2, :] = center + v2
-
-#         # Waters
-#         idx = 6
-#         logdet = torch.zeros((B,), device=i.device, dtype=i.dtype)
-
-#         H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)  # (1,3,1)
-#         H2_ref = self.ref_H2.to(i.device, i.dtype).view(1, 3, 1)
-
-#         for k in range(self.n_waters):
-#             O = i[:, idx:idx+3]           # (B,3)
-#             omega = i[:, idx+3:idx+6]     # (B,3)
-#             idx += 6
-
-#             R = self.rotvec_to_rotmat(omega)  # (B,3,3)
-
-#             # Oxygen position is relative to solute atom0 at center
-#             O_abs = center + O
-#             x[:, self.n_solute + 3*k + 0, :] = O_abs
-
-#             # Rotate reference H vectors
-#             # (B,3,3) @ (B,3,1) -> (B,3,1) -> (B,3)
-#             H1 = (R @ H1_ref.expand(B, 3, 1)).squeeze(-1)
-#             H2 = (R @ H2_ref.expand(B, 3, 1)).squeeze(-1)
-
-#             x[:, self.n_solute + 3*k + 1, :] = O_abs + H1
-#             x[:, self.n_solute + 3*k + 2, :] = O_abs + H2
-
-#             # logdet = logdet + self.so3_logdet_exp(omega)
-
-#         # Wrap into [0,L)
-#         x = self.wrap_0L(x)
-
-#         return x.view(B, -1), logdet
-
-
-
-
-class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
+class SFICTransform(nf.flows.Flow):
     """
-    PBC + rigid-water-friendly coordinate transform.
+    Solute-frame internal coordinate transform for a triatomic solute + rigid water 
+    solvents in a fixed cubic box with PBC.
 
-    Internal coords i:
-      - solute: shape only -> (r1, r2, theta)                  -> 3 dims
-      - waters: 
-          each water: O position relative to solute origin     -> 3 dims
-                    + rotation vector omega                    -> 3 dims
-        (H positions are reconstructed from O + omega and a fixed reference geometry)
+    REQUIREMENT: The simulation MUST use rigid water (rigid_water=True and
+    internal_constraints='hbonds' in the OpenMM system). H positions are
+    reconstructed in forward() from a fixed reference O-H geometry rotated by
+    the water's orientation. If the simulation uses flexible water, the H
+    fluctuations are silently discarded by inverse(), causing systematic energy
+    errors on generated samples.
+
+    Internal coords i (all unconstrained real-valued for the flow):
+      - solute shape (3 dims):
+          z_r1    = log(|S-O1|)                  unconstrained, maps R -> R+
+          z_r2    = log(|S-O2|)                  unconstrained, maps R -> R+
+          z_theta = logit(angle(O1,S,O2) / pi)   unconstrained, maps R -> (0,pi)
+      - per water (6 dims):
+          z_O   = arctanh(2 * O_canon / L)       unconstrained, maps R^3 -> (-L/2,L/2)^3
+          omega = rotation vector (axis * angle)  unconstrained R^3
+
+    All internal coords are unconstrained real numbers suitable for a standard
+    Gaussian-base spline flow.
 
     forward(i)  : i -> Cartesian x (flattened)
     inverse(x)  : Cartesian x -> i
@@ -1418,27 +618,43 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_mol
         assert self.n_solute + 3 * self.n_waters == self.n_atoms
 
-        # Build a reference rigid-water geometry in the "water body frame":
-        # O at origin; two H vectors defined relative to O. We pull this from transform_data.
+        # Build reference rigid-water geometry expressed in the canonical solute frame
+        # of the reference configuration (transform_data).
         with torch.no_grad():
             x0 = transform_data.reshape(1, self.n_atoms, 3).clone()  # (1,N,3)
-            # Use first water (water index 0) from transform_data as reference
+
+            # Canonical rotation for the reference configuration
+            sol_ref = x0[0, :self.n_solute, :]          # (3,3) solute atoms
+            origin_ref = sol_ref[0:1, :]                 # (1,3) = atom0
+            v1_ref = sol_ref[1] - sol_ref[0]             # atom1 - atom0
+            v2_ref = sol_ref[2] - sol_ref[0]             # atom2 - atom0
+            e1_ref = v1_ref / v1_ref.norm().clamp_min(1e-12)
+            v2_perp_ref = v2_ref - (v2_ref * e1_ref).sum() * e1_ref
+            e2_ref = v2_perp_ref / v2_perp_ref.norm().clamp_min(1e-12)
+            e3_ref = torch.cross(e1_ref, e2_ref, dim=0)
+            # R_sol_ref: rows are canonical basis vectors; R_sol_ref @ v_lab = v_canonical
+            R_sol_ref = torch.stack([e1_ref, e2_ref, e3_ref], dim=0)  # (3,3)
+
+            # Reference water in canonical solute frame
             w0_start = self.n_solute
-            ref = x0[:, w0_start:w0_start+3, :]  # (1,3,3) = [O,H,H] in OpenMM's OHH ordering
-            ref = ref[0]  # (3,3)
-            ref_O = ref[0:1, :]
-            ref_rel = ref - ref_O  # O at 0
-            # Store reference H vectors (3,)
-            self.ref_H1 = ref_rel[1].clone()
-            self.ref_H2 = ref_rel[2].clone()
+            ref_water_abs = x0[0, w0_start:w0_start+3, :]           # (3,3) [O,H1,H2] absolute
+            ref_water_rel = ref_water_abs - origin_ref               # (3,3) relative to atom0
+            ref_water_canon = (R_sol_ref @ ref_water_rel.T).T        # (3,3) in canonical frame
 
-            # Also store reference water points for Kabsch (centered on centroid) to infer rotation from data
-            ref_cent = ref_rel.mean(dim=0, keepdim=True)  # (1,3)
-            self.ref_water_kabsch = (ref_rel - ref_cent).clone()  # (3,3)
+            ref_O_canon = ref_water_canon[0:1, :]                    # (1,3)
+            ref_rel_canon = ref_water_canon - ref_O_canon            # O at origin, canonical frame
 
-        # Internal dimension: solute(6) + waters(6 each)
+            # Reference H vectors in canonical solute frame (3,)
+            self.ref_H1 = ref_rel_canon[1].clone()
+            self.ref_H2 = ref_rel_canon[2].clone()
+
+            # Centered reference water for Kabsch in canonical solute frame (3,3)
+            ref_cent = ref_rel_canon.mean(dim=0, keepdim=True)       # (1,3)
+            self.ref_water_kabsch = (ref_rel_canon - ref_cent).clone()
+
+        # Internal dimension: solute(3: r1, r2, theta) + waters(6 each: O_canon + omega)
         self.internal_dim = internal_dim
-        print("internal_dim  in transform:", self.internal_dim )
+        print("internal_dim  in transform:", self.internal_dim)
 
     # ---------- PBC helpers ----------
     def _L_tensor(self, x: torch.Tensor, L: float) -> torch.Tensor:
@@ -1577,6 +793,23 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         cosang = (ba * bc).sum(dim=-1).clamp(-1.0, 1.0)
         return torch.acos(cosang)
 
+    def compute_R_sol(self, v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
+        """
+        Per-sample rotation matrix mapping lab frame to canonical solute frame.
+
+        Canonical frame: v1 along +x, component of v2 perpendicular to v1 along +y.
+
+        v1, v2: (B, 3)
+        Returns R_sol: (B, 3, 3) satisfying R_sol[b] @ v_lab_col = v_canonical_col
+        """
+        eps = 1e-12
+        e1 = v1 / v1.norm(dim=-1, keepdim=True).clamp_min(eps)            # (B,3)
+        v2_perp = v2 - (v2 * e1).sum(dim=-1, keepdim=True) * e1
+        e2 = v2_perp / v2_perp.norm(dim=-1, keepdim=True).clamp_min(eps)  # (B,3)
+        e3 = torch.cross(e1, e2, dim=-1)                                   # (B,3)
+        # Rows of R_sol are the canonical basis vectors expressed in lab frame
+        return torch.stack([e1, e2, e3], dim=1)                            # (B,3,3)
+
     def inverse(self, x: torch.Tensor):
         """
         x: (B, 3*N) flattened Cartesian
@@ -1606,33 +839,76 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         r2 = torch.linalg.norm(v2, dim=-1, keepdim=True)   # (B,1)
         theta = self.angle_abc(x_rel[:, 1, :], x_rel[:, 0, :], x_rel[:, 2, :]).unsqueeze(1)  # (B,1)
 
-        pieces = [r1, r2, theta]
+        eps = 1e-7
 
-        logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
+        # Reparameterise solute DOF to unconstrained reals
+        # r1, r2 > 0  ->  z_r = log(r)   (maps R -> R+, avoids positivity clamp)
+        # theta in (0,pi) -> z_theta = logit(theta/pi)  (maps R -> (0,pi))
+        r1_c = r1[:, 0].clamp_min(eps)
+        r2_c = r2[:, 0].clamp_min(eps)
+        theta_c = theta[:, 0].clamp(eps, math.pi - eps)
 
-        # Waters: O position + rotation vector omega
+        z_r1 = torch.log(r1_c).unsqueeze(1)                              # (B,1)
+        z_r2 = torch.log(r2_c).unsqueeze(1)                              # (B,1)
+        z_theta = torch.log(theta_c / (math.pi - theta_c)).unsqueeze(1)  # (B,1)
+
+        pieces = [z_r1, z_r2, z_theta]
+
+        # Total solute logdet = spherical Jacobian (x -> (r1,r2,theta))
+        #                     + reparameterisation Jacobian ((r1,r2,theta) -> (z_r1,z_r2,z_theta))
+        # Spherical:  -(2*log(r1) + 2*log(r2) + log(sin(theta)))
+        # Reparam:    -log(r1) - log(r2) + log(pi) - log(theta) - log(pi - theta)
+        # Combined:   -(3*log(r1) + 3*log(r2) + log(sin(theta)*theta*(pi-theta)/pi))
+        logdet = -(
+            3.0 * torch.log(r1_c) +
+            3.0 * torch.log(r2_c) +
+            torch.log(theta_c.sin().clamp_min(eps)) +
+            torch.log(theta_c) +
+            torch.log((math.pi - theta_c).clamp_min(eps)) -
+            math.log(math.pi)
+        )
+
+        # Rotation matrix mapping lab frame -> canonical solute frame
+        R_sol = self.compute_R_sol(v1, v2)  # (B,3,3)
+
+        # Waters: z_O (arctanh-reparameterised O in canonical frame) + rotation vector omega
         Yref = self.ref_water_kabsch.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)  # (B,3,3)
         for k in range(self.n_waters):
             s = self.n_solute + 3 * k
-            w = x_rel[:, s:s+3, :]               # (B,3,3) [O,H,H] in solute-centered frame
-            w = self.make_whole_water(w)         # ensure H's are whole w.r.t O
+            w = x_rel[:, s:s+3, :]                  # (B,3,3) [O,H,H] in lab frame rel. to atom0
+            w = self.make_whole_water(w)             # ensure H's are whole w.r.t O
 
-            O = w[:, 0, :]                       # (B,3)
+            # Transform water atoms to canonical solute frame
+            # w_canon[b,k,:] = R_sol[b] @ w[b,k,:]  (column-vector convention)
+            w_canon = torch.bmm(R_sol, w.transpose(1, 2)).transpose(1, 2)  # (B,3,3)
 
-            # Infer orientation by Kabsch from reference geometry
-            w_rel = w - w[:, 0:1, :]             # O at 0
-            w_cent = w_rel - w_rel.mean(dim=1, keepdim=True)
-            # R = self.kabsch_rotation(w_cent, Yref)  # (B,3,3)
-            R = self.kabsch_rotation(Yref, w_cent)
+            O_canon = w_canon[:, 0, :]               # (B,3) O in canonical frame, in (-L/2, L/2)^3
 
-            omega = self.rotmat_to_rotvec(R)     # (B,3)
+            # Reparameterise O: O_canon in (-L/2, L/2)^3 -> z_O in R^3 via arctanh
+            # z_O = arctanh(2 * O_canon / L);  handles box boundary as hard wall.
+            frac = (2.0 / self.L) * O_canon
+            frac = frac.clamp(-1.0 + eps, 1.0 - eps)
+            z_O = torch.arctanh(frac)                # (B,3)
 
-            pieces += [O, omega]
+            # Logdet contribution: log|d(z_O)/d(O_canon)| = sum_i log(2/L) - log(1 - frac_i^2)
+            logdet = logdet + (
+                3.0 * (math.log(2.0) - math.log(self.L)) -
+                torch.log((1.0 - frac ** 2).clamp_min(eps)).sum(dim=-1)
+            )
 
-            # Optional SO(3) exp-map Jacobian correction
-            # logdet = logdet + self.so3_logdet_exp(omega)
+            # Local water geometry in canonical frame for Kabsch
+            w_rel_canon = w_canon - w_canon[:, 0:1, :]
+            w_cent_canon = w_rel_canon - w_rel_canon.mean(dim=1, keepdim=True)
 
-        i = torch.cat(pieces, dim=1)  # (B, 6 + 6*n_waters)
+            R_water = self.kabsch_rotation(w_cent_canon, Yref)  # (B,3,3)
+            omega = self.rotmat_to_rotvec(R_water)              # (B,3)
+
+            # SO(3) exp-map measure correction: -log|det J_exp(omega)|
+            logdet = logdet - self.so3_logdet_exp(omega)
+
+            pieces += [z_O, omega]
+
+        i = torch.cat(pieces, dim=1)  # (B, 3 + 6*n_waters)
         return i, logdet
 
     def forward(self, i: torch.Tensor):
@@ -1656,10 +932,14 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         # x[:, 1, :] = center + v1
         # x[:, 2, :] = center + v2
 
-        # Unpack solute shape
-        r1 = i[:, 0:1].clamp_min(1e-6)          # (B,1)
-        r2 = i[:, 1:2].clamp_min(1e-6)          # (B,1)
-        theta = i[:, 2:3].clamp(1e-3, math.pi - 1e-3)   # (B,1)
+        # Unpack solute shape: all inputs are unconstrained reals
+        z_r1    = i[:, 0:1]   # (B,1)
+        z_r2    = i[:, 1:2]   # (B,1)
+        z_theta = i[:, 2:3]   # (B,1)
+
+        r1    = torch.exp(z_r1)                         # > 0
+        r2    = torch.exp(z_r2)                         # > 0
+        theta = math.pi * torch.sigmoid(z_theta)        # in (0, pi)
 
         center = 0.5 * self.L
         x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
@@ -1667,33 +947,59 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
         # S at center
         x[:, 0, :] = center
 
-        # O1 on +x
+        # O1 on +x axis of canonical frame
         x[:, 1, 0] = center + r1[:, 0]
         x[:, 1, 1] = center
         x[:, 1, 2] = center
 
-        # O2 in xy-plane
+        # O2 in xy-plane of canonical frame
         x[:, 2, 0] = center + r2[:, 0] * torch.cos(theta[:, 0])
         x[:, 2, 1] = center + r2[:, 0] * torch.sin(theta[:, 0])
         x[:, 2, 2] = center
 
+        # Combined logdet: spherical |J_{i->x}| = r1^3 * r2^3 * sin(theta)
+        # plus inverse reparameterisation Jacobians for r1, r2, theta
+        # d(r)/d(z_r) = r  ->  log|J| += log(r)  (×2 for r1, r2 after combined: 3 each)
+        # d(theta)/d(z_theta) = pi * sigmoid * (1-sigmoid) = theta*(pi-theta)/pi
+        # Total: 3*log(r1) + 3*log(r2) + log(sin(theta)) + log(theta) + log(pi-theta) - log(pi)
+        eps = 1e-7
+        logdet = (
+            3.0 * torch.log(r1[:, 0]) +
+            3.0 * torch.log(r2[:, 0]) +
+            torch.log(theta[:, 0].sin().clamp_min(eps)) +
+            torch.log(theta[:, 0].clamp_min(eps)) +
+            torch.log((math.pi - theta[:, 0]).clamp_min(eps)) -
+            math.log(math.pi)
+        )
+
         # Waters
-        # idx = 6
         idx = 3
-        logdet = torch.zeros((B,), device=i.device, dtype=i.dtype)
 
         H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)  # (1,3,1)
         H2_ref = self.ref_H2.to(i.device, i.dtype).view(1, 3, 1)
 
         for k in range(self.n_waters):
-            O = i[:, idx:idx+3]           # (B,3)
+            z_O   = i[:, idx:idx+3]       # (B,3)  unconstrained
             omega = i[:, idx+3:idx+6]     # (B,3)
             idx += 6
 
             R = self.rotvec_to_rotmat(omega)  # (B,3,3)
 
-            # Oxygen position is relative to solute atom0 at center
-            O_abs = center + O
+            # Map z_O -> O_canon in (-L/2, L/2)^3 via tanh
+            O_canon = (self.L / 2.0) * torch.tanh(z_O)   # (B,3)
+
+            # Logdet: log|d(O_canon)/d(z_O)| = sum_j [log(L/2) + log(1 - tanh^2(z_O_j))]
+            frac = 2.0 * O_canon / self.L   # = tanh(z_O), in (-1,1)
+            logdet = logdet + (
+                3.0 * math.log(self.L / 2.0) +
+                torch.log((1.0 - frac ** 2).clamp_min(eps)).sum(dim=-1)
+            )
+
+            # SO(3) exp-map measure correction: +log|det J_exp(omega)|
+            logdet = logdet + self.so3_logdet_exp(omega)
+
+            # Oxygen position in canonical solute frame, then placed at center
+            O_abs = center + O_canon
             x[:, self.n_solute + 3*k + 0, :] = O_abs
 
             # Rotate reference H vectors
@@ -1704,11 +1010,617 @@ class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
             x[:, self.n_solute + 3*k + 1, :] = O_abs + H1
             x[:, self.n_solute + 3*k + 2, :] = O_abs + H2
 
-            # logdet = logdet + self.so3_logdet_exp(omega)
-
         # Wrap into [0,L)
         x = self.wrap_0L(x)
 
+        return x.view(B, -1), logdet
+
+
+class LabFrameTorusTransform(_BaseFlow):
+    """
+    Lab-frame torus coordinate transform for:
+      - one flexible triatomic solute  (atoms 0,1,2)
+      - rigid OHH water solvents
+      - cubic PBC box of edge length L
+
+    Designed for small boxes (~2 solvation shells) where the solute orientation
+    relative to the box is physically meaningful and must not be removed.
+    The torus correctly represents the periodic topology of oxygen positions.
+
+    Internal coordinates
+    --------------------
+    Layout: [v1(3), v2(3), tau_1(3), omega_1(3), ..., tau_W(3), omega_W(3)]
+    Total:  6 + 6 * n_waters
+
+      v1, v2   : MIC bond vectors in lab frame (no canonical rotation)   R^3 each
+      tau_k    : torus angle of oxygen k,  tau = (2pi/L)*MIC(O_k - x0)  T^3
+      omega_k  : rotation vector of water k orientation in lab frame     R^3
+
+    The torus angles tau live in [-pi, pi)^3 and must be handled by a
+    circular/torus-aware flow. omega lives in R^3 and is compatible with
+    any standard flow.
+
+    Change-of-variables logdet
+    --------------------------
+    inverse (Cartesian -> internal):
+      +3*log(2pi/L)          per water  [torus scaling, constant]
+      -so3_logdet_exp(omega) per water  [SO(3) log-map Jacobian]
+
+    forward (internal -> Cartesian):
+      +3*log(L/2pi)          per water  [torus scaling, constant]
+      +so3_logdet_exp(omega) per water  [SO(3) exp-map Jacobian]
+    """
+
+    def __init__(
+        self,
+        L: float,
+        transform_data: torch.Tensor,
+        internal_dim: int = None,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        self.L   = float(L)
+        self.eps = float(eps)
+
+        assert transform_data is not None and transform_data.shape[0] == 1
+        n_atoms = transform_data.shape[1] // 3
+        self.n_atoms           = n_atoms
+        self.n_solute          = 3
+        self.n_atoms_per_water = 3
+        self.n_waters = (n_atoms - self.n_solute) // self.n_atoms_per_water
+        assert self.n_solute + 3 * self.n_waters == self.n_atoms
+
+        expected_dim = 6 + 6 * self.n_waters
+        self.internal_dim = expected_dim if internal_dim is None else internal_dim
+        assert self.internal_dim == expected_dim, (self.internal_dim, expected_dim)
+
+        # Build reference rigid-water geometry from first water in transform_data
+        with torch.no_grad():
+            x0  = transform_data.reshape(1, n_atoms, 3)[0].clone()
+            w0  = x0[self.n_solute:self.n_solute + 3]   # (3,3) OHH
+            O   = w0[0:1]
+            w_rel = w0 - O                               # O at origin
+
+            ref_H1 = w_rel[1].clone()                   # (3,)
+            ref_H2 = w_rel[2].clone()                   # (3,)
+
+            # Reference body frame with columns [e1, e2, n]
+            ref_w_batch = torch.stack([
+                torch.zeros_like(ref_H1),
+                ref_H1,
+                ref_H2,
+            ], dim=0).unsqueeze(0)                      # (1,3,3)
+            ref_frame = self._water_frame(ref_w_batch)  # (1,3,3)
+
+        self.register_buffer("ref_H1",    ref_H1)        # (3,)
+        self.register_buffer("ref_H2",    ref_H2)        # (3,)
+        self.register_buffer("ref_frame", ref_frame[0])  # (3,3)
+
+    # ------------------------------------------------------------------
+    # PBC helpers
+    # ------------------------------------------------------------------
+    def _L(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.as_tensor(self.L, device=x.device, dtype=x.dtype)
+
+    def mic(self, dx: torch.Tensor) -> torch.Tensor:
+        L = self._L(dx)
+        return dx - L * torch.round(dx / L)
+
+    def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
+        L = self._L(x)
+        return x - L * torch.floor(x / L)
+
+    def _make_whole(self, x: torch.Tensor) -> torch.Tensor:
+        """Make molecule whole relative to its first atom.  x: (B, M, 3)"""
+        anchor = x[:, 0:1, :]
+        return anchor + self.mic(x - anchor)
+
+    # ------------------------------------------------------------------
+    # Water body-frame helper
+    # ------------------------------------------------------------------
+    def _normalize(self, v: torch.Tensor) -> torch.Tensor:
+        return v / torch.linalg.norm(v, dim=-1, keepdim=True).clamp_min(self.eps)
+
+    def _water_frame(self, w_rel: torch.Tensor) -> torch.Tensor:
+        """
+        Build deterministic labeled body frame from relative water coords.
+
+        w_rel : (B,3,3)  O at index 0 (origin), H1 at 1, H2 at 2
+        Returns F : (B,3,3) with columns [e1, e2, n]
+
+          e1 = normalize(H1)
+          n  = normalize(H1 x H2)
+          e2 = n x e1
+        """
+        u1 = w_rel[:, 1, :]
+        u2 = w_rel[:, 2, :]
+        e1 = self._normalize(u1)
+        n  = self._normalize(torch.cross(u1, u2, dim=-1))
+        e2 = self._normalize(torch.cross(n, e1, dim=-1))
+        return torch.stack([e1, e2, n], dim=-1)  # (B,3,3)
+
+    # ------------------------------------------------------------------
+    # SO(3) exp-map Jacobian
+    # ------------------------------------------------------------------
+    def _so3_logdet_exp(self, omega: torch.Tensor) -> torch.Tensor:
+        """
+        log|det J| for the SO(3) exponential map  omega -> R.
+
+        = 2 * log( sin(theta/2) / (theta/2) ),  theta = ||omega||
+
+        Equals 0 at theta=0 and is negative for theta > 0 (volume
+        contraction of the exp map).
+
+        omega : (B,3)
+        returns : (B,)
+        """
+        theta = torch.linalg.norm(omega, dim=-1).clamp_min(1e-12)
+        half  = 0.5 * theta
+        return 2.0 * (torch.log(torch.sin(half).clamp_min(1e-12)) - torch.log(half))
+
+    # ------------------------------------------------------------------
+    # inverse:  Cartesian  ->  internal
+    # ------------------------------------------------------------------
+    def inverse(self, x: torch.Tensor):
+        """
+        Map flattened Cartesian coordinates to internal coordinates.
+
+        x : (B, 3*N)
+        Returns
+        -------
+        i       : (B, 6 + 6*n_waters)
+        logdet  : (B,)   log|di/dx|
+        """
+        B = x.shape[0]
+        x = x.view(B, self.n_atoms, 3)
+
+        # Translation gauge: anchor solute atom 0, all coords relative to it
+        sol    = self._make_whole(x[:, :3, :])   # (B,3,3)
+        origin = sol[:, 0:1, :]                  # (B,1,3)
+        x_rel  = self.mic(x - origin)            # (B,N,3)
+
+        # Solute: bond vectors in lab frame (orientation is kept, not removed)
+        v1 = x_rel[:, 1, :]   # (B,3)
+        v2 = x_rel[:, 2, :]   # (B,3)
+        pieces = [v1, v2]
+
+        # Constant torus logdet per water: log|(2pi/L)^3|
+        log_torus = 3.0 * math.log(2.0 * math.pi / self.L)
+        logdet = torch.zeros(B, device=x.device, dtype=x.dtype)
+
+        F_ref = self.ref_frame.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)
+
+        for k in range(self.n_waters):
+            s = self.n_solute + 3 * k
+            # Make water whole relative to its own oxygen
+            w = self._make_whole(x_rel[:, s:s + 3, :])   # (B,3,3)
+
+            # Oxygen torus angle in lab frame
+            O_rel = w[:, 0, :]                            # (B,3)
+            tau   = wrap_to_pi((2.0 * math.pi / self.L) * O_rel)  # (B,3)
+            logdet = logdet + log_torus
+
+            # Water orientation: frame -> rotation matrix -> rotation vector
+            w_body = w - w[:, 0:1, :]                     # O at origin (B,3,3)
+            F_cur  = self._water_frame(w_body)            # (B,3,3)
+            R      = F_cur @ F_ref.transpose(-1, -2)      # R: F_cur = R @ F_ref
+            R      = project_to_so3(R)
+            omega  = so3_log(R)                           # (B,3)
+            logdet = logdet - self._so3_logdet_exp(omega)
+
+            pieces += [tau, omega]
+
+        i = torch.cat(pieces, dim=1)   # (B, 6+6W)
+        return i, logdet
+
+    # ------------------------------------------------------------------
+    # forward:  internal  ->  Cartesian
+    # ------------------------------------------------------------------
+    def forward(self, i: torch.Tensor):
+        """
+        Map internal coordinates to flattened Cartesian coordinates.
+
+        i : (B, 6 + 6*n_waters)
+        Returns
+        -------
+        x       : (B, 3*N)  Cartesian positions in [0, L)
+        logdet  : (B,)      log|dx/di|
+        """
+        B = i.shape[0]
+        assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
+
+        v1 = i[:, 0:3]
+        v2 = i[:, 3:6]
+
+        center = torch.full((B, 3), 0.5 * self.L, device=i.device, dtype=i.dtype)
+        x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
+
+        # Solute atom 0 at box center, atoms 1 and 2 displaced by bond vectors
+        x[:, 0, :] = center
+        x[:, 1, :] = center + v1
+        x[:, 2, :] = center + v2
+
+        # Constant torus logdet per water: log|(L/2pi)^3|
+        log_torus = 3.0 * math.log(self.L / (2.0 * math.pi))
+        logdet = torch.zeros(B, device=i.device, dtype=i.dtype)
+
+        H1_ref = self.ref_H1.to(i.device, i.dtype)
+        H2_ref = self.ref_H2.to(i.device, i.dtype)
+
+        idx = 6
+        for k in range(self.n_waters):
+            tau   = i[:, idx:idx + 3]       # (B,3) torus angles in [-pi, pi)
+            omega = i[:, idx + 3:idx + 6]   # (B,3) rotation vector
+            idx  += 6
+
+            # tau -> oxygen displacement in lab frame
+            O_rel = (self.L / (2.0 * math.pi)) * tau   # (B,3) in [-L/2, L/2)
+            logdet = logdet + log_torus
+
+            # omega -> rotation matrix -> H positions
+            R      = so3_exp(omega)                     # (B,3,3)
+            logdet = logdet + self._so3_logdet_exp(omega)
+
+            O_abs = center + O_rel
+            H1    = torch.einsum("bij,j->bi", R, H1_ref)
+            H2    = torch.einsum("bij,j->bi", R, H2_ref)
+
+            s = self.n_solute + 3 * k
+            x[:, s + 0, :] = O_abs
+            x[:, s + 1, :] = O_abs + H1
+            x[:, s + 2, :] = O_abs + H2
+
+        x = self.wrap_0L(x)
+        return x.view(B, -1), logdet
+
+
+class SFICTorusTransform(_BaseFlow):
+    """
+    Solute-Frame Internal Coordinate transform with torus oxygen parameterisation.
+
+    WARNING — ISOTROPIC BULK ONLY
+    ==============================
+    This transform removes 3 global rotation DOF by expressing all coordinates
+    in a canonical solute frame.  This is physically valid ONLY when the
+    Boltzmann distribution is approximately rotation-invariant, i.e.:
+      * large cubic box (many solvation shells, bulk-like interior)
+      * homogeneous isotropic solvent (no interface, membrane, or surface)
+      * freely-rotating solute (no external orienting field)
+
+    For small boxes (~2 solvation shells), systems near interfaces, or any
+    case where the solute orientation relative to the box is energetically
+    meaningful, use LabFrameTorusTransform instead.
+
+    System requirements
+    -------------------
+    - One flexible triatomic solute  (atoms 0,1,2)
+    - Rigid OHH water molecules
+    - Cubic PBC box of edge length L
+    - Simulation MUST use rigid water (rigid_water=True in OpenMM); flexible
+      H fluctuations are silently discarded by inverse(), causing energy errors.
+
+    Internal coordinates
+    --------------------
+    Layout: [z_r1(1), z_r2(1), z_theta(1), tau_1(3), omega_1(3), ..., tau_W(3), omega_W(3)]
+    Total:  3 + 6 * n_waters
+
+      z_r1    = log(|x1 - x0|)               unconstrained real
+      z_r2    = log(|x2 - x0|)               unconstrained real
+      z_theta = logit(angle(x1,x0,x2) / pi)  unconstrained real
+      tau_k   = (2pi/L) * O_canon_k           torus angle T^3  (for circular flow)
+      omega_k = rotation vector of water k    unconstrained R^3
+
+    Oxygen positions are expressed in the canonical solute frame and stored as
+    torus angles in [-pi, pi)^3.  This correctly captures the periodic topology
+    of the PBC box and avoids the arctanh boundary blow-up of SFICTransform.
+    omega lives on flat R^3 and is handled by any standard flow layer.
+
+    Comparison with SFICTransform
+    ------------------------------
+    Identical except for the oxygen parameterisation:
+      SFICTransform:    z_O  = arctanh(2*O_canon/L)   bounded, boundary diverges
+      SFICTorusTransform: tau = (2pi/L)*O_canon        periodic, constant logdet
+
+    Change-of-variables logdet
+    --------------------------
+    inverse (Cartesian -> internal):
+      solute:    -(3*log(r1) + 3*log(r2) + log(sin(theta)*theta*(pi-theta)/pi))
+      per water: +3*log(2pi/L)           [torus, constant]
+                 -so3_logdet_exp(omega)  [SO(3) log-map]
+
+    forward (internal -> Cartesian):
+      solute:    +(3*log(r1) + 3*log(r2) + log(sin(theta)*theta*(pi-theta)/pi))
+      per water: +3*log(L/2pi)           [torus, constant]
+                 +so3_logdet_exp(omega)  [SO(3) exp-map]
+    """
+
+    def __init__(
+        self,
+        L: float,
+        transform_data: torch.Tensor,
+        internal_dim: int = None,
+        eps: float = 1e-8,
+    ):
+        super().__init__()
+        self.L   = float(L)
+        self.eps = float(eps)
+
+        assert transform_data is not None and transform_data.shape[0] == 1
+        n_atoms = transform_data.shape[1] // 3
+        self.n_atoms          = n_atoms
+        self.n_solute         = 3
+        self.n_atoms_per_mol  = 3
+        self.n_waters = (n_atoms - self.n_solute) // self.n_atoms_per_mol
+        assert self.n_solute + 3 * self.n_waters == self.n_atoms
+
+        expected_dim = 3 + 6 * self.n_waters
+        self.internal_dim = expected_dim if internal_dim is None else internal_dim
+        assert self.internal_dim == expected_dim, (self.internal_dim, expected_dim)
+
+        # Reference water geometry in canonical solute frame from transform_data
+        with torch.no_grad():
+            x0 = transform_data.reshape(1, n_atoms, 3)[0].clone()
+
+            # Canonical solute frame from reference configuration
+            sol_ref = x0[:self.n_solute, :]                   # (3,3)
+            v1_ref  = sol_ref[1] - sol_ref[0]
+            v2_ref  = sol_ref[2] - sol_ref[0]
+            e1_ref  = v1_ref / v1_ref.norm().clamp_min(1e-12)
+            v2_perp = v2_ref - (v2_ref * e1_ref).sum() * e1_ref
+            e2_ref  = v2_perp / v2_perp.norm().clamp_min(1e-12)
+            e3_ref  = torch.cross(e1_ref, e2_ref, dim=0)
+            # Rows are canonical basis vectors: R_sol_ref @ v_lab = v_canonical
+            R_sol_ref = torch.stack([e1_ref, e2_ref, e3_ref], dim=0)  # (3,3)
+
+            # Reference water in canonical solute frame
+            s = self.n_solute
+            ref_water_abs   = x0[s:s + 3, :]                  # (3,3) [O,H1,H2]
+            ref_water_rel   = ref_water_abs - sol_ref[0:1, :]  # relative to atom 0
+            ref_water_canon = (R_sol_ref @ ref_water_rel.T).T  # (3,3) canonical
+
+            ref_O_canon    = ref_water_canon[0:1, :]
+            ref_rel_canon  = ref_water_canon - ref_O_canon     # O at origin
+
+            ref_H1 = ref_rel_canon[1].clone()                  # (3,)
+            ref_H2 = ref_rel_canon[2].clone()                  # (3,)
+
+            # Centred reference geometry for Kabsch alignment
+            ref_cent          = ref_rel_canon.mean(dim=0, keepdim=True)
+            ref_water_kabsch  = (ref_rel_canon - ref_cent).clone()  # (3,3)
+
+        self.register_buffer("ref_H1",           ref_H1)
+        self.register_buffer("ref_H2",           ref_H2)
+        self.register_buffer("ref_water_kabsch", ref_water_kabsch)
+
+    # ------------------------------------------------------------------
+    # PBC helpers
+    # ------------------------------------------------------------------
+    def _L(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.as_tensor(self.L, device=x.device, dtype=x.dtype)
+
+    def mic(self, dx: torch.Tensor) -> torch.Tensor:
+        L = self._L(dx)
+        return dx - L * torch.round(dx / L)
+
+    def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
+        L = self._L(x)
+        return x - L * torch.floor(x / L)
+
+    def _make_whole_solute(self, x_sol: torch.Tensor) -> torch.Tensor:
+        x0 = x_sol[:, 0:1, :]
+        return x0 + self.mic(x_sol - x0)
+
+    def _make_whole_water(self, x_w: torch.Tensor) -> torch.Tensor:
+        O = x_w[:, 0:1, :]
+        return O + self.mic(x_w - O)
+
+    # ------------------------------------------------------------------
+    # Geometry helpers
+    # ------------------------------------------------------------------
+    def _angle_abc(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+        """Angle ABC in radians.  a,b,c: (B,3) -> (B,)"""
+        ba = a - b
+        bc = c - b
+        ba = ba / ba.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        bc = bc / bc.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        return torch.acos((ba * bc).sum(dim=-1).clamp(-1.0, 1.0))
+
+    def _compute_R_sol(self, v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
+        """
+        Per-sample rotation matrix from lab frame to canonical solute frame.
+        Canonical: v1 along +x, projection of v2 perpendicular to v1 along +y.
+        v1, v2: (B,3)  ->  R_sol: (B,3,3),  R_sol @ v_lab = v_canonical
+        """
+        eps = 1e-12
+        e1      = v1 / v1.norm(dim=-1, keepdim=True).clamp_min(eps)
+        v2_perp = v2 - (v2 * e1).sum(dim=-1, keepdim=True) * e1
+        e2      = v2_perp / v2_perp.norm(dim=-1, keepdim=True).clamp_min(eps)
+        e3      = torch.cross(e1, e2, dim=-1)
+        return torch.stack([e1, e2, e3], dim=1)   # (B,3,3) rows = canonical basis
+
+    @staticmethod
+    def _kabsch_rotation(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+        """
+        Optimal rotation R minimising ||X R - Y||_F  (orthogonal Procrustes).
+        X, Y: (B,3,3) centred point clouds (3 points x 3 coords per row).
+        Returns R: (B,3,3) such that X @ R ≈ Y.
+
+        Derivation: maximise Tr(R^T C) with C = X^T Y = U S Vh.
+        The solution is R = U D Vh where D corrects for reflections.
+
+        Note: the formula R = V D U^T (used in SFICTransform.kabsch_rotation)
+        solves the TRANSPOSED problem (Y @ R ≈ X) and returns R_omega^T here.
+        This implementation solves the correct problem (X @ R ≈ Y) and returns R_omega.
+        """
+        C   = X.transpose(1, 2) @ Y           # C = X^T Y
+        U, _, Vh = torch.linalg.svd(C)        # C = U S Vh
+        det = torch.det(U @ Vh)               # det(R) without correction
+        D   = torch.eye(3, device=X.device, dtype=X.dtype).unsqueeze(0).repeat(X.shape[0], 1, 1)
+        D[:, 2, 2] = torch.where(det < 0, -1.0, 1.0)
+        return U @ D @ Vh                      # R = U D Vh  =>  X @ R ≈ Y
+
+    # ------------------------------------------------------------------
+    # SO(3) exp-map Jacobian
+    # ------------------------------------------------------------------
+    def _so3_logdet_exp(self, omega: torch.Tensor) -> torch.Tensor:
+        """
+        log|det J| for SO(3) exp-map  omega -> R.
+        = 2*log(sin(theta/2)/(theta/2)),  theta = ||omega||.
+        omega: (B,3) -> (B,)
+        """
+        theta = torch.linalg.norm(omega, dim=-1).clamp_min(1e-12)
+        half  = 0.5 * theta
+        return 2.0 * (torch.log(torch.sin(half).clamp_min(1e-12)) - torch.log(half))
+
+    # ------------------------------------------------------------------
+    # inverse:  Cartesian  ->  internal
+    # ------------------------------------------------------------------
+    def inverse(self, x: torch.Tensor):
+        """
+        x : (B, 3*N) flattened Cartesian
+        Returns i: (B, 3+6W), logdet: (B,)   [log|di/dx|]
+        """
+        B = x.shape[0]
+        x = x.view(B, self.n_atoms, 3)
+
+        # Anchor at solute atom 0
+        sol    = self._make_whole_solute(x[:, :3, :])   # (B,3,3)
+        origin = sol[:, 0:1, :]                          # (B,1,3)
+        x_rel  = self.mic(x - origin)                   # (B,N,3)
+
+        v1 = x_rel[:, 1, :]   # (B,3)
+        v2 = x_rel[:, 2, :]   # (B,3)
+
+        # Solute shape in polar-like coords (rotation-invariant)
+        r1    = torch.linalg.norm(v1, dim=-1)
+        r2    = torch.linalg.norm(v2, dim=-1)
+        theta = self._angle_abc(x_rel[:, 1, :], x_rel[:, 0, :], x_rel[:, 2, :])
+
+        eps  = 1e-7
+        r1_c = r1.clamp_min(eps)
+        r2_c = r2.clamp_min(eps)
+        th_c = theta.clamp(eps, math.pi - eps)
+
+        z_r1    = torch.log(r1_c)
+        z_r2    = torch.log(r2_c)
+        z_theta = torch.log(th_c / (math.pi - th_c))   # logit(theta/pi)
+
+        pieces = [z_r1.unsqueeze(1), z_r2.unsqueeze(1), z_theta.unsqueeze(1)]
+
+        # Solute logdet: spherical Jacobian + log-distance + logit-angle reparam
+        logdet = -(
+            3.0 * torch.log(r1_c) +
+            3.0 * torch.log(r2_c) +
+            torch.log(th_c.sin().clamp_min(eps)) +
+            torch.log(th_c) +
+            torch.log((math.pi - th_c).clamp_min(eps)) -
+            math.log(math.pi)
+        )
+
+        # Rotation mapping lab frame -> canonical solute frame
+        R_sol  = self._compute_R_sol(v1, v2)                          # (B,3,3)
+
+        log_torus = 3.0 * math.log(2.0 * math.pi / self.L)            # constant
+        Yref   = self.ref_water_kabsch.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)
+
+        for k in range(self.n_waters):
+            s = self.n_solute + 3 * k
+            w = self._make_whole_water(x_rel[:, s:s + 3, :])          # (B,3,3)
+
+            # Transform water to canonical solute frame
+            w_canon = torch.bmm(R_sol, w.transpose(1, 2)).transpose(1, 2)  # (B,3,3)
+
+            # Oxygen torus angle in canonical frame
+            O_canon = w_canon[:, 0, :]                                 # (B,3)
+            tau     = wrap_to_pi((2.0 * math.pi / self.L) * O_canon)  # (B,3)
+            logdet  = logdet + log_torus
+
+            # Water orientation via Kabsch in canonical frame
+            w_rel_canon  = w_canon - w_canon[:, 0:1, :]
+            w_cent_canon = w_rel_canon - w_rel_canon.mean(dim=1, keepdim=True)
+            R_water      = self._kabsch_rotation(w_cent_canon, Yref)   # (B,3,3)
+            omega        = so3_log(R_water)                            # (B,3)
+            logdet       = logdet - self._so3_logdet_exp(omega)
+
+            pieces += [tau, omega]
+
+        i = torch.cat(pieces, dim=1)   # (B, 3+6W)
+        return i, logdet
+
+    # ------------------------------------------------------------------
+    # forward:  internal  ->  Cartesian
+    # ------------------------------------------------------------------
+    def forward(self, i: torch.Tensor):
+        """
+        i : (B, 3+6W)
+        Returns x: (B, 3*N) Cartesian in [0,L), logdet: (B,)  [log|dx/di|]
+
+        Note: generated samples always have the solute in canonical orientation
+        (atom 1 on +x axis, atom 2 in the xy-plane).  For an isotropic bulk
+        system all orientations are equivalent by assumption.
+        """
+        B = i.shape[0]
+        assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
+
+        z_r1    = i[:, 0]
+        z_r2    = i[:, 1]
+        z_theta = i[:, 2]
+
+        r1    = torch.exp(z_r1)                     # > 0
+        r2    = torch.exp(z_r2)                     # > 0
+        theta = math.pi * torch.sigmoid(z_theta)   # in (0, pi)
+
+        center = 0.5 * self.L
+        x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
+
+        # Solute in canonical orientation: atom 0 at center, atom 1 on +x, atom 2 in xy
+        x[:, 0, :] = center
+        x[:, 1, 0] = center + r1
+        x[:, 1, 1] = center
+        x[:, 1, 2] = center
+        x[:, 2, 0] = center + r2 * torch.cos(theta)
+        x[:, 2, 1] = center + r2 * torch.sin(theta)
+        x[:, 2, 2] = center
+
+        eps = 1e-7
+        logdet = (
+            3.0 * torch.log(r1) +
+            3.0 * torch.log(r2) +
+            torch.log(theta.sin().clamp_min(eps)) +
+            torch.log(theta.clamp_min(eps)) +
+            torch.log((math.pi - theta).clamp_min(eps)) -
+            math.log(math.pi)
+        )
+
+        log_torus = 3.0 * math.log(self.L / (2.0 * math.pi))          # constant
+
+        H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)
+        H2_ref = self.ref_H2.to(i.device, i.dtype).view(1, 3, 1)
+
+        idx = 3
+        for k in range(self.n_waters):
+            tau   = i[:, idx:idx + 3]       # (B,3) torus angles in [-pi, pi)
+            omega = i[:, idx + 3:idx + 6]   # (B,3) rotation vector
+            idx  += 6
+
+            # tau -> oxygen position in canonical frame (= lab frame here)
+            O_canon = (self.L / (2.0 * math.pi)) * tau   # (B,3) in [-L/2, L/2)
+            logdet  = logdet + log_torus
+
+            # omega -> rotation matrix -> H positions
+            R      = so3_exp(omega)                       # (B,3,3)
+            logdet = logdet + self._so3_logdet_exp(omega)
+
+            O_abs = center + O_canon
+            H1    = (R @ H1_ref.expand(B, 3, 1)).squeeze(-1)
+            H2    = (R @ H2_ref.expand(B, 3, 1)).squeeze(-1)
+
+            s = self.n_solute + 3 * k
+            x[:, s + 0, :] = O_abs
+            x[:, s + 1, :] = O_abs + H1
+            x[:, s + 2, :] = O_abs + H2
+
+        x = self.wrap_0L(x)
         return x.view(B, -1), logdet
 
 
@@ -2043,374 +1955,7 @@ class PBCGlobal3PointSphericalTransform3(nf.flows.Flow):
             "Do not return logdet=0 for BG likelihood training. "
             "Derive or compute log|det J| separately."
         )
-# class PBCGlobal3PointSphericalTransform2(nf.flows.Flow):
-#     """
-#     PBC + rigid-water-friendly + translation/rotation-reduced transform.
 
-#     Internal coords i:
-#       - solute shape only -> (r1, r2, theta)                  : 3 dims
-#       - each water:
-#           O position in instantaneous solute frame            : 3 dims
-#           rigid-body rotation vector in solute frame          : 3 dims
-
-#     Total dim = 3 + 6 * n_waters
-
-#     Conventions:
-#       - solute atoms are [0, 1, 2]
-#       - water atoms are ordered [O, H1, H2]
-#       - solute atom 0 is the anchor
-#       - forward reconstructs the solute in a canonical frame:
-#           atom0 at box center
-#           atom1 on +x
-#           atom2 in xy-plane
-#     """
-
-#     def __init__(self, L: float, system=None, transform_data=None, internal_dim=None):
-#         super().__init__()
-#         self.L = float(L)
-#         self.system = system
-#         self.transform_data = transform_data
-
-#         assert transform_data is not None and transform_data.shape[0] == 1
-
-#         self.n_atoms = transform_data.shape[1] // 3
-#         self.n_solute = 3
-#         self.n_atoms_per_mol = 3
-#         self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_mol
-#         assert self.n_solute + 3 * self.n_waters == self.n_atoms
-
-#         expected_dim = 3 + 6 * self.n_waters
-#         if internal_dim is None:
-#             self.internal_dim = expected_dim
-#         else:
-#             assert internal_dim == expected_dim, (internal_dim, expected_dim)
-#             self.internal_dim = internal_dim
-
-#         with torch.no_grad():
-#             x0 = transform_data.reshape(1, self.n_atoms, 3).clone()[0]  # (N,3)
-
-#             # --- Reference solute, made whole and expressed in its own canonical frame
-#             sol = x0[:self.n_solute]  # (3,3)
-#             sol_rel = self.mic(sol.unsqueeze(0) - sol[0].view(1, 1, 3), self.L)[0]  # (3,3)
-
-#             R0 = self._build_solute_frame_single(sol_rel)  # (3,3), columns = basis in lab coords
-
-#             # --- Reference rigid water, rotated into the reference solute frame
-#             w0_start = self.n_solute
-#             ref = x0[w0_start:w0_start + 3]  # (3,3) = [O,H1,H2]
-#             ref_rel = self.mic(ref.unsqueeze(0) - ref[0].view(1, 1, 3), self.L)[0]  # O at origin, whole water
-#             ref_rel_sol = (R0.T @ ref_rel.T).T  # water in canonical solute frame
-
-#             ref_cent = ref_rel_sol.mean(dim=0, keepdim=True)
-
-#             self.register_buffer("ref_H1", ref_rel_sol[1].clone())
-#             self.register_buffer("ref_H2", ref_rel_sol[2].clone())
-#             self.register_buffer("ref_water_kabsch", (ref_rel_sol - ref_cent).clone())
-
-#     # ------------------------------------------------------------------
-#     # PBC helpers
-#     # ------------------------------------------------------------------
-#     def _L_tensor(self, x: torch.Tensor, L: float) -> torch.Tensor:
-#         return torch.as_tensor(L, device=x.device, dtype=x.dtype)
-
-#     def mic(self, dx: torch.Tensor, L: float) -> torch.Tensor:
-#         L_t = self._L_tensor(dx, L)
-#         return dx - L_t * torch.round(dx / L_t)
-
-#     def wrap_0L(self, x: torch.Tensor) -> torch.Tensor:
-#         L_t = self._L_tensor(x, self.L)
-#         return x - L_t * torch.floor(x / L_t)
-
-#     def make_whole_solute(self, x_sol: torch.Tensor) -> torch.Tensor:
-#         # x_sol: (B,3,3)
-#         x0 = x_sol[:, 0:1, :]
-#         d = self.mic(x_sol - x0, self.L)
-#         return x0 + d
-
-#     def make_whole_water(self, x_w: torch.Tensor) -> torch.Tensor:
-#         # x_w: (B,3,3) with ordering [O,H1,H2]
-#         O = x_w[:, 0:1, :]
-#         d = self.mic(x_w - O, self.L)
-#         return O + d
-
-#     # ------------------------------------------------------------------
-#     # Solute frame helpers
-#     # ------------------------------------------------------------------
-#     @staticmethod
-#     def _build_solute_frame_single(sol_rel: torch.Tensor) -> torch.Tensor:
-#         """
-#         sol_rel: (3,3), whole solute relative to atom 0
-#         returns R: (3,3), columns are canonical basis vectors in lab coordinates
-#         """
-#         v1 = sol_rel[1]
-#         v2 = sol_rel[2]
-
-#         e1 = v1 / torch.norm(v1).clamp_min(1e-12)
-#         tmp = v2 - torch.dot(v2, e1) * e1
-#         e2 = tmp / torch.norm(tmp).clamp_min(1e-12)
-#         e3 = torch.cross(e1, e2, dim=-1)
-
-#         # Optional sign convention for stability
-#         if e3[2] < 0:
-#             e2 = -e2
-#             e3 = -e3
-
-#         return torch.stack([e1, e2, e3], dim=1)
-
-#     @staticmethod
-#     def _build_solute_frame_batch(sol_rel: torch.Tensor) -> torch.Tensor:
-#         """
-#         sol_rel: (B,3,3), whole solute relative to atom 0
-#         returns R: (B,3,3), columns are canonical basis vectors in lab coordinates
-#         """
-#         v1 = sol_rel[:, 1, :]
-#         v2 = sol_rel[:, 2, :]
-
-#         e1 = v1 / torch.linalg.norm(v1, dim=-1, keepdim=True).clamp_min(1e-12)
-#         tmp = v2 - (e1 * v2).sum(dim=-1, keepdim=True) * e1
-#         e2 = tmp / torch.linalg.norm(tmp, dim=-1, keepdim=True).clamp_min(1e-12)
-#         e3 = torch.cross(e1, e2, dim=-1)
-
-#         # Optional sign convention for stability
-#         flip = e3[:, 2] < 0
-#         if flip.any():
-#             e2 = e2.clone()
-#             e3 = e3.clone()
-#             e2[flip] = -e2[flip]
-#             e3[flip] = -e3[flip]
-
-#         return torch.stack([e1, e2, e3], dim=2)
-
-#     @staticmethod
-#     def angle_abc(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
-#         """
-#         Angle ABC in radians.
-#         a,b,c: (B,3)
-#         returns: (B,)
-#         """
-#         ba = a - b
-#         bc = c - b
-#         ba = ba / ba.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-#         bc = bc / bc.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-#         cosang = (ba * bc).sum(dim=-1).clamp(-1.0, 1.0)
-#         return torch.acos(cosang)
-
-#     # ------------------------------------------------------------------
-#     # SO(3) maps
-#     # ------------------------------------------------------------------
-#     def rotvec_to_rotmat(self, w: torch.Tensor) -> torch.Tensor:
-#         """
-#         w: (B,3) rotation vector (axis * angle)
-#         returns R: (B,3,3)
-#         """
-#         B = w.shape[0]
-#         theta = torch.linalg.norm(w, dim=1, keepdim=True).clamp_min(1e-12)
-#         k = w / theta
-
-#         kx, ky, kz = k[:, 0], k[:, 1], k[:, 2]
-#         K = torch.zeros((B, 3, 3), device=w.device, dtype=w.dtype)
-#         K[:, 0, 1] = -kz
-#         K[:, 0, 2] = ky
-#         K[:, 1, 0] = kz
-#         K[:, 1, 2] = -kx
-#         K[:, 2, 0] = -ky
-#         K[:, 2, 1] = kx
-
-#         I = torch.eye(3, device=w.device, dtype=w.dtype).unsqueeze(0).expand(B, 3, 3)
-#         ct = torch.cos(theta).view(B, 1, 1)
-#         st = torch.sin(theta).view(B, 1, 1)
-#         return I + st * K + (1.0 - ct) * (K @ K)
-
-#     def rotmat_to_rotvec(self, R: torch.Tensor) -> torch.Tensor:
-#         """
-#         R: (B,3,3)
-#         returns w: (B,3)
-#         """
-#         B = R.shape[0]
-#         trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
-#         cos_theta = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0)
-#         theta = torch.acos(cos_theta)
-
-#         w = torch.zeros((B, 3), device=R.device, dtype=R.dtype)
-
-#         small = theta < 1e-6
-#         if small.any():
-#             Rt = R[small].transpose(1, 2)
-#             A = 0.5 * (R[small] - Rt)
-#             w[small, 0] = A[:, 2, 1]
-#             w[small, 1] = A[:, 0, 2]
-#             w[small, 2] = A[:, 1, 0]
-
-#         big = ~small
-#         if big.any():
-#             th = theta[big]
-#             denom = (2.0 * torch.sin(th)).clamp_min(1e-12)
-#             wx = (R[big, 2, 1] - R[big, 1, 2]) / denom
-#             wy = (R[big, 0, 2] - R[big, 2, 0]) / denom
-#             wz = (R[big, 1, 0] - R[big, 0, 1]) / denom
-#             axis = torch.stack([wx, wy, wz], dim=1)
-#             w[big] = axis * th.unsqueeze(1)
-
-#         return w
-
-#     def so3_logdet_exp(self, w: torch.Tensor) -> torch.Tensor:
-#         theta = torch.linalg.norm(w, dim=1).clamp_min(1e-12)
-#         half = 0.5 * theta
-#         return 2.0 * (torch.log(torch.sin(half).clamp_min(1e-12)) - torch.log(half))
-
-#     # ------------------------------------------------------------------
-#     # Kabsch
-#     # ------------------------------------------------------------------
-#     @staticmethod
-#     def kabsch_rotation(source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-#         """
-#         source: (B,3,3) centered
-#         target: (B,3,3) centered
-#         returns R such that source @ R ≈ target
-#         """
-#         C = source.transpose(1, 2) @ target
-#         U, _, Vh = torch.linalg.svd(C)
-#         V = Vh.transpose(1, 2)
-#         Ut = U.transpose(1, 2)
-
-#         det = torch.det(V @ Ut)
-#         D = torch.eye(3, device=source.device, dtype=source.dtype).unsqueeze(0).repeat(source.shape[0], 1, 1)
-#         D[:, 2, 2] = torch.where(det < 0, -1.0, 1.0)
-
-#         return V @ D @ Ut
-
-#     # ------------------------------------------------------------------
-#     # nf API
-#     # ------------------------------------------------------------------
-#     def inverse(self, x: torch.Tensor):
-#         """
-#         x: (B, 3*N) flattened Cartesian
-#         returns:
-#           i: (B, 3 + 6*n_waters)
-#           logdet_xi: (B,)
-#         """
-#         B = x.shape[0]
-#         x = x.view(B, self.n_atoms, 3)
-
-#         # Make solute whole and center on atom 0
-#         sol = self.make_whole_solute(x[:, :3, :])   # (B,3,3)
-#         origin = sol[:, 0:1, :]
-#         x_rel = self.mic(x - origin, self.L)        # all atoms relative to atom0 under MIC
-        
-
-#         # Solute internal shape only
-#         v1 = x_rel[:, 1, :]  # atom0 -> atom1
-#         v2 = x_rel[:, 2, :]  # atom0 -> atom2
-
-#         r1 = torch.linalg.norm(v1, dim=-1, keepdim=True)
-#         r2 = torch.linalg.norm(v2, dim=-1, keepdim=True)
-#         theta = self.angle_abc(
-#             x_rel[:, 1, :],
-#             x_rel[:, 0, :],
-#             x_rel[:, 2, :],
-#         ).unsqueeze(1)
-
-#         pieces = [r1, r2, theta]
-#         logdet = torch.zeros((B,), device=x.device, dtype=x.dtype)
-
-#         # Build instantaneous solute frame
-#         Rsol = self._build_solute_frame_batch(x_rel[:, :3, :])  # (B,3,3)
-
-#         # Reference water in canonical solute frame
-#         Yref = self.ref_water_kabsch.to(x.device, x.dtype).unsqueeze(0).expand(B, 3, 3)
-
-#         for k in range(self.n_waters):
-#             s = self.n_solute + 3 * k
-#             w = x_rel[:, s:s + 3, :]          # (B,3,3) [O,H1,H2], still in lab frame rel to atom0
-#             # w = self.make_whole_water(w)      # make H whole wrt O
-#             O0 = w[:, 0:1, :]
-#             w = O0 + self.mic(w - O0, self.L)
-
-#             # O position in instantaneous solute frame
-#             O_lab = w[:, 0, :]
-#             O = torch.einsum("bij,bj->bi", Rsol.transpose(1, 2), O_lab)
-
-#             # Water geometry relative to O, then rotate into solute frame
-#             w_rel = w - w[:, 0:1, :]
-#             w_rel_sol = torch.einsum("bij,bnj->bni", Rsol.transpose(1, 2), w_rel)
-
-#             # Infer rigid orientation in solute frame
-#             w_cent = w_rel_sol - w_rel_sol.mean(dim=1, keepdim=True)
-#             Rw = self.kabsch_rotation(Yref, w_cent)
-#             omega = self.rotmat_to_rotvec(Rw)
-
-#             pieces += [O, omega]
-
-#             # Optional Haar measure correction
-#             # logdet = logdet + self.so3_logdet_exp(omega)
-
-#         i = torch.cat(pieces, dim=1)
-#         return i, logdet
-
-#     def forward(self, i: torch.Tensor):
-#         """
-#         i: (B, 3 + 6*n_waters)
-#         returns:
-#           x: (B, 3*N) flattened Cartesian in [0, L)
-#           logdet_ix: (B,)
-#         """
-#         B = i.shape[0]
-#         assert i.shape[1] == self.internal_dim, (i.shape, self.internal_dim)
-
-#         # Unpack solute shape
-#         r1 = i[:, 0:1].clamp_min(1e-6)
-#         r2 = i[:, 1:2].clamp_min(1e-6)
-#         theta = i[:, 2:3].clamp(1e-3, math.pi - 1e-3)
-
-#         center = 0.5 * self.L
-#         x = torch.zeros((B, self.n_atoms, 3), device=i.device, dtype=i.dtype)
-
-#         # Canonical solute:
-#         # atom0 at center
-#         # atom1 on +x
-#         # atom2 in xy-plane
-#         x[:, 0, 0] = center
-#         x[:, 0, 1] = center
-#         x[:, 0, 2] = center
-
-#         x[:, 1, 0] = center + r1[:, 0]
-#         x[:, 1, 1] = center
-#         x[:, 1, 2] = center
-
-#         x[:, 2, 0] = center + r2[:, 0] * torch.cos(theta[:, 0])
-#         x[:, 2, 1] = center + r2[:, 0] * torch.sin(theta[:, 0])
-#         x[:, 2, 2] = center
-
-#         # Waters, already represented in this canonical solute frame
-#         idx = 3
-#         logdet = torch.zeros((B,), device=i.device, dtype=i.dtype)
-
-#         H1_ref = self.ref_H1.to(i.device, i.dtype).view(1, 3, 1)
-#         H2_ref = self.ref_H2.to(i.device, i.dtype).view(1, 3, 1)
-
-#         solute0_abs = x[:, 0, :]
-
-#         for k in range(self.n_waters):
-#             O = i[:, idx:idx + 3]
-#             omega = i[:, idx + 3:idx + 6]
-#             idx += 6
-
-#             R = self.rotvec_to_rotmat(omega)
-
-#             O_abs = solute0_abs + O
-#             x[:, self.n_solute + 3 * k + 0, :] = O_abs
-
-#             H1 = (R @ H1_ref.expand(B, 3, 1)).squeeze(-1)
-#             H2 = (R @ H2_ref.expand(B, 3, 1)).squeeze(-1)
-
-#             x[:, self.n_solute + 3 * k + 1, :] = O_abs + H1
-#             x[:, self.n_solute + 3 * k + 2, :] = O_abs + H2
-
-#             # Optional Haar measure correction
-#             # logdet = logdet + self.so3_logdet_exp(omega)
-
-#         x = self.wrap_0L(x)
-#         return x.view(B, -1), logdet
 
 class PBCFixedSoluteTransform(nf.flows.Flow):
     """
