@@ -24,7 +24,6 @@ from fab.target_distributions.solute_in_water import SoluteInWater
 from experiments.logger_setup import setup_logger
 from experiments.setup_run import setup_trainer_and_run_flow, Plotter
 from experiments.solvation.test_run import run_transform_test_droplet, run_test_pbc
-from fab.transforms.transform_pbc import PBCPreprocessTransform
 from matplotlib.patches import Patch
 
 SAVE_DIR = None

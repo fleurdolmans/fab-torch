@@ -1,5 +1,7 @@
 from typing import Callable, Any, Optional, List
 
+import torch
+import torch.nn.functional as F
 import torch.optim.optimizer
 import wandb
 import numpy as np
@@ -15,6 +17,59 @@ from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
 lr_scheduler = Any  # a learning rate scheduler from torch.optim.lr_scheduler
 Plotter = Callable[[FABModel], List[plt.Figure]]
+
+
+def _mic(dx: torch.Tensor, L: float) -> torch.Tensor:
+    L_t = torch.as_tensor(L, device=dx.device, dtype=dx.dtype)
+    return dx - L_t * torch.round(dx / L_t)
+
+
+def _pair_clash_penalty(
+    A: torch.Tensor,   # (B, NA, 2)
+    B: torch.Tensor,   # (B, NB, 2)
+    L: float,
+    r0: float,
+    k: float = 200.0,
+) -> torch.Tensor:
+    dx = _mic(A[:, :, None, :] - B[:, None, :, :], L)
+    d = torch.linalg.norm(dx, dim=-1)
+    pen = F.softplus(k * (r0 - d)) / k
+    return pen.sum(dim=(1, 2)).mean()
+
+
+def _lj_overlap_penalty(
+    x_flat: torch.Tensor,   # (B, 2*(n_solute+n_solvent))
+    L: float,
+    n_solute: int,
+    n_solvent: int,
+    r0_ssolv: float = 0.24,
+    r0_solv_solute: float = 0.24,
+    k: float = 200.0,
+    chunk: int = 64,
+) -> torch.Tensor:
+    B, D = x_flat.shape
+    X = x_flat.view(B, D // 2, 2)
+    solute  = X[:, :n_solute, :]
+    solvent = X[:, n_solute:n_solute + n_solvent, :]
+
+    sw_pen = _pair_clash_penalty(solvent, solute, L=L, r0=r0_solv_solute, k=k)
+
+    L_t = torch.as_tensor(L, device=x_flat.device, dtype=x_flat.dtype)
+    r0_t = torch.as_tensor(r0_ssolv, device=x_flat.device, dtype=x_flat.dtype)
+    ss_pen_per_batch = torch.zeros(B, device=x_flat.device, dtype=x_flat.dtype)
+    for i0 in range(0, n_solvent, chunk):
+        i1  = min(n_solvent, i0 + chunk)
+        Xi  = solvent[:, i0:i1, :]
+        ci  = i1 - i0
+        dx  = _mic(Xi[:, :, None, :] - solvent[:, None, :, :], L_t)
+        d   = torch.linalg.norm(dx, dim=-1)
+        rows = torch.arange(ci, device=x_flat.device)
+        mask = torch.zeros(ci, n_solvent, device=x_flat.device, dtype=torch.bool)
+        mask[rows, rows + i0] = True
+        d = d.masked_fill(mask.unsqueeze(0), 1e9)
+        ss_pen_per_batch = ss_pen_per_batch + (F.softplus(k * (r0_t - d)) / k).sum(dim=(1, 2))
+
+    return ss_pen_per_batch.mean() + sw_pen
 
 
 class PrioritisedBufferTrainer:
@@ -38,6 +93,11 @@ class PrioritisedBufferTrainer:
         warmup_scheduler: Optional[lr_scheduler] = None,
         warmup_iters: int = 0,
         print_eval: bool = False,
+        overlap_w: float = 0.0,
+        overlap_L: float = 1.0,
+        overlap_n_solute: int = 1,
+        overlap_n_solvent: int = 1,
+        overlap_r0: float = 0.24,
     ):
         self.model = model
         self.alpha = alpha
@@ -64,6 +124,11 @@ class PrioritisedBufferTrainer:
         self.w_adjust_in_buffer_after_update = w_adjust_in_buffer_after_update
         self.warmup_scheduler = warmup_scheduler
         self.warmup_iters = warmup_iters
+        self.overlap_w = overlap_w
+        self.overlap_L = overlap_L
+        self.overlap_n_solute = overlap_n_solute
+        self.overlap_n_solvent = overlap_n_solvent
+        self.overlap_r0 = overlap_r0
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
@@ -215,6 +280,28 @@ class PrioritisedBufferTrainer:
                     w_adjust = w_adjust_pre_clip
                 # manually calculate the new form of the loss
                 loss = -torch.mean(w_adjust * log_q_x)
+                # add overlap penalty on fresh flow samples
+                if self.overlap_w > 0.0:
+                    x_pen, _ = self.model.flow.sample_and_log_prob((batch_size,))
+                    # prepend pinned solute at origin to get full (B, 2*(n_solute+n_solvent)) layout
+                    solute_pen = torch.zeros(
+                        batch_size, self.overlap_n_solute, 2,
+                        device=x_pen.device, dtype=x_pen.dtype,
+                    )
+                    x_full_pen = torch.cat(
+                        [solute_pen.view(batch_size, -1), x_pen], dim=1
+                    )
+                    pen = _lj_overlap_penalty(
+                        x_full_pen,
+                        L=self.overlap_L,
+                        n_solute=self.overlap_n_solute,
+                        n_solvent=self.overlap_n_solvent,
+                        r0_ssolv=self.overlap_r0,
+                        r0_solv_solute=self.overlap_r0,
+                    )
+                    loss = loss + self.overlap_w * pen
+
+       
                 if not torch.isnan(loss) and not torch.isinf(loss):
                     loss.backward()
                     grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_gradient_norm)

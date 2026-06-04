@@ -1,4 +1,5 @@
 import math
+import torch
 import normflows as nf
 
 from fab.flow import (
@@ -31,6 +32,22 @@ def _torus_ind_circ(solute_dim: int, n_waters: int) -> list:
         base = solute_dim + 6 * k
         ind_circ += [base, base + 1, base + 2]
     return ind_circ
+
+
+def _torus_base_scale(dim: int, ind_circ: list) -> torch.Tensor:
+    """
+    Scale vector for UniformGaussian so that tau dims are Uniform[-pi, pi).
+
+    normflows UniformGaussian samples eps_u = rand - 0.5  in [-0.5, 0.5), then
+    multiplies by scale.  With scale=1 (default) the uniform dims are in [-0.5, 0.5),
+    NOT [-pi, pi).  We need scale = 2*pi on the tau dims so that:
+        tau_latent = 2*pi * (rand - 0.5)  in [-pi, pi)
+    which matches the circular RQS tail_bound=pi domain.
+    """
+    scale = torch.ones(dim)
+    for i in ind_circ:
+        scale[i] = 2.0 * math.pi
+    return scale
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +127,8 @@ def make_perm_equi_torus_flow_nf(cfg, target):
             flows.append(nf.flows.ActNorm(dim))
 
     if cfg.flow.base.type == "gauss":
-        base = nf.distributions.UniformGaussian(dim, ind_circ)
+        scale = _torus_base_scale(dim, ind_circ)
+        base = nf.distributions.UniformGaussian(dim, ind_circ, scale=scale)
     elif cfg.flow.base.type == "structured-gauss":
         base = make_structured_diag_gaussian_from_target(
             target, learn_mean_var=cfg.flow.base.learn_mean_var
@@ -160,7 +178,8 @@ def make_circ_rqs_torus_flow_nf(cfg, target):
         if getattr(cfg.flow, "actnorm", False):
             flows.append(nf.flows.ActNorm(dim))
 
-    base = nf.distributions.UniformGaussian(dim, ind_circ)
+    scale = _torus_base_scale(dim, ind_circ)
+    base = nf.distributions.UniformGaussian(dim, ind_circ, scale=scale)
     model = nf.NormalizingFlow(base, flows)
     if getattr(cfg.flow, "actnorm", False):
         model.sample(500)
@@ -228,7 +247,8 @@ def make_perm_equi_sfic_torus_flow_nf(cfg, target):
         if getattr(cfg.flow, "actnorm", False):
             flows.append(nf.flows.ActNorm(dim))
 
-    base = nf.distributions.UniformGaussian(dim, ind_circ)
+    scale = _torus_base_scale(dim, ind_circ)
+    base = nf.distributions.UniformGaussian(dim, ind_circ, scale=scale)
     model = nf.NormalizingFlow(base, flows)
     if getattr(cfg.flow, "actnorm", False):
         model.sample(500)
