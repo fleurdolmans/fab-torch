@@ -593,7 +593,7 @@ class SharedWaterBlockSplineCoupling(nf.flows.Flow):
         uw, uh, ud = self._reshape_params(params)
         uw = uw[:, None, :, :].expand(B, Nt, D, self.num_bins)
         uh = uh[:, None, :, :].expand(B, Nt, D, self.num_bins)
-        ud = ud[:, None, :, :].expand(B, Nt, D, self.num_bins + 1)
+        ud = ud[:, None, :, :].expand(B, Nt, D, self.num_bins)
 
         x_flat = x_block.reshape(B * Nt * D)
         uw_flat = uw.reshape(B * Nt * D, self.num_bins)
