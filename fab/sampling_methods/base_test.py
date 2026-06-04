@@ -3,7 +3,7 @@ import torch.nn as nn
 import functorch
 from functools import partial
 
-from experiments.make_flow.make_normflow_model import make_wrapped_normflow_realnvp
+from experiments.make_flow.make_normflow_model_equi import make_wrapped_normflow_realnvp
 from fab.target_distributions.gmm import GMM
 from fab.sampling_methods.base import Point, get_intermediate_log_prob, get_grad_intermediate_log_prob, create_point
 

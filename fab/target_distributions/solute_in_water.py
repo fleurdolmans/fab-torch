@@ -30,7 +30,6 @@ from fab.transforms import (
     LabFrameTorusTransform,
     LabFrameGeometricTorusTransform,
     SFICTorusTransform,
-    LabFrameCanonicalTorusTransform
 )
 
 from fab.utils.numerical import effective_sample_size
@@ -460,19 +459,19 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
             self.internal_dim = self.cartesian_dim - 6
         elif self.transform_version == "GPR":
-            self.coordinate_transform = Global3PointRadialRotvecTransform(self.system, self.transform_data.to(device))
+            self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, transform_data=self.transform_data.to(device))
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
         elif self.transform_version == "SFIC":
-            self.coordinate_transform = SFICTransform(self.system, self.transform_data.to(device))
-            self.internal_dim = 3 + 6 * self.num_solvent_molecules  
+            self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device))
+            self.internal_dim = 3 + 6 * self.num_solvent_molecules
         elif self.transform_version == "LGT":
-            self.coordinate_transform = LabFrameGeometricTorusTransform(self.system, self.transform_data.to(device))
+            self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, self.transform_data.to(device))
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
         elif self.transform_version == "LCT":
-            self.coordinate_transform = LabFrameCanonicalTorusTransform(self.system, self.transform_data.to(device))
+            self.coordinate_transform = LabFrameCanonicalTorusTransform(self.box_length_nm, self.transform_data.to(device))
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
         elif self.transform_version == "SFIC-T":
-            self.coordinate_transform = SFICTorusTransform(self.system, self.transform_data.to(device))
+            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, self.transform_data.to(device))
             self.internal_dim = 3 + 6 * self.num_solvent_molecules
              
         else:
