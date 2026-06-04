@@ -2,7 +2,7 @@ import math
 import torch
 from torch import nn
 import normflows as nf
-from nflows.transforms.splines.rational_quadratic import unconstrained_rational_quadratic_spline
+from normflows.utils.splines import unconstrained_rational_quadratic_spline
 
 from fab.flow.utils import MLP
 
@@ -110,7 +110,7 @@ class PermEquiWaterSplineCoupling(nf.flows.Flow):
 
         # shared parameter net: conditioner(3) + pooled_context(H) + solute_shape(3) -> params
         param_in_dim = self.part_dim + hidden_dim + self.shape_dim
-        params_per_dim = 2 * num_bins + (num_bins + 1)
+        params_per_dim = 3 * num_bins  # normflows: K widths + K heights + K derivatives
         param_out_dim = self.part_dim * params_per_dim
 
         param_layers = []
@@ -164,7 +164,7 @@ class PermEquiWaterSplineCoupling(nf.flows.Flow):
     def _reshape_params(self, params: torch.Tensor):
         B, W, _ = params.shape
         K = self.num_bins
-        per_dim = 2 * K + (K + 1)
+        per_dim = 3 * K  # K widths + K heights + K derivatives (normflows convention)
         params = params.view(B, W, self.part_dim, per_dim)
         uw = params[..., :K]
         uh = params[..., K:2 * K]
@@ -184,7 +184,7 @@ class PermEquiWaterSplineCoupling(nf.flows.Flow):
         x_flat = x_sub.reshape(B * W * D)
         uw_flat = uw.reshape(B * W * D, self.num_bins)
         uh_flat = uh.reshape(B * W * D, self.num_bins)
-        ud_flat = ud.reshape(B * W * D, self.num_bins + 1)
+        ud_flat = ud.reshape(B * W * D, self.num_bins)
 
         y_flat, logabsdet_flat = unconstrained_rational_quadratic_spline(
             inputs=x_flat,
@@ -326,7 +326,7 @@ class PermEquiWaterSplineCouplingPairwiseO(nf.flows.Flow):
         extra_pair_dim = hidden_dim if not transform_oxygen else 0
 
         param_in_dim = self.part_dim + hidden_dim + self.shape_dim + extra_pair_dim
-        params_per_dim = 2 * num_bins + (num_bins + 1)
+        params_per_dim = 3 * num_bins  # normflows: K widths + K heights + K derivatives
         param_out_dim = self.part_dim * params_per_dim
 
         param_layers = []
@@ -405,7 +405,7 @@ class PermEquiWaterSplineCouplingPairwiseO(nf.flows.Flow):
     def _reshape_params(self, params: torch.Tensor):
         B, W, _ = params.shape
         K = self.num_bins
-        per_dim = 2 * K + (K + 1)
+        per_dim = 3 * K  # K widths + K heights + K derivatives (normflows convention)
         params = params.view(B, W, self.part_dim, per_dim)
         uw = params[..., :K]
         uh = params[..., K:2 * K]
@@ -425,7 +425,7 @@ class PermEquiWaterSplineCouplingPairwiseO(nf.flows.Flow):
         x_flat = x_sub.reshape(B * W * D)
         uw_flat = uw.reshape(B * W * D, self.num_bins)
         uh_flat = uh.reshape(B * W * D, self.num_bins)
-        ud_flat = ud.reshape(B * W * D, self.num_bins + 1)
+        ud_flat = ud.reshape(B * W * D, self.num_bins)
 
         y_flat, logabsdet_flat = unconstrained_rational_quadratic_spline(
             inputs=x_flat,
@@ -541,7 +541,7 @@ class SharedWaterBlockSplineCoupling(nf.flows.Flow):
 
         # context = [solute_prefix | pooled_context_water(6)]
         in_dim = n_prefix + block_size
-        params_per_dim = 2 * num_bins + (num_bins + 1)
+        params_per_dim = 3 * num_bins  # normflows: K widths + K heights + K derivatives
         out_dim = block_size * params_per_dim
 
         self.net = MLP(
@@ -575,7 +575,7 @@ class SharedWaterBlockSplineCoupling(nf.flows.Flow):
     def _reshape_params(self, params: torch.Tensor):
         B = params.shape[0]
         K = self.num_bins
-        per_dim = 2 * K + (K + 1)
+        per_dim = 3 * K  # normflows: K widths + K heights + K derivatives
         params = params.view(B, self.block_size, per_dim)
         uw = params[:, :, :K]
         uh = params[:, :, K:2 * K]
@@ -598,7 +598,7 @@ class SharedWaterBlockSplineCoupling(nf.flows.Flow):
         x_flat = x_block.reshape(B * Nt * D)
         uw_flat = uw.reshape(B * Nt * D, self.num_bins)
         uh_flat = uh.reshape(B * Nt * D, self.num_bins)
-        ud_flat = ud.reshape(B * Nt * D, self.num_bins + 1)
+        ud_flat = ud.reshape(B * Nt * D, self.num_bins)
 
         y_flat, logabsdet_flat = unconstrained_rational_quadratic_spline(
             inputs=x_flat,
