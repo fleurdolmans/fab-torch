@@ -23,15 +23,16 @@ from fab.utils.prioritised_replay_buffer import PrioritisedReplayBuffer
 
 from experiments.logger_setup import setup_logger
 from experiments.make_flow import (
-    make_wrapped_normflow_realnvp,
-    make_wrapped_normflow_resampled_flow,
-    make_wrapped_normflow_snf_model,
-    make_wrapped_normflow_solvent_flow,
-    make_coupled_spline_flow_nf,
     make_shared_water_spline_flow_nf,
     make_perm_equi_spline_flow_nf,
-    make_perm_equi_cnf_flow_nf,
-    make_perm_equi_joint_spline_flow_nf
+    make_perm_equi_joint_spline_flow_nf,
+    make_perm_equi_sfic_flow_nf,
+    make_spherical_circular_rqs_flow_nf,
+    make_coupled_rqs_flow_nf,
+    make_realnvp_flow_nf,
+    make_perm_equi_torus_flow_nf,
+    make_circ_rqs_torus_flow_nf,
+    make_perm_equi_sfic_torus_flow_nf,
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -200,16 +201,24 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
 
     if cfg.flow.type == "shared-water-spline-nf":
         flow = make_shared_water_spline_flow_nf(cfg, target)
-    elif cfg.flow.type == "coupled-spline-nf":
-        flow = make_coupled_spline_flow_nf(cfg, target)
     elif cfg.flow.type == "perm-equi-spline-nf":
         flow = make_perm_equi_spline_flow_nf(cfg, target)
-    elif cfg.flow.type == "perm-equi-cnf-nf":
-        flow = make_perm_equi_cnf_flow_nf(cfg, target)
     elif cfg.flow.type == "perm-equi-joint-spline-nf":
         flow = make_perm_equi_joint_spline_flow_nf(cfg, target)
-    elif cfg.flow.type == "coup-nsf" or cfg.flow.type == "circ-coup-nsf":   
-        flow = make_wrapped_normflow_solvent_flow(cfg, target)
+    elif cfg.flow.type == "spherical-circ-rqs-nf":
+        flow = make_spherical_circular_rqs_flow_nf(cfg, target)
+    elif cfg.flow.type == "coupled-rqs-nf":
+        flow = make_coupled_rqs_flow_nf(cfg, target)
+    elif cfg.flow.type == "realnvp-nf":
+        flow = make_realnvp_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-sfic-nf":
+        flow = make_perm_equi_sfic_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-torus-nf":
+        flow = make_perm_equi_torus_flow_nf(cfg, target)
+    elif cfg.flow.type == "circ-rqs-torus-nf":
+        flow = make_circ_rqs_torus_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-sfic-torus-nf":
+        flow = make_perm_equi_sfic_torus_flow_nf(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
     # elif cfg.flow.type == "circ-coup-nsf":
