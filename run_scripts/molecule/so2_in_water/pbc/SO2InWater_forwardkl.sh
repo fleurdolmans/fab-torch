@@ -77,11 +77,11 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=structured-solute-gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf\\
+  flow.hidden_units=128 flow.base.type=structured-solute-gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf\\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
   training.lr=5e-5 training.wd=1e-6 training.batch_size=502 evaluation.eval_batch_size=128\\
   training.max_grad_norm=10 training.warmup_iter=100 \\
-  training.overlap_penalty=50 training.mixing=0.0 training.energy_mode=full target.transform_version=v1\\
+  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=LGT\\
   training.n_iterations=600 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=600\\
   evaluation.n_eval=12 evaluation.n_plots=12 evaluation.n_checkpoints=1 
 EOF

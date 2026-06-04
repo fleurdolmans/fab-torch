@@ -21,11 +21,18 @@ from openmmtools.testsystems import TestSystem
 from fab.utils.logging import Logger
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import TransformedBoltzmann, TransformedBoltzmannParallel
-from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
-from fab.transforms.global_3point_spherical_transform_pbc import PBCRigidWaterTorusSO3Transform, PBCGlobal3PointSphericalTransform, PBCGlobal3PointSphericalTransform2, PBCGlobal3PointSphericalTransform3, PBCFixedSoluteTransform
-from fab.transforms.global_3point_spherical_transform_pbc_sorted import PBCGlobal3PointSphericalTransformSorted, PBCGlobal3PointSphericalTransformSorted2, PBCFixedSoluteTransformSorted
-from fab.transforms.global_3point_spherical_transform_pbc_old import PBCFixedSoluteRadialWaterTransform, PBCFixedSoluteSequentialOOTransform
-from fab.transforms.transform_pbc import PBCPreprocessTransform
+
+from fab.transforms import (
+    Global3PointSphericalTransform,
+    Global3PointRadialRotvecTransform,
+    SFICTransform,
+    LabFrameCanonicalTorusTransform,
+    LabFrameTorusTransform,
+    LabFrameGeometricTorusTransform,
+    SFICTorusTransform,
+    LabFrameCanonicalTorusTransform
+)
+
 from fab.utils.numerical import effective_sample_size
 
 
@@ -368,29 +375,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
         else:
             raise ValueError(f"Unknown energy_mode: {self.energy_mode}")
 
-        if self.boundary_condition == "pbc":
-            fixed_list = ["fixed", "fixed_sorted", "fixed_radial_water", "fixed_sequential_oo"]
-            if self.transform_version is None:
-                self.internal_dim = self.cartesian_dim                    # for cartesian flow
-            elif self.transform_version == "v2" or self.transform_version == "v2_sorted" or self.transform_version == "so2_rigid_gauge":
-                self.internal_dim = 3 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-            elif self.transform_version == "v3":
-                self.internal_dim = 9 + 6 * self.num_solvent_molecules 
-            
-            elif self.transform_version in fixed_list:
-                self.internal_dim = 6 * self.num_solvent_molecules          # for internal cooridinate flow
-            else:
-                if self.transform_version != "v1" and self.transform_version != "v1_sorted":
-                    print(f"Unknown transform_version: {self.transform_version}. Using 'v1' as default.")
-                self.internal_dim = 6 + 6 * self.num_solvent_molecules      # for internal cooridinate flow
-
-        else:
-            if self.transform_version is None:
-                self.internal_dim = self.cartesian_dim
-            else:
-                self.internal_dim = self.cartesian_dim - 6
-        
-        print(f"Internal dim: {self.internal_dim}")
         self.logger = logger
         self.save_dir = save_dir
         self.metric_dir = os.path.join(self.save_dir, f"metrics")
@@ -468,97 +452,33 @@ class SoluteInWater(nn.Module, TargetDistribution):
             f"Data shape ({self.transform_data.shape}) does not match number of "
             f"coordinates in current system ({self.cartesian_dim})."
         )
-        if self.boundary_condition == "droplet":
-            if self.transform_version is None:
-                self.coordinate_transform = None
-            else:
-                self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
-        elif self.boundary_condition == "pbc":
-            # self.coordinate_transform = PBCPreprocessTransform(
-            #     L=self.box_length_nm,
-            #     n_solute=3,
-            #     n_waters=self.num_solvent_molecules,
-            #     anchor_idx=0,
-            #     do_center=False,
-            # )
-            if self.transform_version is None:
-                self.coordinate_transform = None
-            elif self.transform_version == "v1_sorted":
-                self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted(
-                        L=self.box_length_nm,
-                        system=self.system,
-                        transform_data=self.transform_data.to(device),
-                        internal_dim=self.internal_dim
-                    )
-            elif self.transform_version == "v2":
-                self.coordinate_transform = PBCGlobal3PointSphericalTransform2(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    internal_dim=self.internal_dim
-                )
-            
-            elif self.transform_version == "v3":
-                self.coordinate_transform = PBCGlobal3PointSphericalTransform3(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    internal_dim=self.internal_dim
-                )
-            elif self.transform_version == "rigid_torus":
-                self.coordinate_transform = PBCRigidWaterTorusSO3Transform(
-                    L=self.box_length_nm,
-                    transform_data=self.transform_data.to(device)
-                )
-            elif self.transform_version == "fixed":
-                self.coordinate_transform = PBCFixedSoluteTransform(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device)
-                )
-            elif self.transform_version == "fixed_sorted":
-                self.coordinate_transform = PBCFixedSoluteTransformSorted(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    internal_dim=self.internal_dim
-                )
-            elif self.transform_version == "v2_sorted":
-                self.coordinate_transform = PBCGlobal3PointSphericalTransformSorted2(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    internal_dim=self.internal_dim
-                )
-            elif self.transform_version == "fixed_radial_water":
-                self.coordinate_transform = PBCFixedSoluteRadialWaterTransform(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    r_min=0.28,                  # 0.26–0.32
-                    sort_waters_by_radius=True,
-                )
-            elif self.transform_version == "fixed_sequential_oo":
-                self.coordinate_transform = PBCFixedSoluteSequentialOOTransform(
-                    L=self.box_length_nm,
-                    system=self.system,
-                    transform_data=self.transform_data.to(device),
-                    r_min=0.28,
-                    oo_min=0.20,
-                    sort_waters_by_radius=True,
-                )
-            
-            else:
-                self.coordinate_transform = PBCGlobal3PointSphericalTransform(
-                        L=self.box_length_nm,
-                        system=self.system,
-                        transform_data=self.transform_data.to(device),
-                        internal_dim=self.internal_dim
-                    )
-                
+
+        if self.transform_version is None:
+            self.coordinate_transform = None
+            self.internal_dim = self.cartesian_dim
+        elif self.transform_version == "GPT":
+            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = self.cartesian_dim - 6
+        elif self.transform_version == "GPR":
+            self.coordinate_transform = Global3PointRadialRotvecTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = 6 + 6 * self.num_solvent_molecules
+        elif self.transform_version == "SFIC":
+            self.coordinate_transform = SFICTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = 3 + 6 * self.num_solvent_molecules  
+        elif self.transform_version == "LGT":
+            self.coordinate_transform = LabFrameGeometricTorusTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = 6 + 6 * self.num_solvent_molecules
+        elif self.transform_version == "LCT":
+            self.coordinate_transform = LabFrameCanonicalTorusTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = 6 + 6 * self.num_solvent_molecules
+        elif self.transform_version == "SFIC-T":
+            self.coordinate_transform = SFICTorusTransform(self.system, self.transform_data.to(device))
+            self.internal_dim = 3 + 6 * self.num_solvent_molecules
+             
         else:
-            raise ValueError(f"Invalid boundary_condition: {self.boundary_condition}. Must be 'droplet' or 'periodic'.")
+            raise ValueError(f"Invalid transform_version: {self.transform_version}. Must be one of 'None', 'GPT', 'GPR', 'SFIC', 'LGT', 'LCT', or 'SFIC-T'.")
         
+        print(f"Internal dim: {self.internal_dim}")
         # Transform MD data to internal coordinates (X --> I): coordinates fed into the flow.
         # If coordinate_transform is None, I == X (identity/Cartesian flow), logdet == 0.
         if self.coordinate_transform is None:

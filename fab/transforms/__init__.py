@@ -1,4 +1,5 @@
 from fab.transforms.global3point_radial_rotvec_transform import Global3PointRadialRotvecTransform
+from fab.transforms.global_3point_spherical_transform import Global3PointSphericalTransform
 from fab.transforms.sfic_transform import SFICTransform
 from fab.transforms.lab_frame_torus_transform import LabFrameTorusTransform
 from fab.transforms.lab_frame_geometric_torus_transform import LabFrameGeometricTorusTransform
