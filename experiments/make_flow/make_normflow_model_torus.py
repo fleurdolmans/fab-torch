@@ -3,9 +3,6 @@ import normflows as nf
 
 from fab.flow import (
     PermEquiWaterSplineCoupling,
-    PermEquiWaterSplineCouplingPairwiseO,
-    JointSoluteWaterFlowLayer,
-    SoluteSplineCoupling,
     SoluteWaterSplineCoupling,
     PermuteFixed,
     water_block_permutation,
@@ -51,7 +48,7 @@ def make_perm_equi_torus_flow_nf(cfg, target):
       omega in R^3         ->  linear  RQS (tails='linear')
 
     Each flow layer:
-      - SoluteSplineCoupling  (linear RQS on solute v1/v2)
+      - SoluteWaterSplineCoupling(n_prefix=6)  (linear RQS on solute, conditioned on water mean-pool)
       - PermEquiWaterSplineCoupling(transform_oxygen=True,  oxygen_circular=True)
       - PermEquiWaterSplineCoupling(transform_oxygen=False, oxygen_circular=True)
       - PermuteFixed  (random fixed permutation)
@@ -84,16 +81,18 @@ def make_perm_equi_torus_flow_nf(cfg, target):
 
     flows = []
     for k in range(cfg.flow.layers):
-        # solute coupling (linear RQS)
+        # solute coupling (linear RQS, conditioned on water mean-pool)
         flows.append(
-            SoluteSplineCoupling(
-                solute_dim=solute_dim,
+            SoluteWaterSplineCoupling(
+                dim=dim,
+                n_prefix=solute_dim,
+                block_size=6,
                 hidden_dim=cfg.flow.hidden_units,
                 n_hidden=cfg.flow.blocks_per_layer,
                 dropout=cfg.flow.dropout,
+                reverse_mask=bool(k % 2),
                 num_bins=cfg.flow.num_bins,
                 tail_bound=cfg.flow.tail_bound,
-                transform_first_half=bool(k % 2),
             )
         )
         # transform tau (circular) conditioned on omega
