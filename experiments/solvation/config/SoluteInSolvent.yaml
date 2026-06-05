@@ -30,9 +30,11 @@ target:                               # Properties of molecular system
   internal_constraints: "none"        # "none" or "hbonds": "none" for non-rigid water molecules.
   rigid_water: false                  # Rigid water molecules true/false.
 
+  transform:
+    version: LGT                      # which transform to use: None, GPS, GPR, LGT, SFIC, SFIC-T,
+    canonical_sorting: false          # whether to use canonical sorting (only for GPR, LGT, SFIC-T)
 
   # Only used for PBC simulations.   
-  transform_version: v1               # which transform to use: v1, v1_sorted, v2, v2_sorted
   nonbonded_cutoff_nm: 1.0            # Nonbonded cutoff in nm           
   box_length_nm: 2.5                  # Length of the box = (num_solvent_molecules / 33.4)^(1/3) (Liquid water density ≈ 33.4 water molecules / nm^3)
     

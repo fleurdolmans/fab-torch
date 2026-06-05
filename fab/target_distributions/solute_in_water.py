@@ -341,6 +341,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         curriculum_lambda: float = 1.0,
         curriculum_soft_energy_cut: float = 1.0,
         max_n_train_samples: Optional[int] = None,
+        canonical_sorting: bool = False 
     ):
         super(SoluteInWater, self).__init__()
 
@@ -363,7 +364,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.curriculum_lambda = curriculum_lambda
         self.curriculum_soft_energy_cut = curriculum_soft_energy_cut
         self.max_n_train_samples = max_n_train_samples
-        
+        self.canonical_sorting = canonical_sorting
 
         if self.energy_mode == "full":
             force_groups = None
@@ -399,7 +400,6 @@ class SoluteInWater(nn.Module, TargetDistribution):
             train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
             self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim, max_samples=max_n_train_samples).double()
-
         if val_samples_path:
             val_samples_path = pathlib.Path(val_samples_path)
             self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim, max_samples=max_n_train_samples).double()
@@ -462,16 +462,16 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.transform_version == "GPR":
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
-            self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, system=self.system, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
+            self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, system=self.system, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
         elif self.transform_version == "SFIC":
             self.internal_dim = 3 + 6 * self.num_solvent_molecules
             self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
         elif self.transform_version == "LGT":
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
-            self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
+            self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
         elif self.transform_version == "SFIC-T":
             self.internal_dim = 3 + 6 * self.num_solvent_molecules
-            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
+            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
            
              
         else:

@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=03:00:00
+#SBATCH --time=00:10:00
 
 module purge
 module load 2025
@@ -72,16 +72,16 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v1 target.max_n_train_samples=50000\\
-  target.box_length_nm=3.105 target.nonbonded_cutoff_nm=1.0 target.num_solvent_molecules=1000 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.max_n_train_samples=50000\\
+  target.simulation_version=v5 target.box_length_nm=2.5 target.nonbonded_cutoff_nm=1.0 target.num_solvent_molecules=522 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=structured-gauss flow.base.learn_mean_var=false flow.type=make_shared_water_spline_flow_nf\\
-  flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=3\\
+  flow.hidden_units=128 flow.base.type=structured-gauss flow.base.learn_mean_var=true flow.type=shared-water-spline-nf\\
+  flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=4\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=32 evaluation.eval_batch_size=32\\
   training.max_grad_norm=1 training.warmup_iter=750 \\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=SFIC\\
+  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform.version=SFIC\\
   training.n_iterations=3000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=3000\\
   evaluation.n_eval=15 evaluation.n_plots=15 evaluation.n_checkpoints=1 
 EOF
@@ -91,6 +91,4 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
-# training.n_pretraining=100
-# flow.type=coupled-spline-nf
-# 
+# target.simulation_version=v1 target.box_length_nm=3.105 target.nonbonded_cutoff_nm=1.0 target.num_solvent_molecules=1000 \\

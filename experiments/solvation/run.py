@@ -607,7 +607,15 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
 
         plt.subplot(1, 2, 1)
         plt.hist(total_md, bins=60, alpha=0.6, label="MD")
-        plt.hist(total_flow, bins=60, alpha=0.6, label="Flow")
+
+        # replace line 610 with:
+        total_flow_finite = total_flow[np.isfinite(total_flow)]
+        if len(total_flow_finite) > 0:
+            plt.hist(total_flow_finite, bins=60, alpha=0.6,
+                    label=f"Flow ({len(total_flow_finite)}/{len(total_flow)} finite)")
+        else:
+            plt.text(0.5, 0.5, "No finite flow energies", transform=plt.gca().transAxes, ha='center')
+
         plt.xlabel("Total energy (kJ/mol)")
         plt.ylabel("count")
         plt.legend()
@@ -762,7 +770,12 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
 
         plt.subplot(2, 2, 2)
         nbins = 120
-        e_lo, e_hi = np.percentile(md_U_kJ, [0.5, 99.5])
+        md_U_kJ_finite = md_U_kJ[np.isfinite(md_U_kJ)]
+        if len(md_U_kJ_finite) == 0:
+            print("WARNING: no finite MD energies, skipping energy plot")
+            figs.append(plt.figure())  # empty figure
+            return figs  # or continue to next plot section
+        e_lo, e_hi = np.percentile(md_U_kJ_finite, [0.5, 99.5])
         fl_U_kJ_finite = fl_U_kJ[np.isfinite(fl_U_kJ)]
         plt.hist(md_U_kJ, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
         if len(fl_U_kJ_finite) > 0:
@@ -1044,11 +1057,12 @@ def _run(cfg: DictConfig) -> None:
             platform_name=cfg.target.platform_name,
             platform_properties=platform_properties,
             energy_mode=cfg.training.energy_mode,
-            transform_version=cfg.target.transform_version,
+            transform_version=cfg.target.transform.version,
             curriculum_type=cfg.target.curriculum_type,
             curriculum_lambda=cfg.target.curriculum_lambda,
             curriculum_soft_energy_cut=cfg.target.curriculum_soft_energy_cut,
             max_n_train_samples=cfg.target.max_n_train_samples,
+            canonical_sorting=cfg.target.transform.canonical_sorting,
             
         )
     else:
