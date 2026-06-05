@@ -57,7 +57,7 @@ target:                               # Properties of molecular system
   test_samples_path: null
   platform_name: CUDA                 # OpenMM platform to use for energy calculations in buffer: "CUDA", "CPU", "OpenCL", "Reference", or "None"
 
-  max_n_train_samples: None
+  max_n_train_samples: null
 
   # Curriculum learning parameters
   curriculum_type: null

@@ -4,4 +4,3 @@ from fab.transforms.sfic_transform import SFICTransform
 from fab.transforms.lab_frame_torus_transform import LabFrameTorusTransform
 from fab.transforms.lab_frame_geometric_torus_transform import LabFrameGeometricTorusTransform
 from fab.transforms.sfic_torus_transform import SFICTorusTransform
-from fab.transforms.lab_frame_canonical_torus_transform import LabFrameCanonicalTorusTransform

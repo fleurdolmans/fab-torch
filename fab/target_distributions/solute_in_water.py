@@ -26,7 +26,6 @@ from fab.transforms import (
     Global3PointSphericalTransform,
     Global3PointRadialRotvecTransform,
     SFICTransform,
-    LabFrameCanonicalTorusTransform,
     LabFrameTorusTransform,
     LabFrameGeometricTorusTransform,
     SFICTorusTransform,
@@ -456,26 +455,24 @@ class SoluteInWater(nn.Module, TargetDistribution):
         )
 
         if self.transform_version is None:
-            self.coordinate_transform = None
             self.internal_dim = self.cartesian_dim
+            self.coordinate_transform = None
         elif self.transform_version == "GPT":
-            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
             self.internal_dim = self.cartesian_dim - 6
+            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.transform_version == "GPR":
-            self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, transform_data=self.transform_data.to(device))
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
+            self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, system=self.system, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
         elif self.transform_version == "SFIC":
-            self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device))
             self.internal_dim = 3 + 6 * self.num_solvent_molecules
+            self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
         elif self.transform_version == "LGT":
-            self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, self.transform_data.to(device))
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
-        elif self.transform_version == "LCT":
-            self.coordinate_transform = LabFrameCanonicalTorusTransform(self.box_length_nm, self.transform_data.to(device))
-            self.internal_dim = 6 + 6 * self.num_solvent_molecules
+            self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
         elif self.transform_version == "SFIC-T":
-            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, self.transform_data.to(device))
             self.internal_dim = 3 + 6 * self.num_solvent_molecules
+            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
+           
              
         else:
             raise ValueError(f"Invalid transform_version: {self.transform_version}. Must be one of 'None', 'GPT', 'GPR', 'SFIC', 'LGT', 'LCT', or 'SFIC-T'.")
