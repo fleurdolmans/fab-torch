@@ -72,16 +72,16 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v1 target.max_n_train_samples=50000\\
-  target.box_length_nm=3.105 target.nonbonded_cutoff_nm=1.0 target.num_solvent_molecules=1000 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
+  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=make_shared_water_spline_flow_nf\\
-  flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=32 evaluation.eval_batch_size=32\\
+  flow.hidden_units=192 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf\\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=4 flow.tail_bound=3\\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=1 training.warmup_iter=750 \\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=SFIC\\
+  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform_version=LGT\\
   training.n_iterations=3000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=3000\\
   evaluation.n_eval=15 evaluation.n_plots=15 evaluation.n_checkpoints=1 
 EOF

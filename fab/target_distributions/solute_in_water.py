@@ -340,7 +340,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
         transform_version: str = "v1",
         curriculum_type: Optional[str] = None,
         curriculum_lambda: float = 1.0,
-        curriculum_soft_energy_cut: float = 1.0
+        curriculum_soft_energy_cut: float = 1.0,
+        max_n_train_samples: Optional[int] = None,
     ):
         super(SoluteInWater, self).__init__()
 
@@ -362,6 +363,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.curriculum_type = curriculum_type
         self.curriculum_lambda = curriculum_lambda
         self.curriculum_soft_energy_cut = curriculum_soft_energy_cut
+        self.max_n_train_samples = max_n_train_samples
+        
 
         if self.energy_mode == "full":
             force_groups = None
@@ -396,15 +399,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if train_samples_path:
             train_samples_path = pathlib.Path(train_samples_path)
             # OH bonds still ~0.1 nm in length for this data.
-            self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim).double()
+            self.train_data_x = self.load_target_data(train_samples_path, self.cartesian_dim, max_samples=max_n_train_samples).double()
 
         if val_samples_path:
             val_samples_path = pathlib.Path(val_samples_path)
-            self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim).double()
+            self.val_data_x = self.load_target_data(val_samples_path, self.cartesian_dim, max_samples=max_n_train_samples).double()
 
         if test_samples_path:
             test_samples_path = pathlib.Path(test_samples_path)
-            self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim).double()
+            self.test_data_x = self.load_target_data(test_samples_path, self.cartesian_dim, max_samples=max_n_train_samples).double()
 
         # Initialise system
         self.system = TriatomicInWaterSys(
@@ -541,13 +544,20 @@ class SoluteInWater(nn.Module, TargetDistribution):
             )
 
     # @staticmethod
-    def load_target_data(self, data_path: pathlib.Path, dim: int):
+    def load_target_data(self, data_path: pathlib.Path, dim: int, max_samples: Optional[int] = None):
         """
         Load MD samples from file.
         """
         if data_path.suffix == ".h5":
             with h5py.File(str(data_path), "r") as f:
-                target_data = torch.from_numpy(f["coordinates"][()])
+                total_frames = f["coordinates"].shape[0]
+                if max_samples is not None and max_samples < total_frames:
+                    stride = max(1, total_frames // max_samples)
+                    target_data = torch.from_numpy(np.array(f["coordinates"][::stride]))
+                    print(f"  Subsampled {total_frames} frames to {target_data.shape[0]} (stride={stride})", flush=True)
+                else:
+                    target_data = torch.from_numpy(f["coordinates"][()])
+            
         elif data_path.suffix == ".pt":
             target_data = torch.load(str(data_path))
             assert len(target_data.shape) == 2, "Data must be of shape (num_frames, dim)."

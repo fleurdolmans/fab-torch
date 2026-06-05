@@ -1048,6 +1048,7 @@ def _run(cfg: DictConfig) -> None:
             curriculum_type=cfg.target.curriculum_type,
             curriculum_lambda=cfg.target.curriculum_lambda,
             curriculum_soft_energy_cut=cfg.target.curriculum_soft_energy_cut,
+            max_n_train_samples=cfg.target.max_n_train_samples,
             
         )
     else:
