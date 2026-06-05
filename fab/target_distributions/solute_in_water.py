@@ -495,14 +495,20 @@ class SoluteInWater(nn.Module, TargetDistribution):
                 self.train_data_i, self.train_logdet_xi = self.coordinate_transform.inverse(
                     self.train_data_x.reshape(-1, self.cartesian_dim)
                 )
+                nan_mask = torch.isnan(self.train_data_i).any(dim=-1)
+                print(f"NaN frames in train_data_i: {nan_mask.sum().item()}/{len(nan_mask)}")
             if self.val_data_x is not None:
                 self.val_data_i, self.val_logdet_xi = self.coordinate_transform.inverse(
                     self.val_data_x.reshape(-1, self.cartesian_dim)
                 )
+                nan_mask = torch.isnan(self.val_data_i).any(dim=-1)
+                print(f"NaN frames in val_data_i:   {nan_mask.sum().item()}/{len(nan_mask)}")
             if self.test_data_x is not None:
                 self.test_data_i, self.test_logdet_xi = self.coordinate_transform.inverse(
                     self.test_data_x.reshape(-1, self.cartesian_dim)
                 )
+                nan_mask = torch.isnan(self.test_data_i).any(dim=-1)
+                print(f"NaN frames in test_data_i:  {nan_mask.sum().item()}/{len(nan_mask)}")
 
         # Target distribution wrapper
         if n_threads > 1:
