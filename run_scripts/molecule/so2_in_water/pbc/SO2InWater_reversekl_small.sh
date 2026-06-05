@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=01:40:00
+#SBATCH --time=00:30:00
 
 module purge
 module load 2025
@@ -68,30 +68,40 @@ export MAIN_DIR="${MAIN_DIR}"
 
 nvidia-smi
 
-# We are essentially just using the loss_type and use_ais arguments when doing forward KL training.
+# We are essentially just using the loss_type and use_ais arguments when doing reverse KL training.
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
-  target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf\\
-  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=4 flow.tail_bound=3\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
-  training.max_grad_norm=1 training.warmup_iter=1000 \\
+  target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf \\
+  flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3 \\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-05/13-19-21_272406 \\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=256 evaluation.eval_batch_size=64 \\
+  training.max_grad_norm=1 training.warmup_iter=100\\
   target.transform.canonical_sorting=true target.transform.version=LGT\\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full \\
-  training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
-  evaluation.n_eval=20 evaluation.n_plots=20 evaluation.n_checkpoints=1 
+  training.overlap_penalty=0 training.mixing=0.5 training.energy_mode=full\\
+  training.n_iterations=500 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=500 \\
+  evaluation.n_eval=5 evaluation.n_plots=5 evaluation.n_checkpoints=1
 EOF
+
+
 
 chmod +x "${SLURM}"
 
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
-# training.n_pretraining=100
-# flow.type=coupled-spline-nf
-# 
+
+# PRE100 FIXED
+# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-24/13-26-08_780710
+
+# PRE100 STRUCGAUSS FIXED
+# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-24/14-12-00_838705 \\
+ # PRE100 STRUCGAUSS
+#  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-23/10-54-21_712292 \\
+# PRE100 
+  # training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-23/10-54-21_712292 \\
