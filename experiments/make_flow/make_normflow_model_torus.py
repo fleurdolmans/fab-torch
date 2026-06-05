@@ -5,8 +5,6 @@ import normflows as nf
 from fab.flow import (
     PermEquiWaterSplineCoupling,
     SoluteWaterSplineCoupling,
-    PermuteFixed,
-    water_block_permutation,
 )
 from fab.wrappers.normflows import WrappedNormFlowModel
 from experiments.make_base.base import make_structured_diag_gaussian_from_target
@@ -68,7 +66,10 @@ def make_perm_equi_torus_flow_nf(cfg, target):
       - SoluteWaterSplineCoupling(n_prefix=6)  (linear RQS on solute, conditioned on water mean-pool)
       - PermEquiWaterSplineCoupling(transform_oxygen=True,  oxygen_circular=True)
       - PermEquiWaterSplineCoupling(transform_oxygen=False, oxygen_circular=True)
-      - PermuteFixed  (random fixed permutation)
+
+    No inter-layer permutation mixing (PermuteFixed removed) — the mean-pool conditioning
+    in PermEquiWaterSplineCoupling provides global information propagation while
+    preserving exact permutation equivariance of the full flow.
 
     Base distribution:
       UniformGaussian with ind_circ = tau indices  (Uniform[-pi,pi) on tau, N(0,1) on omega)
@@ -116,12 +117,6 @@ def make_perm_equi_torus_flow_nf(cfg, target):
         flows.append(PermEquiWaterSplineCoupling(transform_oxygen=True, **coupling_kwargs))
         # transform omega (linear) conditioned on tau
         flows.append(PermEquiWaterSplineCoupling(transform_oxygen=False, **coupling_kwargs))
-
-        # fixed permutation over water blocks for mixing
-        perm = water_block_permutation(
-            dim, solute_dim, block_size=6, seed=k
-        )
-        flows.append(PermuteFixed(perm))
 
         if getattr(cfg.flow, "actnorm", False):
             flows.append(nf.flows.ActNorm(dim))
@@ -199,7 +194,9 @@ def make_perm_equi_sfic_torus_flow_nf(cfg, target):
         mean-pooled water context
       - PermEquiWaterSplineCoupling(oxygen_circular=True): circular RQS on tau,
         linear RQS on omega
-      - PermuteFixed: water block permutation
+
+    No inter-layer permutation mixing — mean-pool conditioning provides global
+    information propagation while preserving exact permutation equivariance.
 
     Base: UniformGaussian with ind_circ = tau indices.
 
@@ -240,9 +237,6 @@ def make_perm_equi_sfic_torus_flow_nf(cfg, target):
         )
         flows.append(PermEquiWaterSplineCoupling(transform_oxygen=True, **coupling_kwargs))
         flows.append(PermEquiWaterSplineCoupling(transform_oxygen=False, **coupling_kwargs))
-
-        perm = water_block_permutation(dim, solute_dim, block_size=6, seed=k)
-        flows.append(PermuteFixed(perm))
 
         if getattr(cfg.flow, "actnorm", False):
             flows.append(nf.flows.ActNorm(dim))

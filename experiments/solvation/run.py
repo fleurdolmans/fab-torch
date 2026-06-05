@@ -777,7 +777,7 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
             return figs  # or continue to next plot section
         e_lo, e_hi = np.percentile(md_U_kJ_finite, [0.5, 99.5])
         fl_U_kJ_finite = fl_U_kJ[np.isfinite(fl_U_kJ)]
-        plt.hist(md_U_kJ, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(md_U_kJ_finite, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="MD")
         if len(fl_U_kJ_finite) > 0:
             plt.hist(fl_U_kJ_finite, bins=nbins, range=(e_lo, e_hi), density=True, alpha=0.4, label="Flow")
         plt.xlabel("Potential energy (kJ/mol)")
@@ -786,9 +786,9 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.legend()
 
         plt.subplot(2, 2, 3)
-        all_U_finite = np.concatenate([md_U_kJ, fl_U_kJ_finite]) if len(fl_U_kJ_finite) > 0 else md_U_kJ
+        all_U_finite = np.concatenate([md_U_kJ_finite, fl_U_kJ_finite]) if len(fl_U_kJ_finite) > 0 else md_U_kJ_finite
         e2_lo, e2_hi = np.percentile(all_U_finite, [0.1, 99.9])
-        plt.hist(md_U_kJ, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="MD")
+        plt.hist(md_U_kJ_finite, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="MD")
         if len(fl_U_kJ_finite) > 0:
             plt.hist(fl_U_kJ_finite, bins=nbins, range=(e2_lo, e2_hi), density=True, alpha=0.4, label="Flow")
         plt.xlabel("Potential energy (kJ/mol)")
