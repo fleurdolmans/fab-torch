@@ -78,14 +78,22 @@ class Trainer:
         else:
             figures = self.plot(self.model)
 
-        for j, figure in enumerate(figures):
-            if save:
-                if isinstance(self.logger, WandbLogger):
-                    self.logger.write({f"it{i}_fig{j}": wandb.Image(figure), "iteration": i})
-                else:
-                    figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
+        if save:
+            if isinstance(self.logger, WandbLogger):
+                # Use fixed keys (no iteration in name) so wandb keeps all epochs
+                # in the same panel and shows a step slider.
+                # Log all figures in one write call to avoid spurious step increments.
+                log_dict = {f"fig_{j}": wandb.Image(figure) for j, figure in enumerate(figures)}
+                log_dict["iteration"] = i
+                self.logger.write(log_dict)
             else:
+                for j, figure in enumerate(figures):
+                    figure.savefig(os.path.join(self.plots_dir, f"{j}_iter_{i}.png"))
+        else:
+            for figure in figures:
                 plt.show()
+
+        for figure in figures:
             plt.close(figure)
 
     def perform_eval(self, i, eval_batch_size, batch_size):
@@ -352,9 +360,10 @@ class Trainer:
 
 
             # -------------------------------------------------
-            # Overlap penalty on flow samples
+            # Overlap penalty on flow samples (forward KL only)
+            # For energy-based losses the penalty is baked into log_p.
             # -------------------------------------------------
-            if overlap_w > 0.0:
+            if overlap_w > 0.0 and self.model.loss_type == "forward_kl":
                 B_rev = batch_size
                 z, log_q = self.model.flow.sample_and_log_prob((B_rev,))
 

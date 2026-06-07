@@ -11,6 +11,7 @@ except ImportError:
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch import Tensor
 import openmm as mm
@@ -341,7 +342,8 @@ class SoluteInWater(nn.Module, TargetDistribution):
         curriculum_lambda: float = 1.0,
         curriculum_soft_energy_cut: float = 1.0,
         max_n_train_samples: Optional[int] = None,
-        canonical_sorting: bool = False 
+        canonical_sorting: bool = False,
+        overlap_penalty_weight: float = 0.0,
     ):
         super(SoluteInWater, self).__init__()
 
@@ -365,6 +367,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         self.curriculum_soft_energy_cut = curriculum_soft_energy_cut
         self.max_n_train_samples = max_n_train_samples
         self.canonical_sorting = canonical_sorting
+        self.overlap_penalty_weight = overlap_penalty_weight
 
         if self.energy_mode == "full":
             force_groups = None
@@ -580,8 +583,74 @@ class SoluteInWater(nn.Module, TargetDistribution):
 
         return target_data
 
+    # ------------------------------------------------------------------
+    # Overlap penalty helpers (per-sample, returns (B,))
+    # ------------------------------------------------------------------
+    def _mic(self, dx: torch.Tensor) -> torch.Tensor:
+        L = torch.as_tensor(self.box_length_nm, device=dx.device, dtype=dx.dtype)
+        return dx - L * torch.round(dx / L)
+
+    def _oo_clash_pen(
+        self,
+        x_flat: torch.Tensor,
+        r0: float = 0.24,
+        k: float = 200.0,
+        chunk: int = 64,
+    ) -> torch.Tensor:
+        """O-O clash penalty. Returns (B,) per-sample sum."""
+        B = x_flat.shape[0]
+        X = x_flat.view(B, -1, 3)
+        n_w = self.num_solvent_molecules
+        n_solute = 3
+        O = torch.stack([X[:, n_solute + 3 * w, :] for w in range(n_w)], dim=1)  # (B,W,3)
+        r0_t = torch.as_tensor(r0, device=x_flat.device, dtype=x_flat.dtype)
+        pen = torch.zeros(B, device=x_flat.device, dtype=x_flat.dtype)
+        for i0 in range(0, n_w, chunk):
+            i1 = min(n_w, i0 + chunk)
+            ci = i1 - i0
+            Oi = O[:, i0:i1, :]                                        # (B,ci,3)
+            dx = self._mic(Oi[:, :, None, :] - O[:, None, :, :])      # (B,ci,W,3)
+            d  = torch.linalg.norm(dx, dim=-1)                         # (B,ci,W)
+            rows = torch.arange(ci, device=x_flat.device)
+            mask = torch.zeros(ci, n_w, device=x_flat.device, dtype=torch.bool)
+            mask[rows, rows + i0] = True
+            d = d.masked_fill(mask.unsqueeze(0), 1e9)
+            pen = pen + (F.softplus(k * (r0_t - d)) / k).sum(dim=(1, 2))
+        return pen  # (B,)
+
+    def _sw_clash_pen(
+        self,
+        x_flat: torch.Tensor,
+        r0_SO: float = 0.25,
+        r0_OO: float = 0.20,
+        k: float = 100.0,
+    ) -> torch.Tensor:
+        """Solute-water clash penalty. Returns (B,) per-sample sum."""
+        B = x_flat.shape[0]
+        X = x_flat.view(B, -1, 3)
+        n_solute = 3
+        n_w = self.num_solvent_molecules
+        S    = X[:, 0:1, :]                                            # (B,1,3)  sulfur
+        Os   = X[:, 1:3, :]                                            # (B,2,3)  solute oxygens
+        O_w  = torch.stack([X[:, n_solute + 3*w, :] for w in range(n_w)], dim=1)  # (B,W,3)
+
+        def _pair(A, B_at, r0):
+            dx = self._mic(A[:, :, None, :] - B_at[:, None, :, :])
+            d  = torch.linalg.norm(dx, dim=-1)
+            r0_t = torch.as_tensor(r0, device=x_flat.device, dtype=x_flat.dtype)
+            return (F.softplus(k * (r0_t - d)) / k).sum(dim=(1, 2))   # (B,)
+
+        return _pair(S, O_w, r0_SO) + _pair(Os, O_w, r0_OO)           # (B,)
+
+    # ------------------------------------------------------------------
+
     def log_prob(self, i: Tensor):
-        return self.p.log_prob(i)  # I --> X, then unnormalised logprob.
+        log_p = self.p.log_prob(i)  # I --> X, then unnormalised logprob.
+        if self.overlap_penalty_weight > 0.0:
+            x, _ = self.coordinate_transform.forward(i)               # (B, 3N)
+            pen  = self._oo_clash_pen(x) + self._sw_clash_pen(x)      # (B,)
+            return log_p - self.overlap_penalty_weight * pen
+        return log_p
 
     def log_prob_and_jac(self, i: Tensor):
         return self.p.log_prob_and_jac(i)  # I --> X, then unnormalised logprob and Jacobian.

@@ -924,6 +924,74 @@ def setup_triatomic_in_h2o_plotter(cfg: DictConfig, target: SoluteInWater, buffe
         plt.tight_layout()
         figs.append(fig)
 
+        # ------------------------------------------------------------------
+        # 2-D water-O position density relative to solute S (blobbing check)
+        # ------------------------------------------------------------------
+        n_plot_md = min(mdXp.shape[0], 2000)
+        n_plot_fl = min(flowXp.shape[0], 2000)
+        mdXp_plot  = mdXp[:n_plot_md].reshape(n_plot_md, -1, 3)
+        flowXp_plot = flowXp[:n_plot_fl].reshape(n_plot_fl, -1, 3)
+
+        O_idx_list = [n_solute + 3 * w for w in range(n_waters)]
+
+        md_S_pos = mdXp_plot[:, 0, :]   # (B, 3)  solute atom 0
+        fl_S_pos = flowXp_plot[:, 0, :]
+
+        md_O_rel = mic(mdXp_plot[:, O_idx_list, :] - md_S_pos[:, None, :], L)   # (B, W, 3)
+        fl_O_rel = mic(flowXp_plot[:, O_idx_list, :] - fl_S_pos[:, None, :], L)
+
+        md_O_rel_np = md_O_rel.reshape(-1, 3).detach().cpu().numpy()
+        fl_O_rel_np = fl_O_rel.reshape(-1, 3).detach().cpu().numpy()
+
+        half_L = 0.5 * L
+        nbins_2d = 50
+        xy_range_2d = [[-half_L, half_L], [-half_L, half_L]]
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        for ax_2d, rel_np, cmap, label in [
+            (axes[0], md_O_rel_np,  "Blues",   "MD"),
+            (axes[1], fl_O_rel_np, "Oranges", "Flow"),
+        ]:
+            h, _, _ = np.histogram2d(rel_np[:, 0], rel_np[:, 1], bins=nbins_2d, range=xy_range_2d)
+            im = ax_2d.imshow(
+                h.T, origin="lower", cmap=cmap, aspect="auto",
+                extent=[xy_range_2d[0][0], xy_range_2d[0][1], xy_range_2d[1][0], xy_range_2d[1][1]],
+            )
+            ax_2d.set_xlabel("Δx (nm)")
+            ax_2d.set_ylabel("Δy (nm)")
+            ax_2d.set_title(f"{label}: water-O density rel. to solute S (x-y plane)")
+            plt.colorbar(im, ax=ax_2d, label="count")
+        plt.suptitle("2D water-O position density — blobbing check")
+        plt.tight_layout()
+        figs.append(fig)
+
+        # ------------------------------------------------------------------
+        # Solute–solvent distance distribution (S to each water O)
+        # ------------------------------------------------------------------
+        md_SO_dists = np.concatenate([
+            dist_pbc(mdXp_plot[:, n_solute + 3 * w, :], md_S_pos, L).detach().cpu().numpy()
+            for w in range(n_waters)
+        ])
+        fl_SO_dists = np.concatenate([
+            dist_pbc(flowXp_plot[:, n_solute + 3 * w, :], fl_S_pos, L).detach().cpu().numpy()
+            for w in range(n_waters)
+        ])
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        nbins_r = 60
+        ax.hist(md_SO_dists, bins=nbins_r, range=(0.0, half_L), density=True, alpha=0.5,
+                label=f"MD   (mean={md_SO_dists.mean():.3f} nm)")
+        ax.hist(fl_SO_dists, bins=nbins_r, range=(0.0, half_L), density=True, alpha=0.5,
+                label=f"Flow (mean={fl_SO_dists.mean():.3f} nm)")
+        ax.axvline(md_SO_dists.mean(), linestyle="--", linewidth=1.5, alpha=0.8)
+        ax.axvline(fl_SO_dists.mean(), linestyle="--", linewidth=1.5, alpha=0.8)
+        ax.set_xlabel("S–O$_{water}$ distance (nm)")
+        ax.set_ylabel("density")
+        ax.set_title("Solute–solvent distance distribution (S to water oxygens)")
+        ax.legend()
+        plt.tight_layout()
+        figs.append(fig)
+
         return figs
     def plot(fab_model: FABModel, plot_dict: dict) -> List[plt.Figure]:
         # return plot_droplet(fab_model, plot_dict)
@@ -1063,7 +1131,7 @@ def _run(cfg: DictConfig) -> None:
             curriculum_soft_energy_cut=cfg.target.curriculum_soft_energy_cut,
             max_n_train_samples=cfg.target.max_n_train_samples,
             canonical_sorting=cfg.target.transform.canonical_sorting,
-            
+            overlap_penalty_weight=cfg.training.overlap_penalty,
         )
     else:
         raise NotImplementedError("Solute/solvent combination not implemented.")
