@@ -77,14 +77,13 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf\\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=4 flow.tail_bound=3\\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-05/13-19-21_272406 \\
   training.lr=1e-5 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=1 training.warmup_iter=500 \\
-  target.transform.canonical_sorting=true target.transform.version=LGT\\
+  target.transform.canonical_sorting=true target.transform.version=GPR\\
   training.overlap_penalty=50.0 training.mixing=0.0 training.energy_mode=full \\
-  training.n_iterations=5000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=5000\\
+  training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
   evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1 
 EOF
 

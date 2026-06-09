@@ -14,7 +14,7 @@ solute_xml_path: ${node.data_dir}/molecules/solutes/${solute_name}.xml          
 
 solute_inpcrd_path: null                                                          # Filepath to solvent inpcrd; currently unused.
 solute_prmtop_path: null                                                          # Filepath to solvent prmtop; currently unused.
-simulation_version: v1                                                            # Version name for the simulation; used in output filenames.
+simulation_version: n5                                                            # Version name for the simulation; used in output filenames.
 out_dir: ${node.data_dir}/molecules/md/${solute_name}/${boundary_condition}/${simulation_version}/      # Where to store resulting MD frames.
 diagnostics_filename: run_statistics.txt                                       # Where to store MD diagnostics plots.
 

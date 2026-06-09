@@ -74,10 +74,10 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v2\\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=5 \\
-  target.internal_constraints=hbonds target.rigid_water=true \\
+  target.internal_constraints=none target.rigid_water=false \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=droplet fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss-uni flow.base.learn_mean_var=false flow.type=circ-coup-nsf\\
+  flow.hidden_units=128 flow.base.type=gauss-uni flow.base.learn_mean_var=false flow.type=GPS\\
   training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-02/00-04-26_737012 \\
   flow.blocks=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
   training.lr=5e-5 training.wd=1e-6 training.batch_size=502 evaluation.eval_batch_size=128\\

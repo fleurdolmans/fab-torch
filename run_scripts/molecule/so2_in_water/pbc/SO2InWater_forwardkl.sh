@@ -80,10 +80,10 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   flow.hidden_units=128 flow.base.type=structured-gauss flow.base.learn_mean_var=true flow.type=shared-water-spline-nf\\
   flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=4\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=32 evaluation.eval_batch_size=32\\
-  training.max_grad_norm=1 training.warmup_iter=750 \\
-  training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full target.transform.version=SFIC\\
-  training.n_iterations=3000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=3000\\
-  evaluation.n_eval=15 evaluation.n_plots=15 evaluation.n_checkpoints=1 
+  training.max_grad_norm=10 training.warmup_iter=500 \\
+  training.overlap_penalty=100 training.mixing=0.0 training.energy_mode=full target.transform.version=SFIC-T\\
+  training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
+  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1 
 EOF
 
 chmod +x "${SLURM}"
