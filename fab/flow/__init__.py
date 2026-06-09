@@ -4,5 +4,6 @@ from fab.flow.water_coupling import (
     JointSoluteWaterFlowLayer,
     PermEquiWaterSplineCoupling,
     PermEquiWaterSplineCouplingPairwiseO,
+    PermEquiWater9DSplineCoupling,
     SharedWaterBlockSplineCoupling,
 )

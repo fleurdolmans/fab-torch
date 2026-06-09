@@ -21,10 +21,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
     and differentiable.
     """
 
-    def __init__(self, system=None, transform_data=None):
+    def __init__(self, system=None, transform_data=None, use_pbc: bool = False, L: float = None):
         """
         Constructor
         :param transform_data: Data used to set up coordinate scale for r. Must be a single frame of shape (1, ).
+        :param use_pbc: If True, apply Minimum Image Convention (MIC) and make-whole before rotating into
+            the global coordinate system.  Enables GPS for periodic (PBC) systems.
+        :param L: Box side length (nm).  Required when use_pbc=True.  Assumed cubic box.
         """
         super().__init__()
         if system is not None:
@@ -36,7 +39,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
 
         self.n_atoms = transform_data.shape[1] // 3
         self.n_solute = 3
-        self.n_atoms_per_mol = 3   
+        self.n_atoms_per_mol = 3
+        self.n_waters = (self.n_atoms - self.n_solute) // self.n_atoms_per_mol
+
+        self.use_pbc = use_pbc
+        if use_pbc and L is None:
+            raise ValueError("L (box side length) must be provided when use_pbc=True.")
+        self.L = L
 
         self._stats = {
             "seam_x": 0,
@@ -64,6 +73,13 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         self.reset_stats()
         return out
     
+    def mic(self, dx: torch.Tensor) -> torch.Tensor:
+        """
+        Minimum Image Convention: wrap displacements to (-L/2, L/2) for a cubic box of side L.
+        |det J| = 1 (piecewise translation), so this does not affect the Jacobian.
+        """
+        return dx - self.L * torch.round(dx / self.L)
+
     def _begin_stats(self, B: int):
         self._stats["calls"] += 1
         self._stats["B"] += int(B)
@@ -479,7 +495,23 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         :param x: Cartesian coordinates: n_batch x n_atoms x 3
         :return: Internal coordinates: n_batch x n_atoms x 3, and log det Jacobian of the initial transformation.
         """
-        x_centered = x - x[:, 0:1, :]  # Center x around the solute oxygen, which now has coordinates [0, 0, 0].
+        if self.use_pbc:
+            # Center on solute atom 0 and apply MIC to bring all atoms to the nearest image.
+            # |det J| = 1 for these operations (piecewise translations), Jacobian unchanged.
+            x_centered = self.mic(x - x[:, 0:1, :])
+            # Make each water molecule whole: ensure H atoms are the nearest image of their O atom.
+            x_centered = x_centered.clone()  # avoid in-place autograd issues
+            for k in range(self.n_waters):
+                base = self.n_solute + 3 * k  # index of O atom for water k
+                O = x_centered[:, base:base + 1, :]
+                x_centered[:, base + 1:base + 2, :] = O + self.mic(
+                    x_centered[:, base + 1:base + 2, :] - O
+                )
+                x_centered[:, base + 2:base + 3, :] = O + self.mic(
+                    x_centered[:, base + 2:base + 3, :] - O
+                )
+        else:
+            x_centered = x - x[:, 0:1, :]  # Center x around the solute oxygen, which now has coordinates [0, 0, 0].
 
         solute_atom0 = x_centered[:, 0, :]  # e.g., oxygen atom: n_batch x 3 at [0, 0, 0], defines r.
         solute_atom1 = x_centered[:, 1, :]  # e.g., first hydrogen; will become [r, 0, 0], defines phi.

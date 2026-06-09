@@ -20,4 +20,8 @@ from experiments.make_flow.make_normflow_model_LJ import (
     make_lj_flow,
 )
 
+from experiments.make_flow.make_normflow_model_gps import (
+    make_perm_equi_gps_flow_nf,
+)
+
 # from experiments.make_flow.make_aldp_model import make_aldp_model

@@ -132,7 +132,7 @@ class PrioritisedBufferTrainer:
 
     def save_checkpoint(self, i):
         checkpoint_path = os.path.join(self.checkpoints_dir, f"iter_{i}/")
-        pathlib.Path(checkpoint_path).mkdir(exist_ok=False)
+        pathlib.Path(checkpoint_path).mkdir(exist_ok=True)
         self.model.save(os.path.join(checkpoint_path, "model.pt"))
         torch.save(self.optimizer.state_dict(), os.path.join(checkpoint_path, "optimizer.pt"))
         self.buffer.save(os.path.join(checkpoint_path, "buffer.pt"))
