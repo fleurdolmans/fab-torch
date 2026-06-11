@@ -1,18 +1,22 @@
 # Boltzmann Generators for Solute-Solvent Systems
 
-This codebase trains Boltzmann Generators (normalising flows) to sample from the Boltzmann distribution of solute-solvent systems. It is built on top of [FAB-torch](https://github.com/lollcat/fab-torch) (Flow Annealed importance sampling Bootstrap), which provides the core FAB training infrastructure.
+This codebase trains Boltzmann Generators (normalising flows) to sample from the Boltzmann distribution of solute-solvent systems. This folder consists of two codebases: 3Dis built on top of [FAB-torch](https://github.com/lollcat/fab-torch) (Flow Annealed importance sampling Bootstrap) and 2D is built on top of [BG LJ Dimer](https://github.com/weitse-hsu/boltzmann_generators/tree/master).
 
 ---
 
 ## Supported systems
 
-Three types of solute-solvent system are implemented:
+Three types of solute-solvent system are implemented: two in the 3D folder and one in the 2D folder. For 3D systems we use OpenMM to generated MD data, whereas for 2D we use Monte Carlo to sample MC data. 
 
+
+### PBC
 | System | Target class | Run script | Config |
 |---|---|---|---|
 | Triatomic solute (e.g. H2O, SO2) in explicit water | `SoluteInWater` | `experiments/solvation/run.py` | `experiments/solvation/config/SoluteInSolvent.yaml` |
 | LJ solute(s) + LJ solvent in 3D periodic box | `LJParticles` | `experiments/solvation/run_LJ.py` | `experiments/solvation/config/LJ.yaml` |
-| LJ solute + LJ solvent in 2D periodic box | `LJParticles2D` | `experiments/solvation/run_LJ_2D.py` | *(derived from `LJ.yaml`)* |
+
+### Non-PBC
+| LJ solute + LJ solvent in 2D non-periodic box | `LJParticles2D` | `experiments/solvation/run_LJ_2D.py` | *(derived from `LJ.yaml`)* |
 
 ---
 
