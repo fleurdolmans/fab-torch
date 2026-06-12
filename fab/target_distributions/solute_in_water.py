@@ -466,15 +466,15 @@ class SoluteInWater(nn.Module, TargetDistribution):
         elif self.transform_version == "GPR":
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
             self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, system=self.system, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
-        elif self.transform_version == "SFIC":
-            self.internal_dim = 3 + 6 * self.num_solvent_molecules
-            self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
         elif self.transform_version == "LGT":
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
             self.coordinate_transform = LabFrameGeometricTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
-        elif self.transform_version == "SFIC-T":
-            self.internal_dim = 3 + 6 * self.num_solvent_molecules
-            self.coordinate_transform = SFICTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
+        # elif self.transform_version == "SFIC":
+        #     self.internal_dim = 3 + 6 * self.num_solvent_molecules
+        #     self.coordinate_transform = SFICTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim)
+        # elif self.transform_version == "SFIC-T":
+        #     self.internal_dim = 3 + 6 * self.num_solvent_molecules
+        #     self.coordinate_transform = SFICTorusTransform(self.box_length_nm, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)
            
              
         else:

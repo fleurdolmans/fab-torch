@@ -434,7 +434,7 @@ class Trainer:
                 }
             )
 
-            if overlap_w > 0.0:
+            if overlap_w > 0.0 and self.model.loss_type == "forward_kl":
                 info["oo_pen"] = oo_pen.detach().cpu().item()
                 info["sw_pen"] = sw_pen.detach().cpu().item()
 

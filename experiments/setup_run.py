@@ -33,6 +33,7 @@ from experiments.make_flow import (
     make_perm_equi_torus_flow_nf,
     make_circ_rqs_torus_flow_nf,
     make_perm_equi_sfic_torus_flow_nf,
+    make_perm_equi_gps_flow_nf
 )
 
 Plotter = Callable[[FABModel], List[plt.Figure]]
@@ -219,6 +220,8 @@ def setup_model(cfg: DictConfig, target: TargetDistribution) -> FABModel:
         flow = make_circ_rqs_torus_flow_nf(cfg, target)
     elif cfg.flow.type == "perm-equi-sfic-torus-nf":
         flow = make_perm_equi_sfic_torus_flow_nf(cfg, target)
+    elif cfg.flow.type == "perm-equi-gps-nf":
+        flow = make_perm_equi_gps_flow_nf(cfg, target)
     else:
         raise NotImplementedError(f"Flow type {cfg.flow.type} not implemented.")
     # elif cfg.flow.type == "circ-coup-nsf":

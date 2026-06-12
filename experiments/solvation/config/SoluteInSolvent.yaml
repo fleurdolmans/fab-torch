@@ -164,7 +164,7 @@ evaluation:
 
 logger:
   wandb:
-    name: ${target.boundary_condition}_${target.simulation_version}_${fab.loss_type}_dim${target.cartesian_dim}_cr${target.constraint_radius}_bl${flow.blocks}p${flow.blocks_per_layer}_hd${flow.hidden_units}_bi${flow.num_bins}
+    name: ${target.boundary_condition}_${target.transform.version}_overlap${training.overlap_penalty}_lr${training.lr}
     project: ${target.boundary_condition}_${fab.loss_type}_${target.solute_name}_in_${target.solvent_name}
     entity: ${user.wandb.entity}
 #  pandas_logger:
