@@ -460,7 +460,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
         if self.transform_version is None:
             self.internal_dim = self.cartesian_dim
             self.coordinate_transform = None
-        elif self.transform_version == "GPT":
+        elif self.transform_version == "GPS":
             self.internal_dim = self.cartesian_dim - 6
             self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
         elif self.transform_version == "GPR":
@@ -478,7 +478,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
            
              
         else:
-            raise ValueError(f"Invalid transform_version: {self.transform_version}. Must be one of 'None', 'GPT', 'GPR', 'SFIC', 'LGT', 'LCT', or 'SFIC-T'.")
+            raise ValueError(f"Invalid transform_version: {self.transform_version}. Must be one of 'None', 'GPS', 'GPR', 'SFIC', 'LGT', 'LCT', or 'SFIC-T'.")
         
         print(f"Internal dim: {self.internal_dim}")
         # Transform MD data to internal coordinates (X --> I): coordinates fed into the flow.
