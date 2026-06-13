@@ -333,15 +333,21 @@ def run_initial_flow_sanity_test(fab_model, target, batch_size: int = 8):
       6. sample stats
 
     Assumes internal layout:
-      [solute(6) | water_1(6) | ... | water_W(6)]
+      [solute | water_1 | ... | water_W]
+
+    Water block size is inferred from target.transform_version:
+      GPS              -> 9 dims/water (O + H1 + H2, each 3 spherical coords)
+      GPR, LGT, other -> 6 dims/water (rigid-body / rotvec representation)
     """
     print("\n=== INITIAL FLOW SANITY TEST ===")
 
     flow = fab_model.flow
     n_waters = target.num_solvent_molecules
-    # Droplet: 9 dims/water (3 atoms × 3 spherical); PBC: 6 dims/water (rigid-body)
-    water_block_dim = 9 if getattr(target, 'boundary_condition', 'pbc') == 'droplet' else 6
+    # GPS uses 9 dims/water (3 atoms × 3 spherical); GPR/LGT use 6 dims/water (rigid-body)
+    transform_version = getattr(target, 'transform_version', None)
+    water_block_dim = 9 if transform_version == 'GPS' else 6
     solute_dim = target.internal_dim - n_waters * water_block_dim
+    print(f"[SANITY] transform_version={transform_version!r}  water_block_dim={water_block_dim}  solute_dim={solute_dim}")
 
 
     def permute_water_blocks(i, perm):
