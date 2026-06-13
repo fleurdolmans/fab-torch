@@ -92,7 +92,6 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # For water-in-water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms after transforming to Cartesian.
-        # TODO: Check this for SO2. S should be the first atom.
         # Transform I --> X. Return x and log det Jacobian.
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(z.device)
@@ -106,7 +105,6 @@ class Global3PointSphericalTransform(nf.flows.Flow):
         # For water-in-water atom types (e.g. OpenMM indices) matches Flow types (OHH OHH OHH etc). But maybe
         #  not in general for other systems. `z_to_cartesian` assumes OHH order, so this is what the Flow should use.
         #  If this is not the order OpenMM expects, then we should reorder the atoms before transforming to I.
-        # TODO: Check this for SO2. S should be the first atom.
         # Transform X --> I. Return z and log det Jacobian.
         # Sometimes on cpu and sometimes on gpu, so we need to make sure the scales are on the right device.
         self.scale_r = self.scale_r.to(x.device)

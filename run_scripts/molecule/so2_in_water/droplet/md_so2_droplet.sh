@@ -43,6 +43,8 @@ export MAIN_DIR="${MAIN_DIR}"
 srun python "${MAIN_DIR}/data_generation/md_data.py" \
   --config-name make_md_data \
   solute_name=so2 \
-  simulation_version="v2" \
-  num_solvent_molecules=5 \
-  constraint_radius=0.3 
+  simulation_version="n50-rigid" \
+  num_solvent_molecules=50 \
+  constraint_radius=0.8 \
+  internal_constraints="hbonds" \
+  rigid_water=true \

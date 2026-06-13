@@ -557,10 +557,9 @@ def evaluate_models(
             gs  = res[g_std_key]
             c   = _rdf_colors[i % len(_rdf_colors)]
             ax.plot(r, g, lw=2, color=c,
-                    label=f"{lbl}  (mean, {n_repeats} runs)")
+                    label=f"{lbl}")
 
-            ax.fill_between(r, np.maximum(g - gs, 0), g + gs, color=c, alpha=0.15,
-                            label=f"{lbl}  ± 1 std")
+            ax.fill_between(r, np.maximum(g - gs, 0), g + gs, color=c, alpha=0.15)
 
         ax.axhline(1.0, color="k", ls="--", lw=0.8, label="Ideal gas")
         ax.set_xlabel("r  (nm)", fontsize=12)
