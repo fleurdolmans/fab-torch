@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_so2_water
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -75,17 +75,16 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e10 target.energy_max=1e16 \\
+  target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-gps-nf\\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=4 flow.tail_bound=3\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=1 training.warmup_iter=500 \\
-  training.checkpoint_load_dir=/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-12/10-22-50_708369 \\
-  target.transform.canonical_sorting=true target.transform.version=GPR\\
+  target.transform.canonical_sorting=true target.transform.version=GPS\\
   training.overlap_penalty=50.0 training.mixing=0.0 training.energy_mode=full \\
   training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1 
+  evaluation.n_eval=10 evaluation.n_plots=5 evaluation.n_checkpoints=1 
 EOF
 
 chmod +x "${SLURM}"
@@ -95,4 +94,4 @@ echo "Submitting GPU job: ${SLURM}"
 sbatch ${SLURM}
 # training.n_pretraining=100
 # flow.type=coupled-spline-nf
-# 
+#   training.checkpoint_load_dir=/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-12/10-22-50_708369 \\

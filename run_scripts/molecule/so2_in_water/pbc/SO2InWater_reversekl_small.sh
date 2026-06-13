@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_so2_water
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -75,14 +75,14 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e16 \\
+  target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf \\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf \\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3 \\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-05/13-19-21_272406 \\
+  training.checkpoint_load_dir=/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-12/10-22-50_708369 \\
   training.lr=1e-5 training.wd=1e-6 training.batch_size=256 evaluation.eval_batch_size=64 \\
   training.max_grad_norm=1 training.warmup_iter=500\\
-  target.transform.canonical_sorting=true target.transform.version=LGT\\
+  target.transform.canonical_sorting=true target.transform.version=GPR\\
   training.overlap_penalty=50 training.mixing=0.2 training.energy_mode=full\\
   training.n_iterations=2000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=2000 \\
   evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1

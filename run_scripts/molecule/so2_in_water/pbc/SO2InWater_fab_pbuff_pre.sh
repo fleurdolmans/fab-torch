@@ -71,13 +71,13 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e9 target.curriculum_type=temperature target.curriculum_lambda=0.6\\
+  target.energy_cut=1e10 target.energy_max=1e16 target.curriculum_type=temperature target.curriculum_lambda=0.6\\
   target.boundary_condition=pbc fab.loss_type=fab_alpha_div fab.use_ais=true \\
   flow.hidden_units=128 flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
   flow.base.type=gauss flow.base.learn_mean_var=false flow.type=coupled-spline-nf\\
   fab.n_intermediate_distributions=32 fab.transition_operator.n_inner_steps=6 fab.transition_operator.init_step_size=0.01 \\
   training.energy_mode=full target.transform_version=v1\\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-26/22-09-34_024604 \\
+  training.checkpoint_load_dir=/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-12/10-22-50_708369 \\ \\
   training.lr=5e-5 training.wd=1e-6 training.batch_size=128 evaluation.eval_batch_size=128\\
   training.buffer.maximum_length=32768 training.buffer.min_length=4096 \\
   training.max_grad_norm=10 training.buffer.n_batches_sampling=4 training.buffer.w_adjust_max_clip=1\\
