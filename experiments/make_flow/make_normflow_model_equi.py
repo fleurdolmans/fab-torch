@@ -11,10 +11,7 @@ from fab.flow import (
     water_block_permutation,
 )
 from fab.wrappers.normflows import WrappedNormFlowModel
-from experiments.make_base.base import (
-    make_structured_solute_water_gaussian_from_target,
-    make_structured_diag_gaussian_from_target,
-)
+from experiments.make_base.base import make_structured_diag_gaussian_from_target
 
 
 def make_perm_equi_joint_spline_flow_nf(cfg, target):
@@ -63,12 +60,8 @@ def make_perm_equi_joint_spline_flow_nf(cfg, target):
 
     if cfg.flow.base.type == "gauss":
         base = nf.distributions.DiagGaussian(dim, trainable=cfg.flow.base.learn_mean_var)
-    elif cfg.flow.base.type == "structured-solute-gauss":
-        base = make_structured_solute_water_gaussian_from_target(
-            target, trainable=cfg.flow.base.learn_mean_var
-        )
     else:
-        raise NotImplementedError("Supported base types: 'gauss', 'structured-solute-gauss'.")
+        raise NotImplementedError("Supported base types: 'gauss'.")
 
     flow = nf.NormalizingFlow(base, flows)
     return WrappedNormFlowModel(flow)
@@ -111,11 +104,6 @@ def make_perm_equi_spline_flow_nf(cfg, target):
         base = make_structured_diag_gaussian_from_target(
             target,
             learn_mean_var=cfg.flow.base.learn_mean_var,
-        )
-    elif cfg.flow.base.type == "structured-solute-gauss":
-        base = make_structured_solute_water_gaussian_from_target(
-            target,
-            trainable=cfg.flow.base.learn_mean_var,
         )
     else:
         raise NotImplementedError("Supported base types: 'gauss', 'structured-gauss'.")
