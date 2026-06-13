@@ -462,7 +462,7 @@ class SoluteInWater(nn.Module, TargetDistribution):
             self.coordinate_transform = None
         elif self.transform_version == "GPS":
             self.internal_dim = self.cartesian_dim - 6
-            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device))
+            self.coordinate_transform = Global3PointSphericalTransform(self.system, self.transform_data.to(device), use_pbc=(self.boundary_condition=="pbc"), L=self.box_length_nm)
         elif self.transform_version == "GPR":
             self.internal_dim = 6 + 6 * self.num_solvent_molecules
             self.coordinate_transform = Global3PointRadialRotvecTransform(self.box_length_nm, system=self.system, transform_data=self.transform_data.to(device), internal_dim=self.internal_dim, canonical_sorting=self.canonical_sorting)

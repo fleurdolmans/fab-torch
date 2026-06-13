@@ -96,6 +96,92 @@ def compute_min_distances(traj, O_IDX, L, IS_PBC=True):
     return d_ww, d_sw
 
 
+def compute_mean_pairwise_distances(traj, O_IDX, L, IS_PBC=True):
+    """
+    Per-frame mean pairwise distances (water-water and solute-water).
+
+    Parameters
+    ----------
+    traj : array_like, shape (N, N_ATOMS, 3)
+    O_IDX : list[int]
+        Water oxygen atom indices.
+    L : float
+        Box length (nm).
+    IS_PBC : bool
+
+    Returns
+    -------
+    d_ww_mean : np.ndarray, shape (N,)
+        Mean water-O – water-O distance across all unique pairs, per frame.
+    d_sw_mean : np.ndarray, shape (N,)
+        Mean solute-atom-0 – water-O distance per frame.
+    """
+    traj = np.asarray(traj)
+    n_oxy = len(O_IDX)
+
+    # Water-water mean pairwise O-O distance
+    oxy  = traj[:, O_IDX, :]
+    diff = oxy[:, :, None, :] - oxy[:, None, :, :]   # (N, W, W, 3)
+    if IS_PBC:
+        diff -= L * np.round(diff / L)
+    d = np.linalg.norm(diff, axis=-1)   # (N, W, W)
+    # extract upper triangle (unique pairs) per frame
+    triu_i, triu_j = np.triu_indices(n_oxy, k=1)
+    d_ww_mean = d[:, triu_i, triu_j].mean(axis=1)
+
+    # Solute(atom 0)-water mean distance
+    sol  = traj[:, 0:1, :]   # (N, 1, 3)
+    diff_sw = oxy - sol       # (N, W, 3)
+    if IS_PBC:
+        diff_sw -= L * np.round(diff_sw / L)
+    d_sw_mean = np.linalg.norm(diff_sw, axis=-1).mean(axis=1)   # (N,)
+
+    return d_ww_mean, d_sw_mean
+
+
+def density_entropy_3d(traj, O_IDX, L, bins=50, normalize=True, eps=1e-12):
+    """
+    Shannon entropy of the 3D spatial water-oxygen density.
+
+    Parameters
+    ----------
+    traj : array_like, shape (N, N_ATOMS, 3)
+    O_IDX : list[int]
+        Water oxygen atom indices.
+    L : float or None
+        Box length (nm). Used as the histogram range when not None.
+    bins : int
+        Number of bins per dimension.
+    normalize : bool
+        If True divide by log(bins^3) so values are in ~[0, 1].
+    eps : float
+        Small value to avoid log(0).
+
+    Returns
+    -------
+    H : float
+        Normalised (or raw) Shannon entropy.
+    counts : np.ndarray, shape (bins, bins, bins)
+        Raw 3-D histogram counts.
+    """
+    traj = np.asarray(traj)
+    positions = traj[:, O_IDX, :].reshape(-1, 3)   # (N*W, 3)
+
+    if L is not None:
+        hist_range = [[0.0, L], [0.0, L], [0.0, L]]
+    else:
+        hist_range = [(positions[:, i].min(), positions[:, i].max()) for i in range(3)]
+
+    counts, _ = np.histogramdd(positions, bins=bins, range=hist_range)
+    p = counts.ravel()
+    p = p / p.sum()
+    p_nonzero = p[p > eps]
+    H = -np.sum(p_nonzero * np.log(p_nonzero))
+    if normalize:
+        H = H / np.log(len(p))
+    return H, counts
+
+
 def compute_water_geometry(traj, N_WATERS, O_IDX, H1_IDX, H2_IDX, L, IS_PBC=True):
     """
     Water O-H bond lengths and H-O-H angles for all frames.

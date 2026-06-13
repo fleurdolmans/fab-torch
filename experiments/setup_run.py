@@ -495,8 +495,8 @@ def run_initial_flow_sanity_test(fab_model, target, batch_size: int = 8):
             print("[FLOW sample] shape:", tuple(samp.shape))
             print("[FLOW sample] mean/std:", samp.mean().item(), samp.std(unbiased=False).item())
 
-            # oxygen norms in internal space
-            O = samp[:, solute_dim:].view(batch_size, n_waters, 6)[..., 0:3]
+            # oxygen norms in internal space (first 3 dims of each water block = O spherical coords)
+            O = samp[:, solute_dim:].view(batch_size, n_waters, water_block_dim)[..., 0:3]
             O_norm = torch.linalg.norm(O, dim=-1)
 
             print("[FLOW sample] O norm median:",

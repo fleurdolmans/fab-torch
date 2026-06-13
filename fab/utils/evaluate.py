@@ -14,7 +14,13 @@ import torch
 import matplotlib.pyplot as plt
 from scipy.special import logsumexp
 
-from .mol_analysis import compute_rdf_3d, compute_min_distances, compute_water_geometry
+from .mol_analysis import (
+    compute_rdf_3d,
+    compute_min_distances,
+    compute_mean_pairwise_distances,
+    compute_water_geometry,
+    density_entropy_3d,
+)
 from .load import load_model, load_checkpoint, load_md_data, build_target
 from .visuals import (
     plot_mol_position_density,
@@ -167,14 +173,18 @@ def evaluate_single_model(
     md_stats = None
     if x_md is not None:
         d_ww_md, d_sw_md = compute_min_distances(x_md, O_IDX, L, IS_PBC)
+        d_ww_mean_md, d_sw_mean_md = compute_mean_pairwise_distances(x_md, O_IDX, L, IS_PBC)
         r_sw_md, g_sw_md = compute_rdf_3d(x_md, [0], O_IDX, _L_rdf, dr=dr)
         r_ww_md, g_ww_md = compute_rdf_3d(x_md, O_IDX, O_IDX, _L_rdf, dr=dr)
         oh_md, hoh_md = compute_water_geometry(x_md, N_WATERS, O_IDX, H1_IDX, H2_IDX, L, IS_PBC)
+        H_md, _ = density_entropy_3d(x_md, O_IDX, L if IS_PBC else None)
         md_stats = {
             "r_sw": r_sw_md, "g_sw": g_sw_md,
             "r_ww": r_ww_md, "g_ww": g_ww_md,
             "d_ww": d_ww_md, "d_sw": d_sw_md,
+            "d_ww_mean": d_ww_mean_md, "d_sw_mean": d_sw_mean_md,
             "oh":   oh_md,   "hoh":  hoh_md,
+            "density_entropy": H_md,
         }
         if u_md is not None:
             u_md_arr = np.asarray(u_md)
@@ -190,10 +200,12 @@ def evaluate_single_model(
     # ------------------------------------------------------------------
     all_g_sw, all_g_ww = [], []
     d_ww_min_scalars, d_sw_min_scalars = [], []
+    d_ww_mean_scalars, d_sw_mean_scalars = [], []
     d_ww_arrays, d_sw_arrays = [], []
     oh_arrays, hoh_arrays = [], []
     u_gen_arrays = []
     ess_runs, ess_frac_runs = [], []
+    entropy_runs = []
     x_gen_runs = []
     r_sw_ref = None   # same bin centres every repeat (same dr, same L)
     r_ww_ref = None
@@ -218,6 +230,13 @@ def evaluate_single_model(
         d_sw_min_scalars.append(float(d_sw.min()))
         d_ww_arrays.append(d_ww)
         d_sw_arrays.append(d_sw)
+        d_ww_mean, d_sw_mean = compute_mean_pairwise_distances(x_gen, O_IDX, L, IS_PBC)
+        d_ww_mean_scalars.append(float(d_ww_mean.mean()))
+        d_sw_mean_scalars.append(float(d_sw_mean.mean()))
+
+        # Density entropy
+        H_rep, _ = density_entropy_3d(x_gen, O_IDX, L if IS_PBC else None)
+        entropy_runs.append(H_rep)
 
         # Geometry
         oh, hoh = compute_water_geometry(
@@ -257,6 +276,9 @@ def evaluate_single_model(
     ess_frac_mean, ess_frac_std = _ms(ess_frac_runs)
     d_ww_min_mean, d_ww_min_std = _ms(d_ww_min_scalars)
     d_sw_min_mean, d_sw_min_std = _ms(d_sw_min_scalars)
+    d_ww_mean_mean, d_ww_mean_std = _ms(d_ww_mean_scalars)
+    d_sw_mean_mean, d_sw_mean_std = _ms(d_sw_mean_scalars)
+    entropy_mean, entropy_std = _ms(entropy_runs)
 
     u_gen_pooled  = np.concatenate(u_gen_arrays)
     fin_pooled    = np.isfinite(u_gen_pooled)
@@ -283,6 +305,14 @@ def evaluate_single_model(
         "d_sw_pooled":    np.concatenate(d_sw_arrays),
         "d_ww_min_mean":  d_ww_min_mean,  "d_ww_min_std":  d_ww_min_std,
         "d_sw_min_mean":  d_sw_min_mean,  "d_sw_min_std":  d_sw_min_std,
+        "d_ww_mean_runs": np.asarray(d_ww_mean_scalars),
+        "d_sw_mean_runs": np.asarray(d_sw_mean_scalars),
+        "d_ww_mean_mean": d_ww_mean_mean, "d_ww_mean_std": d_ww_mean_std,
+        "d_sw_mean_mean": d_sw_mean_mean, "d_sw_mean_std": d_sw_mean_std,
+        # density entropy
+        "entropy_runs":  np.asarray(entropy_runs),
+        "entropy_mean":  entropy_mean,
+        "entropy_std":   entropy_std,
         # geometry
         "oh_pooled":   np.concatenate(oh_arrays),
         "hoh_pooled":  np.concatenate(hoh_arrays),
@@ -370,6 +400,9 @@ def evaluate_single_model(
             print(f"  energy finite frac    : {e.get('finite_frac', float('nan'))*100:.1f}%")
             print(f"  min d(water-water)    : {md_stats['d_ww'].min():.4f} nm")
             print(f"  min d(solute-water)   : {md_stats['d_sw'].min():.4f} nm")
+            print(f"  mean d(water-water)   : {md_stats['d_ww_mean'].mean():.4f} nm")
+            print(f"  mean d(solute-water)  : {md_stats['d_sw_mean'].mean():.4f} nm")
+            print(f"  density entropy       : {md_stats['density_entropy']:.4f}")
         else:
             print("  (no MD reference provided)")
 
@@ -382,6 +415,9 @@ def evaluate_single_model(
               f"({ess_frac_mean*100:.2f}% ± {ess_frac_std*100:.2f}%)")
         print(f"  min d(water-water)    : {d_ww_min_mean:.4f} ± {d_ww_min_std:.4f} nm")
         print(f"  min d(solute-water)   : {d_sw_min_mean:.4f} ± {d_sw_min_std:.4f} nm")
+        print(f"  mean d(water-water)   : {d_ww_mean_mean:.4f} ± {d_ww_mean_std:.4f} nm")
+        print(f"  mean d(solute-water)  : {d_sw_mean_mean:.4f} ± {d_sw_mean_std:.4f} nm")
+        print(f"  density entropy       : {entropy_mean:.4f} ± {entropy_std:.4f}")
         print(f"  RDF s-w peak          : {results['g_sw_mean'].max():.3f} ± {results['g_sw_std'][results['g_sw_mean'].argmax()]:.3f}")
         print(f"  RDF w-w peak          : {results['g_ww_mean'].max():.3f} ± {results['g_ww_std'][results['g_ww_mean'].argmax()]:.3f}")
 
@@ -683,6 +719,31 @@ def evaluate_models(
         md_dsw_str,
         [f"{eval_results[l]['results']['d_sw_min_mean']:.4f} ± "
          f"{eval_results[l]['results']['d_sw_min_std']:.4f}" for l in labels],
+    )
+
+    # Mean pairwise distances
+    md_dww_mean_str = f"{md_ref['d_ww_mean'].mean():.4f}" if md_ref else "—"
+    md_dsw_mean_str = f"{md_ref['d_sw_mean'].mean():.4f}" if md_ref else "—"
+    _row(
+        "Mean d(water-water) [nm]",
+        md_dww_mean_str,
+        [f"{eval_results[l]['results']['d_ww_mean_mean']:.4f} ± "
+         f"{eval_results[l]['results']['d_ww_mean_std']:.4f}" for l in labels],
+    )
+    _row(
+        "Mean d(solute-water) [nm]",
+        md_dsw_mean_str,
+        [f"{eval_results[l]['results']['d_sw_mean_mean']:.4f} ± "
+         f"{eval_results[l]['results']['d_sw_mean_std']:.4f}" for l in labels],
+    )
+
+    # Density entropy
+    md_entropy_str = f"{md_ref['density_entropy']:.4f}" if md_ref else "—"
+    _row(
+        "Density entropy (norm.)",
+        md_entropy_str,
+        [f"{eval_results[l]['results']['entropy_mean']:.4f} ± "
+         f"{eval_results[l]['results']['entropy_std']:.4f}" for l in labels],
     )
 
     return eval_results
