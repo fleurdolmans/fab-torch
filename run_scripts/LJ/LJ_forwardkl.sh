@@ -71,9 +71,9 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run_LJ.py \\
   --config-name LJ \\
   target.base_state=v10 target.target_state=v10 target.solid=false\\
   target.solute_sigma_nm=0.38 target.solvent_sigma_nm=0.34 target.n_solvent=32\\
-  target.energy_cut=1.e+20 target.energy_max=1.e+30 target.temperature=100\\
+  target.energy_cut=1.e+6 target.energy_max=1.e+20 target.temperature=100\\
   fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=shell-torus flow.base.learn_mean_var=false flow.type=lj_torus_spline\\
+  flow.hidden_units=128 flow.base.type=shell-torus flow.base.learn_mean_var=false flow.type=lj_perm_equi_torus\\
   flow.n_layers=6 flow.layer_nodes_per_dim=4 flow.hidden_units=128 flow.num_bins=8\\
   training.lr=1e-5 training.wd=1e-6 training.batch_size=64 evaluation.eval_batch_size=32\\
   training.max_grad_norm=10 training.warmup_iter=100 \\

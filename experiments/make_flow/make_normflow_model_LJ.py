@@ -59,77 +59,6 @@ class WrappedNormalCentered1D:
         return wrap_centered_box(mu + eps, self.box_length)
 
 
-class FCCGaussianCenteredPeriodicBase(nn.Module):
-    """
-    Exact factorized wrapped-Gaussian base on centered periodic coordinates
-    z in [-L/2, L/2)^(3*n_solvent).
-
-    Intended for:
-      - SoluteCenteredSolventTransform
-      - lj_torus_spline_noF_v2
-
-    Each solvent particle is centered around an assigned FCC site in the same
-    solute-centered relative coordinate chart.
-    """
-
-    def __init__(
-        self,
-        solvent_fcc_rel_nm,   # shape (n_solvent, 3), centered relative coords
-        box_length_nm: float,
-        sigma_nm: float = 0.03,
-        image_range: int = 1,
-        device: str = "cpu",
-        dtype: torch.dtype = torch.float32,
-    ):
-        super().__init__()
-
-        solvent_fcc_rel_nm = torch.as_tensor(solvent_fcc_rel_nm, device=device, dtype=dtype)
-        if solvent_fcc_rel_nm.ndim != 2 or solvent_fcc_rel_nm.shape[1] != 3:
-            raise ValueError("solvent_fcc_rel_nm must have shape (n_solvent, 3)")
-
-        solvent_fcc_rel_nm = wrap_centered_box(solvent_fcc_rel_nm, box_length_nm)
-
-        self.n_solvent = int(solvent_fcc_rel_nm.shape[0])
-        self.dim = 3 * self.n_solvent
-        self.shape = (self.dim,)
-        self.box_length_nm = float(box_length_nm)
-        self.sigma_nm = float(sigma_nm)
-        self.image_range = int(image_range)
-
-        self.register_buffer("centers", solvent_fcc_rel_nm.reshape(1, self.dim))
-        self.register_buffer("_dummy", torch.zeros(1, device=device, dtype=dtype))
-
-        self._wn = WrappedNormalCentered1D(
-            sigma=self.sigma_nm,
-            box_length=self.box_length_nm,
-            image_range=self.image_range,
-        )
-
-    @property
-    def device(self):
-        return self._dummy.device
-
-    @property
-    def dtype(self):
-        return self._dummy.dtype
-
-    def sample(self, n: int) -> torch.Tensor:
-        mu = self.centers.to(device=self.device, dtype=self.dtype).expand(n, -1)
-        z = self._wn.sample(mu)
-        z = wrap_centered_box(z, self.box_length_nm)
-        return z
-
-    def log_prob(self, z: torch.Tensor) -> torch.Tensor:
-        z = wrap_centered_box(z, self.box_length_nm)
-        mu = self.centers.to(device=z.device, dtype=z.dtype).expand_as(z)
-        lp = self._wn.log_prob(z, mu)
-        return lp.sum(dim=-1)
-
-    def forward(self, n: int):
-        z = self.sample(n)
-        log_q = self.log_prob(z)
-        return z, log_q
-
 
 # ============================================================
 # Basic helpers
@@ -632,7 +561,7 @@ class WrappedCustomFlow(nn.Module):
 
 
 # ============================================================
-# lj_coupling_perm_equi
+# RBF feature extractor
 # ============================================================
 
 class RBFFeatures(nn.Module):
@@ -652,9 +581,28 @@ class RBFFeatures(nn.Module):
         return torch.exp(-0.5 * ((d.unsqueeze(-1) - c) / w) ** 2)
 
 
-class PermEquiParticleConditioner(nn.Module):
+
+
+
+# ============================================================
+# Permutation-equivariant torus flow for LJ particles
+# ============================================================
+
+class PermEquiTorusParticleConditioner(nn.Module):
     """
-    Permutation-equivariant per-particle conditioner.
+    Permutation-equivariant per-particle conditioner for unit-torus coordinates.
+
+    Operates on solvent positions in [0, 1)^3.  Three information streams:
+
+    1. Local:  sin/cos embedding of the frozen (kept) unit-torus axes of each
+               particle, processed by a per-particle MLP.
+    2. SS:     Pairwise minimum-image distances (in nm) between all solvent
+               particles, encoded with RBF features and summed over neighbours.
+    3. Solute: Minimum-image distance (in nm) from each particle to the solute
+               reference, encoded with RBF features.
+
+    All three streams are concatenated and passed through a final MLP whose
+    last linear layer is zero-initialized so every layer starts near identity.
     """
 
     def __init__(
@@ -665,16 +613,19 @@ class PermEquiParticleConditioner(nn.Module):
         n_hidden: int = 2,
         n_rbf: int = 16,
         rbf_max_dist: float = 2.0,
+        box_length: float = 1.69,
         dropout: float = 0.0,
     ):
         super().__init__()
         self.d_keep = int(d_keep)
         self.out_dim = int(out_dim)
+        self.box_length = float(box_length)
 
         self.rbf = RBFFeatures(n_rbf=n_rbf, r_max=rbf_max_dist)
 
+        # Stream 1: local sin/cos embedding of frozen torus coords
         local_layers = []
-        d = d_keep
+        d = 2 * d_keep  # sin + cos for each frozen axis
         for _ in range(n_hidden):
             local_layers.append(nn.Linear(d, hidden_dim))
             local_layers.append(nn.ReLU())
@@ -683,6 +634,7 @@ class PermEquiParticleConditioner(nn.Module):
             d = hidden_dim
         self.local_embed = nn.Sequential(*local_layers)
 
+        # Stream 2: RBF of pairwise MIC distances
         ss_layers = []
         d = n_rbf
         for _ in range(max(1, n_hidden - 1)):
@@ -693,6 +645,7 @@ class PermEquiParticleConditioner(nn.Module):
             d = hidden_dim
         self.ss_embed = nn.Sequential(*ss_layers)
 
+        # Stream 3: RBF of solute MIC distances
         sol_layers = []
         d = n_rbf
         for _ in range(max(1, n_hidden - 1)):
@@ -703,48 +656,69 @@ class PermEquiParticleConditioner(nn.Module):
             d = hidden_dim
         self.sol_embed = nn.Sequential(*sol_layers)
 
-        final_in = hidden_dim + hidden_dim + hidden_dim
+        # Final fusion MLP with zero-initialized output
         final_layers = []
-        d = final_in
+        d = hidden_dim + hidden_dim + hidden_dim
         for _ in range(n_hidden):
             final_layers.append(nn.Linear(d, hidden_dim))
             final_layers.append(nn.ReLU())
             if dropout > 0.0:
                 final_layers.append(nn.Dropout(dropout))
             d = hidden_dim
-
         final = nn.Linear(d, out_dim)
         nn.init.zeros_(final.weight)
         nn.init.zeros_(final.bias)
         final_layers.append(final)
         self.out_net = nn.Sequential(*final_layers)
 
-    def forward(self, x_keep: torch.Tensor, pos_all: torch.Tensor, solute_ref: torch.Tensor):
-        B, N, _ = pos_all.shape
+    def forward(
+        self,
+        u_keep: torch.Tensor,   # (B, N, d_keep) frozen unit-torus axes in [0,1)
+        u_all: torch.Tensor,    # (B, N, 3)       all unit-torus coords in [0,1)
+        u_solute: torch.Tensor, # (B, 1, 3)       solute unit-torus position
+    ) -> torch.Tensor:          # (B, N, out_dim)
+        L = torch.as_tensor(self.box_length, device=u_all.device, dtype=u_all.dtype)
 
-        h_local = self.local_embed(x_keep)
+        # Stream 1: torus embedding of frozen axes
+        angle = 2.0 * math.pi * u_keep
+        torus_emb = torch.cat([torch.sin(angle), torch.cos(angle)], dim=-1)
+        h_local = self.local_embed(torus_emb)
 
-        diff = pos_all[:, :, None, :] - pos_all[:, None, :, :]
-        dist = torch.linalg.norm(diff, dim=-1)
-
-        rbf_ss = self.rbf(dist)
-        eye = torch.eye(N, device=pos_all.device, dtype=pos_all.dtype).view(1, N, N, 1)
+        # Stream 2: MIC pairwise distances in nm, summed RBF
+        diff_ss = mic_unit(u_all[:, :, None, :] - u_all[:, None, :, :])  # (B,N,N,3)
+        dist_ss = torch.linalg.norm(diff_ss * L, dim=-1)                  # (B,N,N)
+        rbf_ss = self.rbf(dist_ss)                                         # (B,N,N,n_rbf)
+        eye = torch.eye(u_all.shape[1], device=u_all.device, dtype=u_all.dtype).view(1, u_all.shape[1], u_all.shape[1], 1)
         rbf_ss = rbf_ss * (1.0 - eye)
-        pooled_ss = rbf_ss.sum(dim=2)
+        pooled_ss = rbf_ss.sum(dim=2)                                      # (B,N,n_rbf)
         h_ss = self.ss_embed(pooled_ss)
 
-        d_sol = torch.linalg.norm(pos_all - solute_ref, dim=-1)
-        rbf_sol = self.rbf(d_sol)
+        # Stream 3: MIC distance to solute in nm
+        diff_sol = mic_unit(u_all - u_solute)                              # (B,N,3)
+        dist_sol = torch.linalg.norm(diff_sol * L, dim=-1)                 # (B,N)
+        rbf_sol = self.rbf(dist_sol)                                        # (B,N,n_rbf)
         h_sol = self.sol_embed(rbf_sol)
 
         h = torch.cat([h_local, h_ss, h_sol], dim=-1)
         return self.out_net(h)
 
 
-class PermEquiLJParticleSplineCoupling(nn.Module):
+class PermEquiTorusSplineCoupling(nn.Module):
+    """
+    Permutation-equivariant coupling layer on unit-torus coordinates [0, 1).
+
+    Cycles through axis subsets (from _cartesian_partition_cycle) and applies
+    rational-quadratic splines to the active axes conditioned on the frozen
+    axes via PermEquiTorusParticleConditioner.
+
+    Compatible with WrappedTorusSplineFlow (exposes self.conditioner).
+    Requires v4 transform (FixedSoluteUnitTorusTransform).
+    """
+
     def __init__(
         self,
         box_length: float,
+        solute_positions_unit: torch.Tensor,  # (n_solute, 3) in [0,1)
         update_axes,
         num_bins: int = 8,
         hidden_dim: int = 128,
@@ -758,53 +732,68 @@ class PermEquiLJParticleSplineCoupling(nn.Module):
     ):
         super().__init__()
         self.box_length = float(box_length)
-        self.tail_bound = 0.5 * float(box_length)
         self.update_axes = list(update_axes)
         self.keep_axes = [a for a in [0, 1, 2] if a not in self.update_axes]
         self.num_bins = int(num_bins)
-
+        self.tail_bound = 0.5  # spline domain is centered unit interval [-0.5, 0.5)
         self.min_bin_width = float(min_bin_width)
         self.min_bin_height = float(min_bin_height)
         self.min_derivative = float(min_derivative)
+
+        solute_positions_unit = torch.as_tensor(solute_positions_unit, dtype=torch.float64)
+        self.register_buffer("solute_unit", solute_positions_unit)  # (n_solute, 3)
 
         d_keep = len(self.keep_axes)
         d_update = len(self.update_axes)
         params_per_dim = 3 * self.num_bins - 1
 
-        self.conditioner = PermEquiParticleConditioner(
+        self.conditioner = PermEquiTorusParticleConditioner(
             d_keep=d_keep,
             out_dim=d_update * params_per_dim,
             hidden_dim=hidden_dim,
             n_hidden=n_hidden,
             n_rbf=n_rbf,
             rbf_max_dist=rbf_max_dist,
+            box_length=box_length,
             dropout=dropout,
         )
 
-    def wrap_centered(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.remainder(x + self.tail_bound, self.box_length) - self.tail_bound
+    def _get_params(self, u: torch.Tensor):
+        """
+        u: (B, N, 3) in [0,1)
+        Returns widths, heights, derivatives each of shape (B, N, d_update, num_bins or num_bins-1).
+        """
+        B = u.shape[0]
+        u_b = u[..., self.keep_axes]  # (B, N, d_keep)
 
-    def forward(self, x: torch.Tensor):
-        param = next(self.conditioner.parameters())
-        x = x.to(device=param.device, dtype=param.dtype)
-        x = self.wrap_centered(x)
+        # Solute reference broadcast to batch
+        u_solute = self.solute_unit.to(device=u.device, dtype=u.dtype)  # (n_solute, 3)
+        u_solute_ref = u_solute.mean(dim=0, keepdim=True).unsqueeze(0).expand(B, -1, -1)  # (B, 1, 3)
 
-        x_a = x[..., self.update_axes]
-        x_b = x[..., self.keep_axes]
+        params = self.conditioner(u_b, u, u_solute_ref)  # (B, N, d_update*(3K-1))
 
-        B, N, _ = x.shape
         d_update = len(self.update_axes)
-
-        solute_ref = torch.zeros((B, 1, 3), device=param.device, dtype=param.dtype)
-        params = self.conditioner(x_b, x, solute_ref)
-        params = params.view(B, N, d_update, 3 * self.num_bins - 1)
+        params_per_dim = 3 * self.num_bins - 1
+        params = params.view(B, u.shape[1], d_update, params_per_dim)
 
         widths = params[..., :self.num_bins]
         heights = params[..., self.num_bins:2 * self.num_bins]
         derivatives = params[..., 2 * self.num_bins:]
+        return widths, heights, derivatives
 
-        y_a, logabsdet = unconstrained_rational_quadratic_spline(
-            inputs=x_a,
+    def forward(self, u: torch.Tensor):
+        """u: (B, N, 3) in [0,1) → y: (B, N, 3) in [0,1), logdet: (B,)"""
+        param = next(self.conditioner.parameters())
+        u = u.to(device=param.device, dtype=param.dtype)
+        u = wrap_unit(u)
+
+        widths, heights, derivatives = self._get_params(u)
+
+        # Center active axes to [-0.5, 0.5) for the spline
+        u_a_c = u[..., self.update_axes] - 0.5
+
+        y_a_c, logabsdet = unconstrained_rational_quadratic_spline(
+            inputs=u_a_c,
             unnormalized_widths=widths,
             unnormalized_heights=heights,
             unnormalized_derivatives=derivatives,
@@ -816,34 +805,25 @@ class PermEquiLJParticleSplineCoupling(nn.Module):
             min_derivative=self.min_derivative,
         )
 
-        y = x.clone()
-        y[..., self.update_axes] = y_a
-        y = self.wrap_centered(y)
+        y = u.clone()
+        y[..., self.update_axes] = wrap_unit(y_a_c + 0.5)
+        y = wrap_unit(y)
 
         logdet = logabsdet.sum(dim=(-1, -2))
         return y, logdet
 
     def inverse(self, y: torch.Tensor):
+        """y: (B, N, 3) in [0,1) → x: (B, N, 3) in [0,1), logdet: (B,)"""
         param = next(self.conditioner.parameters())
         y = y.to(device=param.device, dtype=param.dtype)
-        y = self.wrap_centered(y)
+        y = wrap_unit(y)
 
-        y_a = y[..., self.update_axes]
-        y_b = y[..., self.keep_axes]
+        widths, heights, derivatives = self._get_params(y)
 
-        B, N, _ = y.shape
-        d_update = len(self.update_axes)
+        y_a_c = y[..., self.update_axes] - 0.5
 
-        solute_ref = torch.zeros((B, 1, 3), device=param.device, dtype=param.dtype)
-        params = self.conditioner(y_b, y, solute_ref)
-        params = params.view(B, N, d_update, 3 * self.num_bins - 1)
-
-        widths = params[..., :self.num_bins]
-        heights = params[..., self.num_bins:2 * self.num_bins]
-        derivatives = params[..., 2 * self.num_bins:]
-
-        x_a, logabsdet = unconstrained_rational_quadratic_spline(
-            inputs=y_a,
+        x_a_c, logabsdet = unconstrained_rational_quadratic_spline(
+            inputs=y_a_c,
             unnormalized_widths=widths,
             unnormalized_heights=heights,
             unnormalized_derivatives=derivatives,
@@ -856,88 +836,12 @@ class PermEquiLJParticleSplineCoupling(nn.Module):
         )
 
         x = y.clone()
-        x[..., self.update_axes] = x_a
-        x = self.wrap_centered(x)
+        x[..., self.update_axes] = wrap_unit(x_a_c + 0.5)
+        x = wrap_unit(x)
 
         logdet = logabsdet.sum(dim=(-1, -2))
         return x, logdet
 
-
-class WrappedPermEquiLJFlow(nn.Module):
-    """
-    Flow over flattened solvent relative coordinates.
-    """
-
-    def __init__(self, layers, base, box_length: float):
-        super().__init__()
-        self.layers = nn.ModuleList(layers)
-        self.base = base
-        self.box_length = float(box_length)
-        self.tail_bound = 0.5 * float(box_length)
-        self.event_shape = (base.shape[0],) if hasattr(base, "shape") else (base.dim,)
-
-    def wrap_centered(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.remainder(x + self.tail_bound, self.box_length) - self.tail_bound
-
-    def _flat_to_particle(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 2 or x.shape[1] % 3 != 0:
-            raise ValueError(f"Expected (B, 3N), got {tuple(x.shape)}")
-        return x.view(x.shape[0], -1, 3)
-
-    def _particle_to_flat(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 3 or x.shape[-1] != 3:
-            raise ValueError(f"Expected (B, N, 3), got {tuple(x.shape)}")
-        return x.reshape(x.shape[0], -1)
-
-    def forward_map(self, x: torch.Tensor):
-        param = next(self.layers[0].conditioner.parameters())
-        x = x.to(device=param.device, dtype=param.dtype)
-        x = self.wrap_centered(x)
-
-        z = self._flat_to_particle(x)
-        logdet = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
-
-        for layer in self.layers:
-            z, ld = layer(z)
-            logdet = logdet + ld
-
-        z = self._particle_to_flat(z)
-        z = self.wrap_centered(z)
-        return z, logdet
-
-    def inverse_map(self, z: torch.Tensor):
-        param = next(self.layers[0].conditioner.parameters())
-        z = z.to(device=param.device, dtype=param.dtype)
-        z = self.wrap_centered(z)
-
-        x = self._flat_to_particle(z)
-        logdet = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
-
-        for layer in reversed(self.layers):
-            x, ld = layer.inverse(x)
-            logdet = logdet + ld
-
-        x = self._particle_to_flat(x)
-        x = self.wrap_centered(x)
-        return x, logdet
-
-    def log_prob(self, x):
-        z, logdet = self.forward_map(x)
-        return self.base.log_prob(z) + logdet
-
-    def forward_and_log_prob(self, x):
-        z, logdet = self.forward_map(x)
-        return z, self.base.log_prob(z) + logdet
-
-    def sample_and_log_prob(self, shape):
-        n = shape[0]
-        z, log_q = self.base(n)
-        x, inv_logdet = self.inverse_map(z)
-        return x, log_q - inv_logdet
-
-    def sample(self, shape):
-        x, _ = self.sample_and_log_prob(shape)
-        return x
 
 
 # ============================================================
@@ -1795,270 +1699,6 @@ def torus_project_centered(x: torch.Tensor, box_length: float) -> torch.Tensor:
     return torch.cat([torch.sin(angle), torch.cos(angle)], dim=-1)
 
 
-# ============================================================
-# Simple per-particle conditioner for centered periodic coords
-# ============================================================
-
-class SimpleCenteredSplineConditioner(nn.Module):
-    """
-    Shared per-particle conditioner.
-
-    Input:
-        periodic embedding of frozen coordinates, shape (B, N, 2*n_frozen)
-
-    Output:
-        spline params for all 3 coordinates, shape (B, N, out_dim)
-    """
-    def __init__(
-        self,
-        in_dim: int,
-        hidden_dim: int,
-        out_dim: int,
-        n_hidden: int = 2,
-    ):
-        super().__init__()
-        layers = []
-        d = in_dim
-        for _ in range(n_hidden):
-            layers.append(nn.Linear(d, hidden_dim))
-            layers.append(nn.SiLU())
-            d = hidden_dim
-
-        final = nn.Linear(d, out_dim)
-        nn.init.zeros_(final.weight)
-        nn.init.zeros_(final.bias)
-        layers.append(final)
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
-# ============================================================
-# Centered-box periodic spline coupling
-# ============================================================
-
-class CenteredPeriodicParticleSplineCoupling(nn.Module):
-    """
-    Coupling layer on centered periodic coordinates z in [-L/2, L/2).
-
-    For each particle:
-      - keep some channels frozen
-      - periodic-embed frozen channels with sin/cos(2π z/L)
-      - predict spline params for active channels
-      - transform active channels with RQ spline on [-L/2, L/2)
-      - wrap back into centered MIC box
-
-    This is compatible with SoluteCenteredSolventTransform.
-    """
-
-    def __init__(
-        self,
-        box_length: float,
-        conditioner: SimpleCenteredSplineConditioner,
-        channel_mask: Sequence[int],
-        num_bins: int = 8,
-        min_bin_width: float = 1e-3,
-        min_bin_height: float = 1e-3,
-        min_derivative: float = 1e-3,
-    ):
-        super().__init__()
-        if len(channel_mask) != 3:
-            raise ValueError("channel_mask must have length 3")
-
-        self.box_length = float(box_length)
-        self.tail_bound = 0.5 * float(box_length)
-
-        self.conditioner = conditioner
-        self.num_bins = int(num_bins)
-
-        self.min_bin_width = float(min_bin_width)
-        self.min_bin_height = float(min_bin_height)
-        self.min_derivative = float(min_derivative)
-
-        mask = torch.as_tensor(channel_mask, dtype=torch.bool).view(1, 1, 3)
-        self.register_buffer("channel_mask", mask)
-
-        self.active_idx = [i for i, v in enumerate(channel_mask) if v == 1]
-        self.frozen_idx = [i for i, v in enumerate(channel_mask) if v == 0]
-        self.n_active = len(self.active_idx)
-
-        self.params_per_dim = 3 * self.num_bins - 1
-
-    def wrap_centered(self, x: torch.Tensor) -> torch.Tensor:
-        return wrap_centered_box(x, self.box_length)
-
-    def _get_params(self, z: torch.Tensor) -> torch.Tensor:
-        """
-        z: (B, N, 3) in [-L/2, L/2)
-        returns params of shape (B, N, n_active, params_per_dim)
-        """
-        z = self.wrap_centered(z)
-        z_frozen = z[..., self.frozen_idx]                             # (B,N,n_frozen)
-        cond_in = torus_project_centered(z_frozen, self.box_length)   # (B,N,2*n_frozen)
-
-        raw_params = self.conditioner(cond_in)                        # (B,N,3*params_per_dim)
-        B, N, _ = raw_params.shape
-        raw_params = raw_params.view(B, N, 3, self.params_per_dim)
-
-        active = torch.as_tensor(self.active_idx, device=z.device, dtype=torch.long)
-        params = raw_params[:, :, active, :]                          # (B,N,n_active,params_per_dim)
-        return params
-
-    def forward(self, z: torch.Tensor):
-        param = next(self.conditioner.parameters())
-        z = z.to(device=param.device, dtype=param.dtype)
-        z = self.wrap_centered(z)
-
-        params = self._get_params(z)
-
-        widths = params[..., :self.num_bins]
-        heights = params[..., self.num_bins:2 * self.num_bins]
-        derivatives = params[..., 2 * self.num_bins:]
-
-        z_a = z[..., self.active_idx]
-
-        y_a, logabsdet = unconstrained_rational_quadratic_spline(
-            inputs=z_a,
-            unnormalized_widths=widths,
-            unnormalized_heights=heights,
-            unnormalized_derivatives=derivatives,
-            inverse=False,
-            tails="linear",
-            tail_bound=self.tail_bound,
-            min_bin_width=self.min_bin_width,
-            min_bin_height=self.min_bin_height,
-            min_derivative=self.min_derivative,
-        )
-
-        y = z.clone()
-        y[..., self.active_idx] = y_a
-        y = self.wrap_centered(y)
-
-        logdet = logabsdet.sum(dim=(-1, -2))
-        return y, logdet
-
-    def inverse(self, y: torch.Tensor):
-        param = next(self.conditioner.parameters())
-        y = y.to(device=param.device, dtype=param.dtype)
-        y = self.wrap_centered(y)
-
-        params = self._get_params(y)
-
-        widths = params[..., :self.num_bins]
-        heights = params[..., self.num_bins:2 * self.num_bins]
-        derivatives = params[..., 2 * self.num_bins:]
-
-        y_a = y[..., self.active_idx]
-
-        x_a, logabsdet = unconstrained_rational_quadratic_spline(
-            inputs=y_a,
-            unnormalized_widths=widths,
-            unnormalized_heights=heights,
-            unnormalized_derivatives=derivatives,
-            inverse=True,
-            tails="linear",
-            tail_bound=self.tail_bound,
-            min_bin_width=self.min_bin_width,
-            min_bin_height=self.min_bin_height,
-            min_derivative=self.min_derivative,
-        )
-
-        x = y.clone()
-        x[..., self.active_idx] = x_a
-        x = self.wrap_centered(x)
-
-        logdet = logabsdet.sum(dim=(-1, -2))
-        return x, logdet
-
-
-# ============================================================
-# Wrapped flow for centered periodic solvent coordinates
-# ============================================================
-
-class WrappedCenteredPeriodicSplineFlow(nn.Module):
-    """
-    Flow over flattened solvent coordinates in centered periodic box:
-        z in [-L/2, L/2)^(3N)
-
-    Compatible with SoluteCenteredSolventTransform.
-
-    Base must also live on the same centered periodic coordinates.
-    """
-
-    def __init__(self, layers, base, box_length: float):
-        super().__init__()
-        self.layers = nn.ModuleList(layers)
-        self.base = base
-        self.box_length = float(box_length)
-        self.tail_bound = 0.5 * float(box_length)
-        self.event_shape = (base.shape[0],) if hasattr(base, "shape") else (base.dim,)
-
-    def wrap_centered(self, x: torch.Tensor) -> torch.Tensor:
-        return wrap_centered_box(x, self.box_length)
-
-    def _flat_to_particle(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 2 or x.shape[1] % 3 != 0:
-            raise ValueError(f"Expected (B, 3N), got {tuple(x.shape)}")
-        return x.view(x.shape[0], -1, 3)
-
-    def _particle_to_flat(self, x: torch.Tensor) -> torch.Tensor:
-        if x.ndim != 3 or x.shape[-1] != 3:
-            raise ValueError(f"Expected (B, N, 3), got {tuple(x.shape)}")
-        return x.reshape(x.shape[0], -1)
-
-    def forward_map(self, x: torch.Tensor):
-        param = next(self.layers[0].conditioner.parameters())
-        x = x.to(device=param.device, dtype=param.dtype)
-        x = self.wrap_centered(x)
-
-        z = self._flat_to_particle(x)
-        logdet = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
-
-        for layer in self.layers:
-            z, ld = layer(z)
-            logdet = logdet + ld
-
-        z = self._particle_to_flat(z)
-        z = self.wrap_centered(z)
-        return z, logdet
-
-    def inverse_map(self, z: torch.Tensor):
-        param = next(self.layers[0].conditioner.parameters())
-        z = z.to(device=param.device, dtype=param.dtype)
-        z = self.wrap_centered(z)
-
-        x = self._flat_to_particle(z)
-        logdet = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
-
-        for layer in reversed(self.layers):
-            x, ld = layer.inverse(x)
-            logdet = logdet + ld
-
-        x = self._particle_to_flat(x)
-        x = self.wrap_centered(x)
-        return x, logdet
-
-    def log_prob(self, x: torch.Tensor):
-        z, logdet = self.forward_map(x)
-        return self.base.log_prob(z) + logdet
-
-    def forward_and_log_prob(self, x: torch.Tensor):
-        z, logdet = self.forward_map(x)
-        return z, self.base.log_prob(z) + logdet
-
-    def sample_and_log_prob(self, shape):
-        n = shape[0]
-        z, log_q = self.base(n)         # base must already sample centered coords
-        z = self.wrap_centered(z)
-        x, inv_logdet = self.inverse_map(z)
-        x = self.wrap_centered(x)
-        return x, log_q - inv_logdet
-
-    def sample(self, shape):
-        x, _ = self.sample_and_log_prob(shape)
-        return x
 
 # ============================================================
 # Factory
@@ -2083,7 +1723,7 @@ def make_lj_flow(cfg, target):
     base_type = cfg.flow.base.type
     flow_type = cfg.flow.type
 
-    if flow_type in ("lj_torus_spline", "lj_torus_spline_noF", "lj_particle_group_spline"):
+    if flow_type in ("lj_torus_spline", "lj_torus_spline_noF", "lj_particle_group_spline", "lj_perm_equi_torus"):
         if base_type == "uniform":
             base = UniformUnitTorusBase(dim=dim)
         elif base_type == "gauss-uni":
@@ -2191,25 +1831,6 @@ def make_lj_flow(cfg, target):
             base_scale = bound_circ * torch.ones(dim)
             base = nf.distributions.UniformGaussian(dim, periodic_inds, scale=base_scale)
             base.shape = (dim,)
-        elif base_type == "fcc-gaussian":
-            fcc = build_fcc_positions(target.box_length_nm, n_cells=2)   # 32 sites
-
-            solute_idx = 0
-            solute_abs = fcc[solute_idx:solute_idx+1]          # (1,3)
-            solvent_abs = torch.cat([fcc[:solute_idx], fcc[solute_idx+1:]], dim=0)  # (31,3)
-
-            # match SoluteCenteredSolventTransform(reference="first_solute")
-            ref = solute_abs[0]
-            solvent_rel = wrap_centered_box(solvent_abs - ref, target.box_length_nm)
-
-            base = FCCGaussianCenteredPeriodicBase(
-                solvent_fcc_rel_nm=solvent_rel,
-                box_length_nm=target.box_length_nm,
-                sigma_nm=0.03,
-                image_range=1,
-                device=str(target.device),
-                dtype=torch.get_default_dtype(),
-            )
         else:
             raise NotImplementedError(
                 f"Base distribution {base_type} not implemented for flow_type={flow_type}"
@@ -2232,26 +1853,6 @@ def make_lj_flow(cfg, target):
             )
 
         return WrappedCustomFlow(layers, base, box_length=L)
-
-    elif flow_type == "lj_coupling_perm_equi":
-        cycle = _cartesian_partition_cycle()
-        layers = []
-
-        for i in range(n_layers):
-            layers.append(
-                PermEquiLJParticleSplineCoupling(
-                    box_length=L,
-                    update_axes=cycle[i % len(cycle)],
-                    num_bins=num_bins,
-                    hidden_dim=hidden_dim,
-                    n_hidden=n_hidden,
-                    n_rbf=int(getattr(cfg.flow, "pair_rbf_dim", 16)),
-                    rbf_max_dist=float(getattr(cfg.flow, "pair_rbf_max_dist", 2.0)),
-                    dropout=float(getattr(cfg.flow, "dropout", 0.0)),
-                )
-            )
-
-        return WrappedPermEquiLJFlow(layers, base, box_length=L)
 
     elif flow_type == "lj_torus_spline":
         cycle = _cartesian_partition_cycle()
@@ -2318,41 +1919,32 @@ def make_lj_flow(cfg, target):
             )
 
         return WrappedTorusSplineFlow(layers=layers, base=base)
-    
-    elif flow_type == "lj_torus_spline_noF_v2":
+
+    elif flow_type == "lj_perm_equi_torus":
         cycle = _cartesian_partition_cycle()
+
+        solute_nm = torch.as_tensor(
+            target.system.solute_positions_nm, dtype=torch.get_default_dtype()
+        )
+        solute_unit = solute_nm / L  # convert fixed solute positions to unit coords
+
         layers = []
-
-        params_per_dim = 3 * num_bins - 1
-
         for i in range(n_layers):
-            mask = [1 if ax in cycle[i % len(cycle)] else 0 for ax in [0, 1, 2]]
-            n_frozen = 3 - sum(mask)
-
-            conditioner = SimpleCenteredSplineConditioner(
-                in_dim=2 * n_frozen,
-                hidden_dim=hidden_dim,
-                out_dim=3 * params_per_dim,
-                n_hidden=n_hidden,
-            )
-
             layers.append(
-                CenteredPeriodicParticleSplineCoupling(
+                PermEquiTorusSplineCoupling(
                     box_length=L,
-                    conditioner=conditioner,
-                    channel_mask=mask,
+                    solute_positions_unit=solute_unit,
+                    update_axes=cycle[i % len(cycle)],
                     num_bins=num_bins,
-                    min_bin_width=1e-3,
-                    min_bin_height=1e-3,
-                    min_derivative=1e-3,
+                    hidden_dim=hidden_dim,
+                    n_hidden=n_hidden,
+                    n_rbf=int(getattr(cfg.flow, "pair_rbf_dim", 16)),
+                    rbf_max_dist=float(getattr(cfg.flow, "pair_rbf_max_dist", 2.0)),
+                    dropout=float(getattr(cfg.flow, "dropout", 0.0)),
                 )
             )
 
-        return WrappedCenteredPeriodicSplineFlow(
-            layers=layers,
-            base=base,
-            box_length=L,
-        )
+        return WrappedTorusSplineFlow(layers=layers, base=base)
 
     elif flow_type == "lj_particle_group_spline":
         # Hybrid particle-group + coordinate-split coupling.

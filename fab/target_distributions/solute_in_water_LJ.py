@@ -13,7 +13,7 @@ import openmm as mm
 from openmm import app, unit
 from openmmtools.testsystems import TestSystem
 
-from fab.transforms.transform_LJ import SolventOnlyTransform, SoluteCenteredSolventTransform, TorusCartesianTransform, FixedSoluteUnitTorusTransform
+from fab.transforms.transform_LJ import SolventOnlyTransform, FixedSoluteUnitTorusTransform
 
 from fab.target_distributions.base import TargetDistribution
 from fab.target_distributions.boltzmann import (
@@ -422,21 +422,6 @@ class LJParticles(nn.Module, TargetDistribution):
                 solute_positions_nm=self.system.solute_positions_nm,
                 n_solute=self.n_solute,
                 n_solvent=self.n_solvent,
-            )
-        elif self.transform_version == "v2":
-            self.coordinate_transform = SoluteCenteredSolventTransform(
-                solute_positions_nm=self.system.solute_positions_nm,
-                n_solute=self.n_solute,
-                n_solvent=self.n_solvent,
-                box_length_nm=self.box_length_nm,
-                reference="solute_centroid",
-            )
-        elif self.transform_version == "v3":
-            self.coordinate_transform = TorusCartesianTransform(
-                solute_positions_nm=self.system.solute_positions_nm,
-                n_solute=self.n_solute,
-                n_solvent=self.n_solvent,
-                box_length_nm=self.box_length_nm,
             )
         elif self.transform_version == "v4":
             self.coordinate_transform = FixedSoluteUnitTorusTransform(
