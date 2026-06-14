@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_so2_water_droplet
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=05:00:00
+#SBATCH --time=02:00:00
 
 module purge
 module load 2025
@@ -72,14 +72,14 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=n5\\
-  target.num_solvent_molecules=5 target.constraint_radius=0.3 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=n50\\
+  target.num_solvent_molecules=50 target.constraint_radius=0.8 \\
   target.internal_constraints=none target.rigid_water=false \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=droplet fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=spherical-circ-rqs-nf\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-gps-nf\\
   flow.blocks=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
+  training.lr=1e-5 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=10 training.warmup_iter=100 \\
   target.transform.canonical_sorting=false target.transform.version=GPS\\
   training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full \\

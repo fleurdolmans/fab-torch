@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_lj_forwardkl
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -77,7 +77,7 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run_LJ.py \\
   flow.n_layers=6 flow.layer_nodes_per_dim=4 flow.hidden_units=128 flow.num_bins=8\\
   training.lr=1e-5 training.wd=1e-6 training.batch_size=64 evaluation.eval_batch_size=32\\
   training.max_grad_norm=10 training.warmup_iter=100 \\
-  training.overlap.penalty=10.0 training.overlap.dist_ssolv=0.31 training.overlap.dist_solute=0.35 training.mixing=0.0 training.energy_mode=full target.transform_version=v4\\
+  training.overlap.penalty=0.0 training.overlap.dist_ssolv=0.31 training.overlap.dist_solute=0.35 training.mixing=0.0 training.energy_mode=full target.transform_version=v4\\
   training.n_iterations=600 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=600\\
   evaluation.n_eval=12 evaluation.n_plots=12 evaluation.n_checkpoints=1 
 EOF

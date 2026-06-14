@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_so2_water_droplet
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -72,17 +72,18 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v2\\
-  target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=5 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=n50\\
+  target.num_solvent_molecules=50 target.constraint_radius=0.8 \\
   target.internal_constraints=none target.rigid_water=false \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
-  target.boundary_condition=droplet fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss-uni flow.base.learn_mean_var=false flow.type=GPS\\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-02/00-04-26_737012 \\
+  target.boundary_condition=droplet fab.loss_type=flow_reverse_kl fab.use_ais=false flow.type=perm-equi-gps-nf\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false \\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/19-10-56_708158 \\
   flow.blocks=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=5e-5 training.wd=1e-6 training.batch_size=502 evaluation.eval_batch_size=128\\
+  training.lr=5e-5 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=10 training.warmup_iter=100 \\
-  training.overlap_penalty=50 training.mixing=0.0 training.energy_mode=full \\
+  target.transform.canonical_sorting=false target.transform.version=GPS\\
+  training.overlap_penalty=10 training.mixing=0.2 training.energy_mode=full \\
   training.n_iterations=1000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=600\\
   evaluation.n_eval=5 evaluation.n_plots=5 evaluation.n_checkpoints=1 
 EOF
@@ -92,6 +93,6 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
-# training.n_pretraining=100
-# flow.type=coupled-spline-nf
-# 
+
+# stage 1
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/19-10-56_708158
