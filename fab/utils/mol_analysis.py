@@ -96,6 +96,59 @@ def compute_min_distances(traj, O_IDX, L, IS_PBC=True):
     return d_ww, d_sw
 
 
+def compute_solute_geometry(traj, N_SOLUTE_ATOMS, L, IS_PBC=True, bonds=None, angles=None):
+    """
+    Solute bond lengths and bond angles for all frames.
+
+    Parameters
+    ----------
+    traj : array_like, shape (N, N_ATOMS, 3)
+    N_SOLUTE_ATOMS : int
+    L : float
+    IS_PBC : bool
+    bonds : list of (i, j) or None
+        Pairs of solute-atom indices (0-based within solute).
+        Defaults to all unique pairs when None.
+    angles : list of (i, j, k) or None
+        Triplets of solute-atom indices; j is the vertex atom.
+        Defaults to no angles when None.
+
+    Returns
+    -------
+    bond_data : list of (label, lengths) where lengths is np.ndarray shape (N,)
+    angle_data : list of (label, angles_deg) where angles_deg is np.ndarray shape (N,)
+    """
+    traj = np.asarray(traj)
+    sol = traj[:, :N_SOLUTE_ATOMS, :]   # (N, S, 3)
+
+    def _mic(a, b):
+        d = b - a
+        if IS_PBC:
+            d -= L * np.round(d / L)
+        return d
+
+    if bonds is None:
+        bonds = [(i, j) for i in range(N_SOLUTE_ATOMS) for j in range(i + 1, N_SOLUTE_ATOMS)]
+    if angles is None:
+        angles = []
+
+    bond_data = []
+    for i, j in bonds:
+        v = _mic(sol[:, i, :], sol[:, j, :])
+        bond_data.append((f"{i}-{j}", np.linalg.norm(v, axis=-1)))
+
+    angle_data = []
+    for i, j, k in angles:
+        v1 = _mic(sol[:, j, :], sol[:, i, :])
+        v2 = _mic(sol[:, j, :], sol[:, k, :])
+        cos = (v1 * v2).sum(-1) / (
+            np.linalg.norm(v1, axis=-1) * np.linalg.norm(v2, axis=-1) + 1e-12
+        )
+        angle_data.append((f"{i}-{j}-{k}", np.degrees(np.arccos(np.clip(cos, -1, 1)))))
+
+    return bond_data, angle_data
+
+
 def compute_mean_pairwise_distances(traj, O_IDX, L, IS_PBC=True):
     """
     Per-frame mean pairwise distances (water-water and solute-water).

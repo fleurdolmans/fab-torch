@@ -18,6 +18,7 @@ from .mol_analysis import (
     compute_rdf_3d,
     compute_min_distances,
     compute_mean_pairwise_distances,
+    compute_solute_geometry,
     compute_water_geometry,
     density_entropy_3d,
 )
@@ -26,6 +27,7 @@ from .visuals import (
     plot_mol_position_density,
     plot_mol_oo_distances,
     plot_water_geometry,
+    plot_solute_geometry,
     plot_mol_energies,
 )
 
@@ -116,6 +118,8 @@ def evaluate_single_model(
     n_repeats=5,
     batch_size=256,
     dr=0.005,
+    solute_bonds=None,
+    solute_angles=None,
     visualize=True,
     print_summary=True,
 ):
@@ -177,6 +181,9 @@ def evaluate_single_model(
         r_sw_md, g_sw_md = compute_rdf_3d(x_md, [0], O_IDX, _L_rdf, dr=dr)
         r_ww_md, g_ww_md = compute_rdf_3d(x_md, O_IDX, O_IDX, _L_rdf, dr=dr)
         oh_md, hoh_md = compute_water_geometry(x_md, N_WATERS, O_IDX, H1_IDX, H2_IDX, L, IS_PBC)
+        sol_bonds_md, sol_angles_md = compute_solute_geometry(
+            x_md, N_SOLUTE_ATOMS, L, IS_PBC, solute_bonds, solute_angles,
+        )
         H_md, _ = density_entropy_3d(x_md, O_IDX, L if IS_PBC else None)
         md_stats = {
             "r_sw": r_sw_md, "g_sw": g_sw_md,
@@ -184,6 +191,8 @@ def evaluate_single_model(
             "d_ww": d_ww_md, "d_sw": d_sw_md,
             "d_ww_mean": d_ww_mean_md, "d_sw_mean": d_sw_mean_md,
             "oh":   oh_md,   "hoh":  hoh_md,
+            "sol_bonds":  sol_bonds_md,
+            "sol_angles": sol_angles_md,
             "density_entropy": H_md,
         }
         if u_md is not None:
@@ -203,6 +212,7 @@ def evaluate_single_model(
     d_ww_mean_scalars, d_sw_mean_scalars = [], []
     d_ww_arrays, d_sw_arrays = [], []
     oh_arrays, hoh_arrays = [], []
+    sol_bond_runs, sol_angle_runs = [], []   # list-of-lists, one per repeat
     u_gen_arrays = []
     ess_runs, ess_frac_runs = [], []
     entropy_runs = []
@@ -237,6 +247,13 @@ def evaluate_single_model(
         # Density entropy
         H_rep, _ = density_entropy_3d(x_gen, O_IDX, L if IS_PBC else None)
         entropy_runs.append(H_rep)
+
+        # Solute geometry
+        sol_bonds_rep, sol_angles_rep = compute_solute_geometry(
+            x_gen, N_SOLUTE_ATOMS, L, IS_PBC, solute_bonds, solute_angles,
+        )
+        sol_bond_runs.append(sol_bonds_rep)
+        sol_angle_runs.append(sol_angles_rep)
 
         # Geometry
         oh, hoh = compute_water_geometry(
@@ -280,6 +297,23 @@ def evaluate_single_model(
     d_sw_mean_mean, d_sw_mean_std = _ms(d_sw_mean_scalars)
     entropy_mean, entropy_std = _ms(entropy_runs)
 
+    # Aggregate solute geometry: per bond/angle, pool across repeats then mean±std
+    # sol_bond_runs[rep] = [(label, lengths(N,)), ...]
+    sol_bonds_agg    = []   # [(label, mean, std), ...]
+    sol_bonds_pooled = []   # [(label, pooled_array), ...]
+    if sol_bond_runs and sol_bond_runs[0]:
+        for b_idx, (lbl, _) in enumerate(sol_bond_runs[0]):
+            pooled = np.concatenate([sol_bond_runs[r][b_idx][1] for r in range(n_repeats)])
+            sol_bonds_agg.append((lbl, float(pooled.mean()), float(pooled.std())))
+            sol_bonds_pooled.append((lbl, pooled))
+    sol_angles_agg    = []
+    sol_angles_pooled = []
+    if sol_angle_runs and sol_angle_runs[0]:
+        for a_idx, (lbl, _) in enumerate(sol_angle_runs[0]):
+            pooled = np.concatenate([sol_angle_runs[r][a_idx][1] for r in range(n_repeats)])
+            sol_angles_agg.append((lbl, float(pooled.mean()), float(pooled.std())))
+            sol_angles_pooled.append((lbl, pooled))
+
     u_gen_pooled  = np.concatenate(u_gen_arrays)
     fin_pooled    = np.isfinite(u_gen_pooled)
     energy_mean_v = float(u_gen_pooled[fin_pooled].mean()) if fin_pooled.any() else float("nan")
@@ -313,6 +347,11 @@ def evaluate_single_model(
         "entropy_runs":  np.asarray(entropy_runs),
         "entropy_mean":  entropy_mean,
         "entropy_std":   entropy_std,
+        # solute geometry — aggregated stats and pooled raw arrays
+        "sol_bonds_agg":    sol_bonds_agg,
+        "sol_angles_agg":   sol_angles_agg,
+        "sol_bonds_pooled": sol_bonds_pooled,
+        "sol_angles_pooled": sol_angles_pooled,
         # geometry
         "oh_pooled":   np.concatenate(oh_arrays),
         "hoh_pooled":  np.concatenate(hoh_arrays),
@@ -403,6 +442,10 @@ def evaluate_single_model(
             print(f"  mean d(water-water)   : {md_stats['d_ww_mean'].mean():.4f} nm")
             print(f"  mean d(solute-water)  : {md_stats['d_sw_mean'].mean():.4f} nm")
             print(f"  density entropy       : {md_stats['density_entropy']:.4f}")
+            for lbl, lengths in md_stats["sol_bonds"]:
+                print(f"  solute bond {lbl}        : {lengths.mean():.4f} ± {lengths.std():.4f} nm")
+            for lbl, angles_deg in md_stats["sol_angles"]:
+                print(f"  solute angle {lbl}      : {angles_deg.mean():.2f} ± {angles_deg.std():.2f} °")
         else:
             print("  (no MD reference provided)")
 
@@ -418,6 +461,10 @@ def evaluate_single_model(
         print(f"  mean d(water-water)   : {d_ww_mean_mean:.4f} ± {d_ww_mean_std:.4f} nm")
         print(f"  mean d(solute-water)  : {d_sw_mean_mean:.4f} ± {d_sw_mean_std:.4f} nm")
         print(f"  density entropy       : {entropy_mean:.4f} ± {entropy_std:.4f}")
+        for lbl, mean_v, std_v in results["sol_bonds_agg"]:
+            print(f"  solute bond {lbl}        : {mean_v:.4f} ± {std_v:.4f} nm")
+        for lbl, mean_v, std_v in results["sol_angles_agg"]:
+            print(f"  solute angle {lbl}      : {mean_v:.2f} ± {std_v:.2f} °")
         print(f"  RDF s-w peak          : {results['g_sw_mean'].max():.3f} ± {results['g_sw_std'][results['g_sw_mean'].argmax()]:.3f}")
         print(f"  RDF w-w peak          : {results['g_ww_mean'].max():.3f} ± {results['g_ww_std'][results['g_ww_mean'].argmax()]:.3f}")
 
@@ -443,6 +490,8 @@ def evaluate_models(
     n_repeats=5,
     batch_size=256,
     dr=0.005,
+    solute_bonds=None,
+    solute_angles=None,
     colors=None,
     device="cpu",
     platform="CPU",
@@ -525,6 +574,8 @@ def evaluate_models(
             n_repeats=n_repeats,
             batch_size=batch_size,
             dr=dr,
+            solute_bonds=solute_bonds,
+            solute_angles=solute_angles,
             visualize=False,
             print_summary=True,
         )
@@ -538,7 +589,7 @@ def evaluate_models(
     _rdf_colors = colors[1:]  # reserve colors[0] for MD reference
 
     for panel, (r_key, g_key, g_std_key, title_rdf) in enumerate([
-        ("r_sw", "g_sw_mean", "g_sw_std", "Solute(0) – Water-O RDF"),
+        ("r_sw", "g_sw_mean", "g_sw_std", "Solute(S) – Water-O RDF"),
         ("r_ww", "g_ww_mean", "g_ww_std", "Water-O – Water-O RDF"),
     ]):
         _, ax = plt.subplots(figsize=(8, 5))
@@ -607,7 +658,23 @@ def evaluate_models(
     plot_water_geometry(oh_ds, hoh_ds)
 
     # ------------------------------------------------------------------
-    # Plot 4: Overlaid energy distributions
+    # Plot 4: Solute bond lengths and angles
+    # ------------------------------------------------------------------
+    first_res = eval_results[labels[0]]["results"]
+    if first_res["sol_bonds_pooled"] or first_res["sol_angles_pooled"]:
+        bond_ds, angle_ds = [], []
+        if md_ref is not None:
+            bond_ds.append((md_ref["sol_bonds"],  "MD reference", colors[0]))
+            angle_ds.append((md_ref["sol_angles"], "MD reference", colors[0]))
+        for i, lbl in enumerate(labels):
+            res = eval_results[lbl]["results"]
+            c = _rdf_colors[i % len(_rdf_colors)]
+            bond_ds.append((res["sol_bonds_pooled"],  lbl, c))
+            angle_ds.append((res["sol_angles_pooled"], lbl, c))
+        plot_solute_geometry(bond_ds, angle_ds)
+
+    # ------------------------------------------------------------------
+    # Plot 5: Overlaid energy distributions
     # ------------------------------------------------------------------
     u_ref = u_md if u_md is not None else None
     u_flow_all = np.concatenate(
@@ -744,5 +811,28 @@ def evaluate_models(
         [f"{eval_results[l]['results']['entropy_mean']:.4f} ± "
          f"{eval_results[l]['results']['entropy_std']:.4f}" for l in labels],
     )
+
+    # Solute bonds and angles (use first model's agg list to get labels)
+    first_res = eval_results[labels[0]]["results"]
+    for b_idx, (lbl, _, _) in enumerate(first_res["sol_bonds_agg"]):
+        md_bond_str = (
+            f"{md_ref['sol_bonds'][b_idx][1].mean():.4f}" if md_ref else "—"
+        )
+        _row(
+            f"Solute bond {lbl} [nm]",
+            md_bond_str,
+            [f"{eval_results[l]['results']['sol_bonds_agg'][b_idx][1]:.4f} ± "
+             f"{eval_results[l]['results']['sol_bonds_agg'][b_idx][2]:.4f}" for l in labels],
+        )
+    for a_idx, (lbl, _, _) in enumerate(first_res["sol_angles_agg"]):
+        md_angle_str = (
+            f"{md_ref['sol_angles'][a_idx][1].mean():.2f}" if md_ref else "—"
+        )
+        _row(
+            f"Solute angle {lbl} [°]",
+            md_angle_str,
+            [f"{eval_results[l]['results']['sol_angles_agg'][a_idx][1]:.2f} ± "
+             f"{eval_results[l]['results']['sol_angles_agg'][a_idx][2]:.2f}" for l in labels],
+        )
 
     return eval_results

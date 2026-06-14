@@ -270,7 +270,7 @@ def visualize_distances(ss, vv, label,
         ax.set_ylabel('Density', fontsize=16)
         ax.set_title(title, fontsize=18)
         if ax == axes[0]:  # Only add legend to the last subplot
-            ax.legend(fontsize=16, loc='upper left')
+            ax.legend(fontsize=12, loc='upper left')
 
     plt.tight_layout()
     plt.show()
@@ -514,7 +514,7 @@ def plot_water_oxygen_heatmaps(datasets, L, O_IDX, N_SOLUTE_ATOMS,
     plt.show()
 
 
-def plot_rdf_3d(sw_curves, ww_curves, L=None, IS_PBC=True):
+def plot_rdf_3d(sw_curves, ww_curves, L=None, IS_PBC=True, sigma_oo=0.31507):
     """
     Plot solute–water-O and water-O–water-O RDF panels.
 
@@ -525,36 +525,40 @@ def plot_rdf_3d(sw_curves, ww_curves, L=None, IS_PBC=True):
     Parameters
     ----------
     sw_curves : list of (r, g_r, label)
-        Solute(atom 0) – water-O RDF curves.
+        Solute(S) – water-O RDF curves.
     ww_curves : list of (r, g_r, label)
         Water-O – water-O RDF curves.
     L : float or None
         Box length (nm); used to set x-axis limit to L/2 when IS_PBC=True.
     IS_PBC : bool
-    colors : list[str] or None
-        Line colours in the same order as curves. Defaults to a standard palette.
+    sigma_oo : float or None
+        O-O LJ sigma (nm) to draw as a reference line on the water-water panel.
+        TIP3P value: 0.31507 nm.
     """
     _colors = ["black", "steelblue", "orangered", "purple", "darkorange", "crimson"]
     panels = [
-        (sw_curves, "Solute(0) – Water-O RDF"),
-        (ww_curves, "Water-O – Water-O RDF"),
+        (sw_curves, "Solute(S) – Water-O RDF", False),
+        (ww_curves, "Water-O – Water-O RDF",   True),
     ]
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    for ax, (curves, title) in zip(axes, panels):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    for ax, (curves, title, is_ww) in zip(axes, panels):
         for i, (r, g, lbl) in enumerate(curves):
             ax.plot(r, g, lw=2, color=_colors[i % len(_colors)], label=lbl)
         ax.axhline(1.0, color="k", ls="--", lw=0.8, label="Ideal gas")
+        if is_ww and sigma_oo is not None:
+            ax.axvline(sigma_oo, color="gray", ls=":", lw=1.2,
+                       label=f"σ_OO = {sigma_oo:.4f} nm")
         ax.set_xlabel("r  (nm)", fontsize=12)
         ax.set_ylabel("g(r)", fontsize=12)
         ax.set_title(title, fontsize=16)
         if IS_PBC and L is not None:
             ax.set_xlim(0, 0.5 * L)
-        ax.legend(fontsize=11)
+        ax.legend(fontsize=14)
     plt.tight_layout()
     plt.show()
 
 
-def plot_mol_oo_distances(ww_dists, sw_dists, colors=None):
+def plot_mol_oo_distances(ww_dists, sw_dists, colors=None, sigma_oo=None):
     """
     Plot minimum O-O distance distributions (water–water and solute–water).
 
@@ -566,6 +570,9 @@ def plot_mol_oo_distances(ww_dists, sw_dists, colors=None):
     sw_dists : list of (distances, label)
         Per-frame minimum solute-atom-0 – water-O distances.
     colors : list[str] or None
+    sigma_oo : float or None
+        O-O LJ sigma (nm) to draw as a reference line on the water-water panel.
+        TIP3P value: 0.31507 nm.
     """
     if colors is None:
         colors = ["black", "steelblue", "orangered", "purple", "darkorange", "crimson"]
@@ -573,19 +580,25 @@ def plot_mol_oo_distances(ww_dists, sw_dists, colors=None):
     _all  = np.concatenate([v for v, _ in ww_dists + sw_dists])
     _bins = np.linspace(0, np.nanpercentile(_all[np.isfinite(_all)], 99), 80)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    for ax, dists, stitle in zip(
+    fig, axes = plt.subplots(2, 1, figsize=(7, 8))
+    for ax, dists, stitle, show_sigma in zip(
         axes,
         [ww_dists, sw_dists],
-        ["Water-O – Water-O  (min per frame)", "Solute(0) – Water-O  (min per frame)"],
+        ["Water-O – Water-O ", "Solute(S) – Water-O "],
+        [True, False],
     ):
         for i, (d, lbl) in enumerate(dists):
             ax.hist(d, bins=_bins, density=True, alpha=0.35,
                     color=colors[i % len(colors)], label=lbl, histtype="stepfilled")
-        ax.set_xlabel("Min distance  (nm)", fontsize=14)
+        if show_sigma and sigma_oo is not None:
+            ax.axvline(sigma_oo, color="gray", ls=":", lw=1.2,
+                       label=f"σ_OO = {sigma_oo:.4f} nm")
         ax.set_ylabel("Density", fontsize=14)
         ax.set_title(stitle, fontsize=14)
-        ax.legend(fontsize=11)
+        if ax == axes[0]:
+            ax.legend(fontsize=12, loc="upper left")
+            ax.set_xlabel("Min distance  (nm)", fontsize=14)
+            ax.xaxis.set_visible(False)
     plt.tight_layout()
     plt.show()
 
@@ -632,6 +645,73 @@ def plot_water_geometry(oh_datasets, hoh_datasets):
     axes[1].set_ylabel("Density", fontsize=12)
     axes[1].set_title("Water H–O–H angle", fontsize=16)
     axes[1].legend(fontsize=11)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_solute_geometry(bond_datasets, angle_datasets, ref_bonds=None, ref_angles=None):
+    """
+    Plot solute bond length and angle distributions.
+
+    Parameters
+    ----------
+    bond_datasets : list of (bonds, label, color)
+        bonds : list of (bond_label_str, lengths_nm_array)
+            Output of ``compute_solute_geometry`` (bond_data field), pooled
+            across repeats.
+    angle_datasets : list of (angles, label, color)
+        angles : list of (angle_label_str, angles_deg_array)
+    ref_bonds : list of (bond_label_str, ref_nm) or None
+        Reference values shown as vertical dashed lines (e.g. equilibrium
+        bond lengths from the force field).
+    ref_angles : list of (angle_label_str, ref_deg) or None
+    """
+    bond_labels  = [lbl for lbl, _ in (bond_datasets[0][0]  if bond_datasets  else [])]
+    angle_labels = [lbl for lbl, _ in (angle_datasets[0][0] if angle_datasets else [])]
+    n_panels = len(bond_labels) + len(angle_labels)
+    if n_panels == 0:
+        return
+
+    ref_bonds_dict  = dict(ref_bonds)  if ref_bonds  else {}
+    ref_angles_dict = dict(ref_angles) if ref_angles else {}
+
+    fig, axes = plt.subplots(n_panels, 1, figsize=(3 * n_panels, 8))
+    if n_panels == 1:
+        axes = [axes]
+
+    panel = 0
+    for b_idx, b_label in enumerate(bond_labels):
+        ax = axes[panel]
+        for bonds, lbl, c in bond_datasets:
+            arr = np.asarray(bonds[b_idx][1])
+            ax.hist(arr, bins=80, density=True, alpha=0.4, color=c,
+                    histtype="stepfilled", label=lbl)
+        if b_label in ref_bonds_dict:
+            v = ref_bonds_dict[b_label]
+            ax.axvline(v, color="gray", ls=":", lw=1.5,
+                       label=f"ref = {v:.4f} nm")
+        ax.set_xlabel(f"Bond length  {b_label}  (nm)", fontsize=12)
+        ax.set_ylabel("Density", fontsize=12)
+        ax.set_title(f"Solute bond  {b_label}", fontsize=14)
+        panel += 1
+
+    for a_idx, a_label in enumerate(angle_labels):
+        ax = axes[panel]
+        for angles, lbl, c in angle_datasets:
+            arr = np.asarray(angles[a_idx][1])
+            ax.hist(arr, bins=80, density=True, alpha=0.4, color=c,
+                    histtype="stepfilled", label=lbl)
+        if a_label in ref_angles_dict:
+            v = ref_angles_dict[a_label]
+            ax.axvline(v, color="gray", ls=":", lw=1.5,
+                       label=f"ref = {v:.1f}°")
+        ax.set_xlabel(f"Angle  {a_label}  (°)", fontsize=12)
+        ax.set_ylabel("Density", fontsize=12)
+        ax.set_title(f"Solute angle  {a_label}", fontsize=14)
+        if ax == axes[-1]:  # Only add legend to the last subplot
+            ax.legend(fontsize=12, loc="upper left")
+        panel += 1
+
     plt.tight_layout()
     plt.show()
 

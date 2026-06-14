@@ -24,6 +24,7 @@ from experiments.make_flow import (
     make_perm_equi_torus_flow_nf,
     make_circ_rqs_torus_flow_nf,
     make_perm_equi_sfic_torus_flow_nf,
+    make_perm_equi_gps_flow_nf
 )
 def load_config(run_dir):
     for _candidate in [
@@ -85,6 +86,8 @@ def load_model(target, run_dir):
     _ft = cfg.flow.type
     if _ft == "shared-water-spline-nf":
         flow = make_shared_water_spline_flow_nf(cfg, target)
+    elif _ft == "perm-equi-gps-nf":
+        flow = make_perm_equi_gps_flow_nf(cfg, target)
     elif _ft == "perm-equi-spline-nf":
         flow = make_perm_equi_spline_flow_nf(cfg, target)
     elif _ft == "perm-equi-joint-spline-nf":
