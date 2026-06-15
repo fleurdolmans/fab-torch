@@ -214,6 +214,7 @@ def evaluate_single_model(
     oh_arrays, hoh_arrays = [], []
     sol_bond_runs, sol_angle_runs = [], []   # list-of-lists, one per repeat
     u_gen_arrays = []
+    e_mean_runs, e_std_runs = [], []
     ess_runs, ess_frac_runs = [], []
     entropy_runs = []
     x_gen_runs = []
@@ -268,6 +269,8 @@ def evaluate_single_model(
         fin = np.isfinite(u_gen)
         e_mean = float(u_gen[fin].mean()) if fin.any() else float("nan")
         e_std  = float(u_gen[fin].std())  if fin.any() else float("nan")
+        e_mean_runs.append(e_mean)
+        e_std_runs.append(e_std)
 
         # ESS
         log_w = log_p - log_q
@@ -315,9 +318,10 @@ def evaluate_single_model(
             sol_angles_pooled.append((lbl, pooled))
 
     u_gen_pooled  = np.concatenate(u_gen_arrays)
-    fin_pooled    = np.isfinite(u_gen_pooled)
-    energy_mean_v = float(u_gen_pooled[fin_pooled].mean()) if fin_pooled.any() else float("nan")
-    energy_std_v  = float(u_gen_pooled[fin_pooled].std())  if fin_pooled.any() else float("nan")
+
+    # Per-repeat Umean and Ustd aggregated over runs
+    umean_mean, umean_std = _ms(e_mean_runs)
+    ustd_mean,  ustd_std  = _ms(e_std_runs)
 
     results = {
         "n_repeats":  n_repeats,
@@ -357,8 +361,10 @@ def evaluate_single_model(
         "hoh_pooled":  np.concatenate(hoh_arrays),
         # energy
         "u_gen_pooled":  u_gen_pooled,
-        "energy_mean":   energy_mean_v,
-        "energy_std":    energy_std_v,
+        "e_mean_runs":   np.asarray(e_mean_runs),
+        "e_std_runs":    np.asarray(e_std_runs),
+        "umean_mean":    umean_mean,  "umean_std":  umean_std,
+        "ustd_mean":     ustd_mean,   "ustd_std":   ustd_std,
         # ESS
         "ess_runs":       np.asarray(ess_runs),
         "ess_frac_runs":  np.asarray(ess_frac_runs),
@@ -452,7 +458,8 @@ def evaluate_single_model(
         print(f"\n{_sep}")
         print(f"Flow statistics averaged over {n_repeats} repeats × {n_samples} samples")
         print(_sep)
-        print(f"  energy mean ± std     : {results['energy_mean']:.2f} ± {results['energy_std']:.2f}")
+        print(f"  Umean (mean over runs): {results['umean_mean']:.2f} ± {results['umean_std']:.2f}")
+        print(f"  Ustd  (mean over runs): {results['ustd_mean']:.2f} ± {results['ustd_std']:.2f}")
         print(f"  energy finite frac    : {np.isfinite(results['u_gen_pooled']).mean()*100:.1f}%")
         print(f"  ESS                   : {ess_mean:.0f} ± {ess_std:.0f}  "
               f"({ess_frac_mean*100:.2f}% ± {ess_frac_std*100:.2f}%)")
@@ -739,16 +746,23 @@ def evaluate_models(
          f"{eval_results[l]['results']['ess_frac_std']*100:.2f}%" for l in labels],
     )
 
-    # Energy
-    md_e_str = "—"
+    # Energy — Umean and Ustd reported separately, each as mean ± std over runs
+    md_umean_str = "—"
+    md_ustd_str  = "—"
     if md_ref is not None and "energy" in md_ref:
-        md_e_str = (f"{md_ref['energy']['mean']:.1f} ± "
-                    f"{md_ref['energy']['std']:.1f}")
+        md_umean_str = f"{md_ref['energy']['mean']:.1f}"
+        md_ustd_str  = f"{md_ref['energy']['std']:.1f}"
     _row(
-        "Energy mean ± std",
-        md_e_str,
-        [f"{eval_results[l]['results']['energy_mean']:.1f} ± "
-         f"{eval_results[l]['results']['energy_std']:.1f}" for l in labels],
+        "Umean (mean ± std over runs)",
+        md_umean_str,
+        [f"{eval_results[l]['results']['umean_mean']:.1f} ± "
+         f"{eval_results[l]['results']['umean_std']:.1f}" for l in labels],
+    )
+    _row(
+        "Ustd  (mean ± std over runs)",
+        md_ustd_str,
+        [f"{eval_results[l]['results']['ustd_mean']:.1f} ± "
+         f"{eval_results[l]['results']['ustd_std']:.1f}" for l in labels],
     )
 
     # RDF peak solute-water
