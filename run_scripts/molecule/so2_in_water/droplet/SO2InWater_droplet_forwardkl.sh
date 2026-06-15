@@ -78,8 +78,8 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.energy_cut=1e6 target.energy_max=1e10 \\
   target.boundary_condition=droplet fab.loss_type=forward_kl fab.use_ais=false \\
   flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-gps-nf\\
-  flow.blocks=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3\\
-  training.lr=1e-5 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
+  flow.blocks=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3.5\\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
   training.max_grad_norm=10 training.warmup_iter=100 \\
   target.transform.canonical_sorting=false target.transform.version=GPS\\
   training.overlap_penalty=0 training.mixing=0.0 training.energy_mode=full \\
