@@ -95,13 +95,3 @@ chmod +x "${SLURM}"
 echo "Submitting GPU job: ${SLURM}"
 
 sbatch ${SLURM}
-
-# PRE100 FIXED
-# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-24/13-26-08_780710
-
-# PRE100 STRUCGAUSS FIXED
-# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-24/14-12-00_838705 \\
- # PRE100 STRUCGAUSS
-#  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-23/10-54-21_712292 \\
-# PRE100 
-  # training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-03-23/10-54-21_712292 \\

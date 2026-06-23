@@ -599,7 +599,8 @@ def evaluate_models(
         ("r_sw", "g_sw_mean", "g_sw_std", "Solute(S) – Water-O RDF"),
         ("r_ww", "g_ww_mean", "g_ww_std", "Water-O – Water-O RDF"),
     ]):
-        _, ax = plt.subplots(figsize=(8, 5))
+        _, ax = plt.subplots(figsize=(7, 5))
+        sigma_oo=0.31507  # nm, for reference line
 
         if x_md is not None:
             md_ref = eval_results[labels[0]]["results"]["md_stats"]
@@ -620,12 +621,18 @@ def evaluate_models(
             ax.fill_between(r, np.maximum(g - gs, 0), g + gs, color=c, alpha=0.15)
 
         ax.axhline(1.0, color="k", ls="--", lw=0.8, label="Ideal gas")
-        ax.set_xlabel("r  (nm)", fontsize=12)
-        ax.set_ylabel("g(r)", fontsize=12)
-        ax.set_title(title_rdf, fontsize=16)
+        ax.axvline(sigma_oo, color="black", ls=":", lw=1.2,
+                       label=f"σ_OO = {sigma_oo:.4f} nm")
+        # ax.set_xlabel("r  (nm)", fontsize=16)
+        ax.xaxis.set_visible(False)
+        ax.yaxis.set_visible(False)
+        # ax.set_ylabel("g(r)", fontsize=16)
+        ax.tick_params(axis="both", which="major", labelsize=14)
+        # ax.set_title(title_rdf, fontsize=16)
+        ax.set_ylim(0, 1.95) 
         if IS_PBC:
             ax.set_xlim(0, 0.5 * L)
-        ax.legend(fontsize=11)
+        ax.legend(fontsize=14, loc="upper left")
         plt.tight_layout()
         plt.show()
 

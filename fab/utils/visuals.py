@@ -209,10 +209,10 @@ def visualize_rdf(r=None, gr=None, label=None, sigma=1.1, title='Solute-Solvent 
     ax.axhline(1.0, color='k', ls='--', lw=0.8, label='Ideal gas')
     ax.axvline(sigma, color='k', ls=':', lw=0.8, label=f'σ = {sigma}')
 
-    ax.set_xlabel('r  (nm)', fontsize=12)
-    ax.set_ylabel('g(r)', fontsize=12)
-    ax.set_title(title, fontsize=18)
-    ax.legend(fontsize=12, loc='upper left')
+    ax.set_xlabel('r  (nm)', fontsize=14)
+    ax.set_ylabel('g(r)', fontsize=14)
+    # ax.set_title(title, fontsize=18)
+    ax.legend(fontsize=14, loc='upper left')
 
     plt.tight_layout()
     plt.show()
@@ -548,12 +548,15 @@ def plot_rdf_3d(sw_curves, ww_curves, L=None, IS_PBC=True, sigma_oo=0.31507):
         if is_ww and sigma_oo is not None:
             ax.axvline(sigma_oo, color="gray", ls=":", lw=1.2,
                        label=f"σ_OO = {sigma_oo:.4f} nm")
-        ax.set_xlabel("r  (nm)", fontsize=12)
-        ax.set_ylabel("g(r)", fontsize=12)
-        ax.set_title(title, fontsize=16)
+        ax.set_xlabel("r  (nm)", fontsize=16)
+        ax.set_ylabel("g(r)", fontsize=16)
+        if ax == axes[0]:
+            ax.set_ylim(0, 180)
+            ax.legend(fontsize=16, loc="upper left")
+        # ax.set_title(title, fontsize=16)
         if IS_PBC and L is not None:
             ax.set_xlim(0, 0.5 * L)
-        ax.legend(fontsize=14)
+        
     plt.tight_layout()
     plt.show()
 
@@ -584,7 +587,7 @@ def plot_mol_oo_distances(ww_dists, sw_dists, colors=None, sigma_oo=None):
     for ax, dists, stitle, show_sigma in zip(
         axes,
         [ww_dists, sw_dists],
-        ["Water-O – Water-O ", "Solute(S) – Water-O "],
+        ["Water(O) – Water(O) ", "Solute(S) – Water(O) "],
         [True, False],
     ):
         for i, (d, lbl) in enumerate(dists):
@@ -593,11 +596,17 @@ def plot_mol_oo_distances(ww_dists, sw_dists, colors=None, sigma_oo=None):
         if show_sigma and sigma_oo is not None:
             ax.axvline(sigma_oo, color="gray", ls=":", lw=1.2,
                        label=f"σ_OO = {sigma_oo:.4f} nm")
-        ax.set_ylabel("Density", fontsize=14)
-        ax.set_title(stitle, fontsize=14)
+        # ax.set_ylabel("Density", fontsize=16)
+        ax.set_xlim(0, 0.35)
+        ax.set_title(stitle, fontsize=16)
+        ax.tick_params(axis="both", which="major", labelsize=14)
+        if ax == axes[1]:
+            ax.set_ylim(0, 35)
+            ax.set_xlabel("r (nm)", fontsize=16)
         if ax == axes[0]:
-            ax.legend(fontsize=12, loc="upper left")
-            ax.set_xlabel("Min distance  (nm)", fontsize=14)
+            ax.set_ylim(0, 130)
+            # ax.legend(fontsize=16, loc="upper left")
+            ax.yaxis.set_visible(False)
             ax.xaxis.set_visible(False)
     plt.tight_layout()
     plt.show()
@@ -675,7 +684,7 @@ def plot_solute_geometry(bond_datasets, angle_datasets, ref_bonds=None, ref_angl
     ref_bonds_dict  = dict(ref_bonds)  if ref_bonds  else {}
     ref_angles_dict = dict(ref_angles) if ref_angles else {}
 
-    fig, axes = plt.subplots(n_panels, 1, figsize=(3 * n_panels, 8))
+    fig, axes = plt.subplots(1, n_panels, figsize=(4 * n_panels, 4))
     if n_panels == 1:
         axes = [axes]
 
@@ -874,5 +883,341 @@ def plot_pretty_density_histograms(
     cbar.set_label("solvent count per bin (log scale)", fontsize=12)
     plt.show()
 
+
+def plot_training_trajectory(
+    model_losses,
+    stage_names,
+    flow_labels=None,
+    smooth_window=None,
+    figsize=(12, 4),
+    title='Training loss trajectory',
+    show_raw=False,
+    ylim=None,
+    show_gradient=False,
+    stage_boundaries=None,
+    boundary_unit='iteration',
+    iters_per_epoch=None,
+    stage_label_y=0.97,
+    show_stage_shading=True,
+    show_stage_lines=True,
+    colors=None,
+):
+    """
+    Plot the concatenated training loss trajectory across multiple stages
+    and/or multiple flows, given pre-loaded loss arrays.
+
+    Parameters
+    ----------
+    model_losses : list of array-like  or  list of lists of array-like
+        Single flow, one array per stage::
+
+            model_losses = [stage1_loss, stage2_loss]
+
+        Multiple flows, one list-of-stage-arrays per flow::
+
+            model_losses = [
+                [flow1_stage1_loss, flow1_stage2_loss],
+                [flow2_stage1_loss, flow2_stage2_loss],
+            ]
+
+        When using ``stage_boundaries`` with a concatenated loss, wrap in a
+        single-element list::
+
+            model_losses = [all_loss]           # single flow
+            model_losses = [[all_loss_f1], [all_loss_f2]]  # two flows
+
+    stage_names : list of str  or  list of lists of str
+        Stage labels matching ``model_losses``.
+
+        Single flow::
+
+            stage_names = ['ML', 'KL']
+
+        Multiple flows::
+
+            stage_names = [['ML', 'KL'], ['ML', 'KL']]
+
+    flow_labels : list of str or None
+        Legend labels for each flow (e.g. ``['LGT', 'GPR']``).
+        Required for a useful legend when plotting multiple flows.
+
+    smooth_window : int or None
+        Moving-average window width. Defaults to ``max(1, total // 200)``.
+
+    figsize : tuple
+        Passed to ``plt.subplots``.
+
+    title : str
+
+    show_raw : bool
+        If True, draw the unsmoothed loss as a faint background line.
+
+    ylim : tuple or None
+        Explicit y-axis limits, e.g. ``(0, 5)``.
+
+    show_gradient : bool
+        If True, plot d(loss)/d(iteration) on a secondary y-axis.
+
+    stage_boundaries : None, list, or list of lists
+        Manual stage boundaries (useful when one loss array spans several stages).
+
+        ``None`` — inferred from the lengths of the arrays in ``model_losses``.
+
+        Otherwise interpreted as iteration indices (``boundary_unit='iteration'``)
+        or epoch numbers (``boundary_unit='epoch'``).
+
+        Accepted formats (for a run with N stages):
+
+        * Full:     ``[0, 5000, 12000, 20000]``  (N+1 entries)
+        * End pts:  ``[5000, 12000, 20000]``      (N entries, 0 prepended)
+        * Internal: ``[5000, 12000]``             (N-1 entries, 0 and total appended)
+
+        For multiple flows pass a shared list or a list-of-lists.
+
+    boundary_unit : ``'iteration'`` or ``'epoch'``
+
+    iters_per_epoch : int, float, list, or None
+        Required when ``boundary_unit='epoch'``.
+
+    stage_label_y : float
+        Vertical position of stage labels in axes coordinates.
+
+    show_stage_shading : bool
+
+    show_stage_lines : bool
+
+    colors : list of str or None
+        Line colours for each flow (default palette is used when None).
+
+    Returns
+    -------
+    fig, ax : matplotlib Figure and Axes
+
+    Examples
+    --------
+    Single flow, two stages fetched from WandB::
+
+        import wandb
+        api = wandb.Api()
+        def _get_loss(run_id):
+            run = api.run(f"entity/project/{run_id}")
+            return run.history(keys=["loss"])["loss"].dropna().tolist()
+
+        plot_training_trajectory(
+            model_losses=[_get_loss("run_stage1"), _get_loss("run_stage2")],
+            stage_names=["ML", "KL"],
+        )
+
+    Two flows, same stage structure::
+
+        plot_training_trajectory(
+            model_losses=[
+                [lgt_ml_loss, lgt_kl_loss],
+                [gpr_ml_loss, gpr_kl_loss],
+            ],
+            stage_names=[["ML", "KL"], ["ML", "KL"]],
+            flow_labels=["LGT", "GPR"],
+        )
+    """
+    from matplotlib.transforms import blended_transform_factory
+
+    if colors is None:
+        colors = ['steelblue', 'orangered', 'seagreen', 'purple', 'darkorange', 'crimson']
+
+    stage_colors = ['#d0e8f5', '#fde8d0', '#d0f5d8', '#f5d0e8', '#ede8f5', '#f5f5d0']
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _is_multi_flow(x):
+        """True when x is [[stage_arrays...], [stage_arrays...]] (multi-flow)."""
+        if not (isinstance(x, (list, tuple)) and len(x) > 0):
+            return False
+        first = x[0]
+        if not (isinstance(first, (list, tuple, np.ndarray)) and len(first) > 0):
+            return False
+        # Multi-flow: first element of the first item is itself array-like.
+        # Single-flow: first element of the first item is a scalar.
+        return isinstance(first[0], (list, tuple, np.ndarray))
+
+    def _normalise_flows(losses, names):
+        multi = _is_multi_flow(losses)
+        if not multi:
+            losses = [losses]
+            names  = [names] if isinstance(names[0], str) else names
+        return losses, names, multi
+
+    def _normalise_iters_per_epoch(ipe, n):
+        if ipe is None:
+            return None
+        if isinstance(ipe, (list, tuple, np.ndarray)):
+            if len(ipe) != n:
+                raise ValueError(
+                    f"iters_per_epoch must have one entry per flow. Got {len(ipe)} for {n} flows."
+                )
+            return list(ipe)
+        return [ipe] * n
+
+    def _resolve_boundaries(stage_boundaries, flow_idx, n_flows, total, n_stages,
+                             boundary_unit, ipe_flow):
+        if stage_boundaries is None:
+            return None
+
+        if _is_multi_flow_boundaries(stage_boundaries, n_flows):
+            raw = list(stage_boundaries[flow_idx])
+        else:
+            raw = list(stage_boundaries)
+
+        if boundary_unit == 'epoch':
+            if ipe_flow is None:
+                raise ValueError("iters_per_epoch is required when boundary_unit='epoch'.")
+            raw = [int(round(e * ipe_flow)) for e in raw]
+        else:
+            raw = [int(round(b)) for b in raw]
+
+        # Accept full / end-points / internal formats.
+        if len(raw) == n_stages + 1:
+            if raw[0] != 0:
+                raise ValueError("Full stage_boundaries must start with 0.")
+        elif len(raw) == n_stages:
+            raw = [0] + raw
+        elif len(raw) == n_stages - 1:
+            raw = [0] + raw + [total]
+        else:
+            raise ValueError(
+                f"stage_boundaries length {len(raw)} does not match n_stages={n_stages}. "
+                "Expected N+1, N, or N-1 entries."
+            )
+
+        if any(raw[i] >= raw[i + 1] for i in range(len(raw) - 1)):
+            raise ValueError("stage_boundaries must be strictly increasing.")
+        if raw[-1] > total:
+            raise ValueError(
+                f"Final boundary {raw[-1]} exceeds total loss length {total}."
+            )
+        return raw
+
+    def _is_multi_flow_boundaries(sb, n_flows):
+        return (
+            isinstance(sb, (list, tuple))
+            and len(sb) > 0
+            and isinstance(sb[0], (list, tuple))
+            and len(sb) == n_flows
+        )
+
+    # ------------------------------------------------------------------
+    # Normalise inputs
+    # ------------------------------------------------------------------
+    model_losses, stage_names, multi_flow = _normalise_flows(model_losses, stage_names)
+    n_flows = len(model_losses)
+
+    if len(stage_names) != n_flows:
+        raise ValueError(
+            f"stage_names must have one entry per flow. Got {len(stage_names)} for {n_flows} flows."
+        )
+    if flow_labels is not None and len(flow_labels) != n_flows:
+        raise ValueError(
+            f"flow_labels must have one entry per flow. Got {len(flow_labels)} for {n_flows} flows."
+        )
+    if multi_flow and flow_labels is None:
+        flow_labels = [f'Flow {i + 1}' for i in range(n_flows)]
+
+    ipe_by_flow = _normalise_iters_per_epoch(iters_per_epoch, n_flows)
+
+    # ------------------------------------------------------------------
+    # Figure
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax2 = None
+    if show_gradient:
+        ax2 = ax.twinx()
+        ax2.set_ylabel('d(Loss) / d(iteration)', fontsize=11, color='gray')
+        ax2.tick_params(axis='y', labelcolor='gray')
+        ax2.axhline(0, color='gray', lw=0.6, ls=':', alpha=0.6)
+
+    flow0_last_boundary = 0
+
+    for flow_idx, (stage_losses, names) in enumerate(zip(model_losses, stage_names)):
+        stage_losses = [np.asarray(s, dtype=float) for s in stage_losses]
+        all_losses   = np.concatenate(stage_losses)
+        total        = len(all_losses)
+
+        if total == 0:
+            raise ValueError(f"Flow {flow_idx}: no loss values found.")
+
+        # Boundaries
+        if stage_boundaries is None:
+            bounds = [0]
+            running = 0
+            for s in stage_losses:
+                running += len(s)
+                bounds.append(running)
+        else:
+            bounds = _resolve_boundaries(
+                stage_boundaries, flow_idx, n_flows, total, len(names),
+                boundary_unit, None if ipe_by_flow is None else ipe_by_flow[flow_idx],
+            )
+
+        # Smooth
+        win = smooth_window if smooth_window is not None else max(1, total // 200)
+        win = int(win)
+        smoothed = np.convolve(all_losses, np.ones(win) / win, mode='valid')
+        x_smooth = np.arange(win // 2, win // 2 + len(smoothed))
+
+        color = colors[flow_idx % len(colors)]
+        label = flow_labels[flow_idx] if flow_labels is not None else None
+        trans = blended_transform_factory(ax.transData, ax.transAxes)
+
+        # Stage shading
+        if show_stage_shading:
+            for i, (start, end) in enumerate(zip(bounds[:-1], bounds[1:])):
+                ax.axvspan(start, end, alpha=0.12, color=stage_colors[i % len(stage_colors)])
+
+        # Stage separator lines
+        if show_stage_lines:
+            for b in bounds[1:-1]:
+                ax.axvline(b, color='gray', ls='--', lw=1.0, alpha=0.7)
+
+        # Stage labels (only draw for flow 0, or for stages beyond flow 0's range)
+        for name, start, end in zip(names, bounds[:-1], bounds[1:]):
+            if flow_idx == 0 or start >= flow0_last_boundary:
+                ax.text(
+                    (start + end) / 2, stage_label_y, name,
+                    transform=trans, ha='center', va='top', fontsize=14, alpha=0.85,
+                )
+
+        if flow_idx == 0:
+            flow0_last_boundary = bounds[-1]
+
+        # Raw loss
+        if show_raw:
+            ax.plot(np.arange(total), all_losses, color=color, lw=0.4, alpha=0.3)
+
+        # Smoothed loss
+        ax.plot(x_smooth, smoothed, color=color, lw=1.5, label=label)
+
+        # Optional gradient
+        if show_gradient:
+            grad = np.convolve(np.gradient(smoothed), np.ones(win) / win, mode='same')
+            ax2.plot(x_smooth, grad, color=color, lw=1.0, ls='--', alpha=1.0,
+                     label=f'{label} gradient' if label else 'gradient')
+
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    ax.set_xlim(left=0)
+    ax.set_xlabel('Batch iteration', fontsize=14)
+    ax.set_ylabel('Loss', fontsize=14)
+    ax.set_title(title, fontsize=16)
+
+    if flow_labels is not None:
+        ax.legend(fontsize=14, loc='upper right')
+
+    plt.tight_layout()
+    plt.show()
+
+    return fig, ax
 
 
