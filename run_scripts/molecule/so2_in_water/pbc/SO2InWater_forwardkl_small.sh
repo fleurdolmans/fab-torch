@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=03:00:00
+#SBATCH --time=7:00:00
 
 module purge
 module load 2025
@@ -77,14 +77,14 @@ python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e16 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=structured-gauss flow.base.learn_mean_var=true flow.type=perm-equi-spline-nf\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf\\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=4 flow.tail_bound=3\\
   training.lr=1e-4 training.wd=1e-6 training.batch_size=512 evaluation.eval_batch_size=128\\
-  training.max_grad_norm=1 training.warmup_iter=500 \\
-  target.transform.canonical_sorting=true target.transform.version=GPR\\
+  training.max_grad_norm=1 training.warmup_iter=2000 \\
+  target.transform.canonical_sorting=true target.transform.version=LGT\\
   training.overlap_penalty=0.0 training.mixing=0.0 training.energy_mode=full \\
-  training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
-  evaluation.n_eval=10 evaluation.n_plots=5 evaluation.n_checkpoints=1 
+  training.n_iterations=50000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=50000\\
+  evaluation.n_eval=50 evaluation.n_plots=50 evaluation.n_checkpoints=1 
 EOF
 
 chmod +x "${SLURM}"

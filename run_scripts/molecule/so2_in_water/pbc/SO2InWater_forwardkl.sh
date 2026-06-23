@@ -2,7 +2,7 @@
 #SBATCH --job-name=slurm_so2_water
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
-#SBATCH --partition=staging
+#SBATCH --partition=rome
 #SBATCH --time=00:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -72,16 +72,16 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.max_n_train_samples=50000\\
-  target.simulation_version=v2 target.box_length_nm=2.5 target.nonbonded_cutoff_nm=1.0 target.num_solvent_molecules=522 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} max_n_train_samples=50000\\
+  target.simulation_version=v8 target.box_length_nm=2.0 target.nonbonded_cutoff_nm=0.9 target.num_solvent_molecules=267 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
-  target.energy_cut=1e6 target.energy_max=1e10 \\
+  target.energy_cut=1e6 target.energy_max=1e16 \\
   target.boundary_condition=pbc fab.loss_type=forward_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=structured-gauss flow.base.learn_mean_var=true flow.type=shared-water-spline-nf\\
-  flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=4\\
-  training.lr=1e-4 training.wd=1e-6 training.batch_size=32 evaluation.eval_batch_size=32\\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf\\
+  flow.layers=8 flow.blocks_per_layer=2 flow.group_size=6 flow.tail_bound=4 \\
+  training.lr=1e-4 training.wd=1e-6 training.batch_size=32 evaluation.eval_batch_size=32 \\
   training.max_grad_norm=10 training.warmup_iter=500 \\
-  training.overlap_penalty=100 training.mixing=0.0 training.energy_mode=full target.transform.version=SFIC-T\\
+  training.overlap_penalty=100 training.mixing=0.0 training.energy_mode=full target.transform.version=GPR \\
   training.n_iterations=10000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=10000\\
   evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1 
 EOF

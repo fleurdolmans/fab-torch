@@ -48,7 +48,7 @@ cat > "${SLURM}" <<EOF
 #SBATCH --cpus-per-task=9
 #SBATCH --gpus=1
 #SBATCH --partition=gpu_a100
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 
 module purge
 module load 2025
@@ -72,20 +72,20 @@ nvidia-smi
 
 python ${LOGS_DIR}/${PROJECT_NAME}/experiments/solvation/run.py \\
   --config-name SoluteInSolvent \\
-  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10 \\
+  target.solute_name=${SOLUTE} target.solvent_name=${SOLVENT} target.simulation_version=v10\\
   target.box_length_nm=0.9 target.nonbonded_cutoff_nm=0.4 target.num_solvent_molecules=22 \\
   target.internal_constraints=hbonds target.rigid_water=true \\
   target.energy_cut=1e6 target.energy_max=1e16 \\
   target.boundary_condition=pbc fab.loss_type=flow_reverse_kl fab.use_ais=false \\
-  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-torus-nf \\
+  flow.hidden_units=128 flow.base.type=gauss flow.base.learn_mean_var=false flow.type=perm-equi-spline-nf \\
   flow.layers=12 flow.blocks_per_layer=4 flow.group_size=6 flow.tail_bound=3 \\
-  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/21-06-16_170345\\
-  training.lr=3e-5 training.wd=1e-6 training.batch_size=256 evaluation.eval_batch_size=64 \\
-  training.max_grad_norm=1 training.warmup_iter=500\\
-  target.transform.canonical_sorting=true target.transform.version=LGT\\
-  training.overlap_penalty=50 training.mixing=0.0 training.energy_mode=full\\
+  training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-19/08-39-30_632046\\
+  training.lr=5e-5 training.wd=1e-6 training.batch_size=256 evaluation.eval_batch_size=64 \\
+  training.max_grad_norm=1 training.warmup_iter=250\\
+  target.transform.canonical_sorting=true target.transform.version=GPR\\
+  training.overlap_penalty=5 training.mixing=0.0 training.energy_mode=full\\
   training.n_iterations=3000 training.buffer.use=false training.buffer.prioritised=false training.lr_scheduler.decay_iter=3000 \\
-  evaluation.n_eval=10 evaluation.n_plots=10 evaluation.n_checkpoints=1
+  evaluation.n_eval=30 evaluation.n_plots=30 evaluation.n_checkpoints=1
 EOF
 
 
@@ -97,26 +97,31 @@ echo "Submitting GPU job: ${SLURM}"
 sbatch ${SLURM}
 
 # LGT stage 1
-# training.checkpoint_load_dir=/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-05/13-19-21_272406
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-18/21-50-48_669540
 # LGT stage 1- structure gauss
-# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/22-35-31_052320
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-18/09-34-30_089429
 # LGT stage 2
-# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/21-06-16_170345
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-19/08-37-35_506211
 # LGT stage 2 - structured gauss
-# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/11-01-38_439278
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-19/08-37-25_892744
 #LGT stage 1 - structured gauss - learnable
 # /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/22-02-32_007312
+
+#LGT longer
+# 
 
 # GPR stage 3 - structured
 # /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/22-35-24_624343
 
 # GPR stage 1
-#/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/22-28-27_109465
+#/home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-18/17-30-46_607608
 # GPR - stage 1 -structured gauss
-# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-13/22-35-19_938741
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-18/13-43-46_592586
 #GPR - stage 2
 # /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/10-52-27_144440
 #GPR -stage 2 - structure gauss
-# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/11-01-18_217693
+# /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-18/21-54-45_621932
 #GPR stage 1 structured gauss learnable
 # /home/fdolmans/HDD/results/fab/SoluteInwater/so2_in_water/MD_training/2026-06-14/22-02-42_727953
+
+# 
