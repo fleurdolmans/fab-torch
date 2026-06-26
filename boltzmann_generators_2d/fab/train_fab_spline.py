@@ -54,9 +54,9 @@ from potentials import SoluteSimulation2D
 from Library.boltzmann import BoltzmannGenerator2D
 
 
-from fab                                        import FABModel, Metropolis, PrioritisedBufferTrainer
-from fab.utils.prioritised_replay_buffer        import PrioritisedReplayBuffer
-from fab.utils.logging                          import ListLogger
+from boltzmann_generators_3d.fab                                        import FABModel, Metropolis, PrioritisedBufferTrainer
+from boltzmann_generators_3d.fab.utils.prioritised_replay_buffer        import PrioritisedReplayBuffer
+from boltzmann_generators_3d.fab.utils.logging                          import ListLogger
 
 from target       import SoluteTarget2D
 from flow_adapter import SoluteFlowFAB

@@ -1,0 +1,1 @@
+from boltzmann_generators_3d.fab.trainable_distributions.base import TrainableDistribution

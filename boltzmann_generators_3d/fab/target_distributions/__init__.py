@@ -1,0 +1,1 @@
+from boltzmann_generators_3d.fab.target_distributions.base import TargetDistribution

@@ -38,7 +38,7 @@ from scipy.optimize import linear_sum_assignment
 import torch
 import torch.nn as nn
 
-from fab.trainable_distributions.base import TrainableDistribution
+from boltzmann_generators_3d.fab.trainable_distributions.base import TrainableDistribution
 
 
 class SoluteFlowFAB(TrainableDistribution, nn.Module):

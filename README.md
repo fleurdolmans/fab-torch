@@ -1,22 +1,9 @@
 # Boltzmann Generators for Solute-Solvent Systems
 
-This codebase trains Boltzmann Generators (normalising flows) to sample from the Boltzmann distribution of solute-solvent systems. This folder consists of two codebases: 3Dis built on top of [FAB-torch](https://github.com/lollcat/fab-torch) (Flow Annealed importance sampling Bootstrap) and 2D is built on top of [BG LJ Dimer](https://github.com/weitse-hsu/boltzmann_generators/tree/master).
+This codebase trains Boltzmann Generators (normalising flows) to sample from the Boltzmann distribution of solute-solvent molecular systems. It contains two independent implementations:
 
----
-
-## Supported systems
-
-Three types of solute-solvent system are implemented: two in the 3D folder and one in the 2D folder. For 3D systems we use OpenMM to generated MD data, whereas for 2D we use Monte Carlo to sample MC data. 
-
-
-### PBC
-| System | Target class | Run script | Config |
-|---|---|---|---|
-| Triatomic solute (e.g. H2O, SO2) in explicit water | `SoluteInWater` | `experiments/solvation/run.py` | `experiments/solvation/config/SoluteInSolvent.yaml` |
-| LJ solute(s) + LJ solvent in 3D periodic box | `LJParticles` | `experiments/solvation/run_LJ.py` | `experiments/solvation/config/LJ.yaml` |
-
-### Non-PBC
-| LJ solute + LJ solvent in 2D non-periodic box | `LJParticles2D` | `experiments/solvation/run_LJ_2D.py` | *(derived from `LJ.yaml`)* |
+- **2D** (`boltzmann_generators_2d/`) — a 2D purely repulsive Lennard-Jones (LJ) system, based on [BG LJ Dimer](https://github.com/weitse-hsu/boltzmann_generators/tree/master).
+- **3D** (`boltzmann_generators_3d/`) — a full 3D framework built on top of [FAB-torch](https://github.com/lollcat/fab-torch) (Flow Annealed importance sampling Bootstrap), supporting real molecular systems (OpenMM) and LJ particle systems.
 
 ---
 
@@ -24,52 +11,96 @@ Three types of solute-solvent system are implemented: two in the 3D folder and o
 
 ```
 fab-torch/
-├── fab/
-│   ├── target_distributions/
-│   │   ├── solute_in_water.py          # Real molecular system (OpenMM)
-│   │   ├── solute_in_water_LJ.py       # 3D LJ solute-solvent system
-│   │   ├── solute_in_water_LJ_2D.py    # 2D LJ solute-solvent system
-│   │   └── boltzmann.py                # TransformedBoltzmann energy wrapper
-│   ├── transforms/
-│   │   ├── transform_LJ.py             # Coordinate transforms for LJ systems (v1-v4)
-│   │   ├── transform_LJ_2D.py          # Coordinate transforms for 2D LJ
-│   │   ├── global_3point_spherical_transform.py   # GPT transform for molecular systems
-│   │   ├── global3point_radial_rotvec_transform.py  # GPR transform
-│   │   ├── lab_frame_geometric_torus_transform.py   # LGT transform
-│   │   ├── sfic_transform.py           # SFIC transform
-│   │   └── sfic_torus_transform.py     # SFIC-T transform
-│   ├── flow/
-│   │   ├── water_coupling.py           # Permutation-equivariant water spline coupling
-│   │   └── solute_coupling.py          # Solute sub-flow layers
-│   ├── sampling_methods/
-│   │   ├── ais.py                      # Annealed Importance Sampling
-│   │   └── transition_operators/
-│   │       ├── hmc.py                  # Hamiltonian Monte Carlo
-│   │       └── metropolis.py           # Metropolis-Hastings
-│   ├── train_LJ.py                     # Trainer for LJ systems (forward KL)
-│   ├── train_with_prioritised_buffer_LJ.py  # Trainer with FAB + prioritised buffer
-│   └── core.py                         # FABModel core
-├── experiments/
-│   ├── solvation/
-│   │   ├── run.py                      # Entry point: real molecular system
-│   │   ├── run_LJ.py                   # Entry point: 3D LJ system
-│   │   ├── run_LJ_2D.py                # Entry point: 2D LJ system
-│   │   └── config/
-│   │       ├── SoluteInSolvent.yaml    # Config for real molecular system
-│   │       └── LJ.yaml                 # Config for LJ system
-│   ├── make_flow/
-│   │   ├── make_normflow_model.py      # Flow builder for molecular systems
-│   │   └── make_normflow_model_LJ.py   # Flow builder for LJ systems
-│   ├── setup_run_LJ.py                 # Trainer + model setup for LJ experiments
-│   └── setup_run.py                    # Trainer + model setup for molecular experiments
-├── data_generation/
-│   ├── md_data.py                      # MD data generation for molecular systems
-│   ├── md_data_LJ.py                   # MD data generation for LJ systems
-│   └── config/
-│       ├── make_md_data.yaml
-│       └── make_md_data_LJ.yaml
-└── config/
-    └── node/                           # Machine-specific path configs
+├── boltzmann_generators_2d/
+│   ├── config.py                        # Central config (system params, flow, training)
+│   ├── factories.py                     # Builders: build_system(), build_flow(), build_trainer()
+│   ├── Library/                         # Core physics, flows, training
+│   │   ├── potentials.py                # 2D LJ potential with soft harmonic walls
+│   │   ├── sampling.py                  # MetropolisSampler for MC data generation
+│   │   ├── boltzmann.py                 # ML / KL / overlap training loop
+│   │   ├── build_system.py              # Flow construction, RSA initialisation
+│   │   ├── evaluate.py                  # Evaluation metrics
+│   │   ├── visual.py                    # Visualisation helpers
+│   │   └── flow/
+│   │       ├── realnvp.py               # RealNVP affine coupling flow
+│   │       └── spline.py                # Rational-quadratic spline flow
+│   ├── fab/                             # FAB-specific wrappers
+│   │   ├── target.py                    # SoluteTarget2D / SoluteFullTarget2D
+│   │   ├── flow_adapter.py              # FAB-compatible flow interface
+│   │   └── train_fab_spline.py          # FAB training with spline flow + temperature curriculum
+│   ├── Notebooks/
+│   │   ├── Solute-LJ-Bath-2D.ipynb      # MC generation, pretraining (ML+KL), analysis
+│   │   └── MC_data/                     # Pre-generated MC trajectories (.npz)
+│   └── Trained_models/
+│       ├── FAB/                         # FAB-trained checkpoints (spline, per stage)
+│       ├── realnvp/                     # Pretrained RealNVP checkpoints
+│       └── spline/                      # Pretrained spline checkpoints
+│
+└── boltzmann_generators_3d/
+    ├── fab/                             # Core FAB library
+    │   ├── core.py                      # FABModel: flow + AIS + loss functions
+    │   ├── types_.py                    # Abstract base types
+    │   ├── train.py                     # Trainer (real molecular systems)
+    │   ├── train_LJ.py                  # TrainerLJ (LJ systems, forward KL + mixing)
+    │   ├── train_with_buffer.py         # BufferTrainer (non-prioritised replay)
+    │   ├── train_with_prioritised_buffer.py     # PrioritisedBufferTrainer (FAB + buffer)
+    │   ├── train_with_prioritised_buffer_LJ.py  # PrioritisedBufferTrainerLJ (LJ variant)
+    │   ├── target_distributions/
+    │   │   ├── solute_in_water.py       # Real molecular system (OpenMM, AMBER14/TIP3P)
+    │   │   ├── solute_in_water_LJ.py    # 3D LJ solute-solvent system (OpenMM)
+    │   │   ├── boltzmann.py             # TransformedBoltzmann energy wrapper
+    │   │   └── gaussian.py              # Gaussian target (for testing)
+    │   ├── transforms/
+    │   │   ├── global_3point_spherical_transform.py     # GPS (droplet + PBC)
+    │   │   ├── global3point_radial_rotvec_transform.py  # GPR (droplet)
+    │   │   ├── lab_frame_torus_transform.py             # LFT (PBC)
+    │   │   ├── lab_frame_geometric_torus_transform.py   # LGT (PBC)
+    │   │   └── transform_LJ.py                          # Coordinate transforms for LJ systems
+    │   ├── flow/
+    │   │   ├── water_coupling.py        # Permutation-equivariant water coupling layers
+    │   │   └── solute_coupling.py       # Solute sub-flow layers
+    │   ├── sampling_methods/
+    │   │   ├── ais.py                   # Annealed Importance Sampling
+    │   │   └── transition_operators/
+    │   │       ├── hmc.py               # Hamiltonian Monte Carlo
+    │   │       └── metropolis.py        # Metropolis-Hastings
+    │   └── utils/
+    │       ├── evaluate.py              # Evaluation metrics
+    │       ├── visuals.py               # Plotting utilities
+    │       ├── logging.py               # ListLogger, WandbLogger
+    │       ├── numerical.py             # ESS, expectation utilities
+    │       ├── replay_buffer.py
+    │       └── prioritised_replay_buffer.py
+    ├── experiments/
+    │   ├── setup_run.py                 # Model + trainer setup (molecular systems)
+    │   ├── setup_run_LJ.py              # Model + trainer setup (LJ systems)
+    │   ├── logger_setup.py
+    │   ├── load_model_for_eval.py
+    │   ├── make_flow/
+    │   │   ├── make_normflow_model_equi.py      # Permutation-equivariant droplet flows
+    │   │   ├── make_normflow_model_droplet.py   # Non-equivariant droplet flows
+    │   │   ├── make_normflow_model_torus.py     # PBC / torus flows
+    │   │   ├── make_normflow_model_gps.py       # GPS flow (droplet or PBC)
+    │   │   └── make_normflow_model_LJ.py        # Flow builder for LJ systems
+    │   ├── make_base/
+    │   │   ├── base.py                  # Base distribution factory (molecular)
+    │   │   └── base_LJ.py               # Base distribution factory (LJ)
+    │   └── solvation/
+    │       ├── run.py                   # Entry point: real molecular system
+    │       ├── run_LJ.py                # Entry point: LJ system
+    │       ├── run_pbc.py               # Entry point: PBC variant
+    │       └── config/
+    │           ├── SoluteInSolvent.yaml
+    │           └── LJ.yaml
+    ├── data_generation/
+    │   ├── md_data.py                   # MD data generation (molecular systems)
+    │   ├── md_data_LJ.py                # MD data generation (LJ systems)
+    │   └── config/
+    │       ├── make_md_data.yaml
+    │       └── make_md_data_LJ.yaml
+    ├── config/
+    │   └── node/                        # Machine-specific path configs
+    └── visualize_models.ipynb           # Model evaluation notebook
 ```
 
 ---
@@ -79,212 +110,283 @@ fab-torch/
 Requires conda. Clone this repository, `cd` into it, then:
 
 ```bash
-conda create --name bgsol python=3.7.16
+conda create --name bgsol python=3.11 -y
 conda activate bgsol
-conda install pytorch==1.8.1 torchvision==0.9.1 torchaudio==0.8.1 cudatoolkit=10.1 -c pytorch
-conda install -c conda-forge openmm cudatoolkit=10.1
-conda config --add channels omnia --add channels conda-forge
-conda install openmmtools
+
+# PyTorch (GPU)
+conda install -y pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
+
+# PyTorch (CPU / Apple Silicon)
+# conda install -y pytorch torchvision torchaudio -c pytorch
+
+# OpenMM and scientific packages
+conda install -y -c conda-forge numpy openmm openmmtools
+conda install -y -c conda-forge mdtraj pandas h5py
+
+# Python packages
+python -m pip install -U pip
 pip install -r requirements.txt
 ```
 
-If conda is slow resolving the environment, use the libmamba solver (available in newer conda versions).
+**Sanity checks:**
+```bash
+python -c "import torch; print('cuda?', torch.cuda.is_available(), 'cuda ver', torch.version.cuda)"
+python -c "import openmm, openmm.testInstallation; openmm.testInstallation.main()"
+```
+
+If conda is slow resolving the environment, use the libmamba solver.
 
 ---
 
-## How it works
+## 2D system (`boltzmann_generators_2d/`)
 
-### 1. Physical system and energy
+A 2D implementation of a single replusive LJ solute surrounded by repulsive LJ solvent particles in a non-periodic box. Energy is computed directly in PyTorch (no OpenMM), making it fast to iterate on and useful for debugging flow architectures.
 
-The target distribution is the Boltzmann distribution at temperature $T$:
+**System**: 1 fixed LJ solute at the origin + 36 LJ solvent particles in 2D. Input dimension to the flow is 72 (36 × 2D Cartesian).
 
-$$p(x) \propto \exp\!\left(-\frac{U(x)}{k_B T}\right)$$
+### Data generation
 
-where $U(x)$ is the potential energy of configuration $x$.
+Data is generated via **Metropolis Monte Carlo** using `MetropolisSampler` in `Library/sampling.py`. No MD or OpenMM required.
 
-- **Real molecular systems** (`SoluteInWater`): $U(x)$ is evaluated using OpenMM with AMBER14/TIP3P force fields. Supports droplet and PBC boundary conditions.
-- **LJ systems** (`LJParticles`, `LJParticles2D`): $U(x)$ is a Lennard-Jones potential evaluated in PyTorch (2D) or via OpenMM (3D), with a switching function and periodic boundary conditions.
+The sampler proposes single-particle displacements and accepts/rejects based on the Boltzmann weight. The system is initialised using **Random Sequential Addition** (RSA) from `Library/build_system.py` to avoid initial overlaps.
 
-### 2. Coordinate transforms (X ↔ I)
+The notebook drives data generation:
 
-The flow does not operate directly on Cartesian coordinates $X$ (e.g. due to translation/rotation symmetry and periodicity). Instead, configurations are mapped to *internal coordinates* $I$ via a fixed, invertible coordinate transform. The flow is trained in internal coordinate space.
+```python
+# from Notebooks/Solute-LJ-Bath-2D.ipynb
+sampler = MetropolisSampler(system, T=1.0, sigma_MC=0.1, stride=10)
+xtraj = sampler.run(n_steps=500_000)
+np.savez("Notebooks/MC_data/traj.npz", xtraj=xtraj)
+```
 
-Notation used throughout the code: **I → X** means a forward transform from internal to Cartesian; **X → I** means the inverse (used to transform MD data before feeding it to the flow).
+Pre-generated trajectories are stored in `Notebooks/MC_data/` as `.npz` files and used to seed the replay buffer during FAB training.
 
-#### Transforms for real molecular systems (`transform_version` in config)
+### Available flows
+
+Two flow architectures are implemented in `Library/flow/`:
+
+| Flow | File | Architecture | Input dim |
+|---|---|---|---|
+| RealNVP | `flow/realnvp.py` | Affine coupling layers, alternating binary masks, MLP conditioners | 72D (solvent) or 74D (all particles) |
+| Spline flow | `flow/spline.py` | Rational-quadratic spline coupling, odd/even particle partitioning, MLP or DeepSets conditioner | 72D (solvent only) |
+
+Both use a diagonal Gaussian base distribution (σ=1.0).
+
+**Default hyperparameters** (set in `config.py`):
+- 8 coupling blocks (16 layers total)
+- 256-dim hidden layers, 3-layer MLP conditioners
+- 8 spline bins, tail bound 5.5 (spline only)
+
+### Training
+
+Training is done using stage training:
+
+**Stage 1 — Pretraining** (`Library/boltzmann.py`):
+Trains the flow on MC data.
+
+
+**Stage 2 — ML + KL** (`Library/boltzmann.py`):
+Trains the flow on 20% MC data and on 80% energies of the flow genereted samples, with an overlap penlaty of 2. 
+
+
+**Stage 3 — KL only** (`Library/boltzmann.py`):
+Trains fully on energies of the flow genereted samples, with an overlap penlaty of 10.
+- after this we do some finetuning by running it for a small number of epoch with overlap penalty 20 and the 30. 
+
+
+**Stage 4 — (optional) FAB fine-tuning** (`fab/train_fab.py`, `fab/train_fab_spline.py`):
+Fine-tunes the pretrained flow with FAB using a **temperature curriculum**:
+
+| Stage | Temperature | Iterations |
+|---|---|---|
+| 1 | 5.0 | 30 |
+| 2 | 3.0 | 40 |
+| 3 | 2.0 | 50 |
+| 4 | 1.0 | 600 |
+
+Each stage uses AIS with 16 intermediate distributions and Metropolis transitions (15 steps, adaptive step size). Samples are stored in a prioritised replay buffer and reused for multiple gradient updates per AIS call.
+
+FAB checkpoints are saved per stage to `Trained_models/FAB/`.
+
+### Notebooks
+
+**`Notebooks/Solute-LJ-Bath-2D.ipynb`** — the main experimental notebook:
+- Monte Carlo data generation for different system sizes
+- RealNVP and spline flow pretraining (ML + KL + overlap)
+- Hungarian alignment preprocessing for particle permutation invariance
+- Checkpoint saving for FAB fine-tuning
+- Post-training analysis: radial distribution functions, position densities, energy distributions
+
+---
+
+## 3D system (`boltzmann_generators_3d/`)
+
+The full 3D framework for training Boltzmann Generators on realistic molecular systems using OpenMM or LJ potentials. Built on the FAB algorithm with AIS-based bootstrapping.
+
+### Target distributions
+
+The goal is to sample from the Boltzmann distribution $p(x) \propto \exp(-U(x) / k_B T)$ where:
+
+- **`SoluteInWater`** — triatomic solute (e.g. SO2, H2O) in explicit TIP3P water. $U(x)$ evaluated with OpenMM using AMBER14 force fields. Supports **droplet** and **PBC** boundary conditions.
+- **`SoluteInWaterLJ`** — one or more LJ solutes in a 3D periodic box of LJ solvent particles. $U(x)$ evaluated with OpenMM LJ potential and switching function.
+
+### Data generation
+
+MD simulations are run with OpenMM. Run from the `boltzmann_generators_3d/` directory:
+
+**Real molecular systems:**
+```bash
+python data_generation/md_data.py --config-name make_md_data.yaml
+```
+
+**LJ systems:**
+```bash
+python data_generation/md_data_LJ.py --config-name make_md_data_LJ.yaml
+```
+
+For LJ systems, initialisation follows: L-BFGS energy minimisation → short NVE equilibration → Nosé-Hoover thermostat equilibration → burn-in → production run.
+
+Output is saved as `.h5` files with a `coordinates` dataset of shape `(n_frames, 3N)` in nanometres.
+
+### Coordinate transforms (X ↔ I)
+
+The flow operates in *internal coordinates* $I$ rather than Cartesian coordinates $X$ to remove translational/rotational symmetry and handle periodicity. `transform.forward(i)` maps $I \to X$; `transform.inverse(x)` maps $X \to I$.
+
+**For real molecular systems** (`target.transform.version` in config):
+
+| Key | Class | Boundary | Description |
+|---|---|---|---|
+| `GPT` | `Global3PointSphericalTransform` | Droplet or PBC | 3-point spherical; removes 6 global DOF. Mixed radial + periodic angles. |
+| `GPR` | `Global3PointRadialRotvecTransform` | Droplet | Radial + rotation vector per water relative to 3 reference atoms. All in ℝ. |
+| `SFIC` | `SFICTransform` | Droplet | Solute-frame internal coordinates. |
+| `SFIC-T` | `SFICTorusTransform` | PBC | SFIC with torus parametrisation. |
+| `LGT` | `LabFrameGeometricTorusTransform` | PBC | Lab-frame torus coords; encodes solvent relative to solute. |
+
+**For LJ systems** (`target.transform_version` in config):
 
 | Key | Class | Description |
 |---|---|---|
-| `GPT` | `Global3PointSphericalTransform` | 3-point spherical transform; removes 6 global DOF (3 translation + 3 rotation), dim = `3N - 6` |
-| `GPR` | `Global3PointRadialRotvecTransform` | Radial + rotation vector representation for each water molecule relative to 3 reference atoms |
-| `SFIC` | `SFICTransform` | Solute-frame internal coordinates |
-| `LGT` | `LabFrameGeometricTorusTransform` | Lab-frame torus coordinates; encodes solvent positions relative to solute center |
-| `SFIC-T` | `SFICTorusTransform` | SFIC transform with torus parametrisation |
-
-The default for molecular systems is `LGT`.
-
-#### Transforms for LJ systems (`transform_version` in config)
-
-| Key | Class | Description |
-|---|---|---|
-| `v1` | `SolventOnlyTransform` | Identity on solvent coords; inserts fixed solute coordinates. `internal_dim = 3 * n_solvent` |
+| `v1` | `SolventOnlyTransform` | Identity on solvent; fixed solute. `internal_dim = 3 * n_solvent` |
 | `v2` | `SoluteCenteredSolventTransform` | Solvent coords relative to solute centroid |
-| `v3` | `TorusCartesianTransform` | Solvent coords on torus in Cartesian space |
-| `v4` | `FixedSoluteUnitTorusTransform` | Solvent coords mapped to unit torus `[0,1)` |
+| `v3` | `TorusCartesianTransform` | Solvent on torus in Cartesian space |
+| `v4` | `FixedSoluteUnitTorusTransform` | Solvent mapped to unit torus `[0, 1)³` |
 
-For 2D LJ systems the only supported transform is `v4` (`FixedSoluteUnitTorusTransform2D`).
+### Available flows
 
-### 3. Normalising flow
+Set via `flow.type` in config:
 
-A normalising flow $q_\theta(i)$ is trained to approximate $p(i)$, the Boltzmann distribution in internal coordinates. The flow is a stack of neural spline coupling layers (Rational Quadratic Splines) built using the `normflows` library.
+| Type | Equivariant | Boundary | Description |
+|---|---|---|---|
+| `shared-water-spline-nf` | No | Droplet | Shared-weight spline coupling over water blocks |
+| `spherical-circ-rqs-nf` | No | Droplet | Circular RQS on mixed radial + spherical coordinates (GPT transform) |
+| `coupled-rqs-nf` | No | Droplet | Standard flat RQS coupling on unconstrained internal coordinates |
+| `realnvp-nf` | No | Droplet | Affine coupling (RealNVP) on flat internal coordinates |
+| `circ-rqs-torus-nf` | No | **PBC only** | Circular RQS on torus coordinates |
+| `perm-equi-torus-nf` | **Yes** | **PBC only** | Permutation-equivariant spline flow on torus. Periodic τ angles with circular RQS. Water mean-pool conditioning. |
+| `perm-equi-joint-spline-nf` | **Yes** | Droplet | Jointly updates solute and water each layer. Water conditioned on mean-pool. |
+| `perm-equi-spline-nf` | **Yes** | Droplet | Water-only flow conditioned on pairwise O-O distances (RBF geometry). Solute used as context only. |
+| `perm-equi-gps-nf` | **Yes** | Both | 9D spherical water blocks (O + H1 + H2). Mean-pool + solute shape conditioning. |
 
-- **Molecular systems**: Supports circular coupling for bond angle dimensions. Flow builder: `make_normflow_model.py`.
-- **LJ systems**: Coupling layers operate on groups of 3 (xyz per particle); optionally permutation-equivariant over solvent molecules using `PermEquiWaterSplineCoupling` in `fab/flow/water_coupling.py`. Flow builder: `make_normflow_model_LJ.py`.
-
-Key flow hyperparameters (set in the config):
+**Key flow hyperparameters** (in config):
 
 | Parameter | Description |
 |---|---|
-| `flow.n_layers` / `flow.blocks` | Number of coupling layers |
-| `flow.hidden_units` | Hidden layer width of conditioner networks |
-| `flow.num_bins` | Number of spline bins |
-| `flow.tail_bound` | Spline tail bound (assumes ~unit-variance data) |
-| `flow.group_size` | Feature group size for coupling splits (6 for molecular systems: xyz per water) |
-| `flow.base.type` | Base distribution type (e.g. `gauss-uni`, shell-based) |
+| `flow.layers` | Number of coupling layers |
+| `flow.hidden_units` | Conditioner network hidden width |
+| `flow.num_bins` | Number of RQS spline bins |
+| `flow.tail_bound` | Spline tail bound |
+| `flow.dropout` | Dropout rate in conditioner networks |
+| `flow.base.type` | Base distribution (`gauss`, `structured-gauss`) |
 
-### 4. Training
+### Training
 
-Two training modes are supported:
+#### Loss types (`fab.loss_type` in config)
 
-#### Forward KL (likelihood training)
-Minimises the forward KL divergence $D_\text{KL}(p \| q)$ using MD samples. This requires pre-generated MD data. Corresponds to maximum likelihood training on the MD trajectory.
+| Loss | Requires MD data | Description |
+|---|---|---|
+| `forward_kl` | Yes | Maximum likelihood on MD samples. Stable, requires a pre-generated dataset. |
+| `base_transport` | Yes | Base transport on MD samples. |
+| `fab_alpha_div` | No | FAB loss. AIS generates importance-weighted samples targeting $p^\alpha / q^{\alpha-1}$. |
+| `fab_ub_alpha_2_div` | No | Upper bound on alpha-2 divergence. Conservative FAB variant. |
+| `flow_reverse_kl` | No | Mode-seeking reverse KL from flow samples. |
+| `flow_alpha_2_div` | No | Alpha-2 divergence estimated from flow samples. |
 
-Trainer: `fab/train_LJ.py` (`TrainerLJ`)
+#### Trainers
 
-#### FAB (Flow Annealed importance sampling Bootstrap)
-Minimises an alpha-divergence objective without requiring MD samples for training (only for evaluation). Uses Annealed Importance Sampling (AIS) with HMC or Metropolis transitions to generate improved samples, optionally stored in a prioritised replay buffer.
+| Class | File | When to use |
+|---|---|---|
+| `Trainer` | `train.py` | Real molecular systems (`SoluteInWater`). Forward KL, base transport, and reverse KL. SO2/water-specific overlap penalty. |
+| `TrainerLJ` | `train_LJ.py` | LJ systems. Same loss modes plus optional mixing of MD and reverse-KL objectives. Generic LJ overlap penalty. Saves flow samples as `.h5` and `.pdb` at end of training. |
+| `PrioritisedBufferTrainer` | `train_with_prioritised_buffer.py` | FAB with prioritised experience replay (molecular systems). Targets $p^\alpha / q^{\alpha-1}$. |
+| `PrioritisedBufferTrainerLJ` | `train_with_prioritised_buffer_LJ.py` | Same, LJ variant. |
+| `BufferTrainer` | `train_with_buffer.py` | FAB with non-prioritised replay buffer. |
 
-Trainer: `fab/train_with_prioritised_buffer_LJ.py` (`PrioritisedBufferTrainer`)
+The trainer is selected automatically in `setup_run.py` / `setup_run_LJ.py` based on `fab.loss_type` and `training.buffer` settings.
 
-The training mode is controlled by `fab.loss_type` and `training.buffer` in the config.
+#### FAB mechanism
 
----
+When using a FAB loss with a replay buffer:
+1. AIS runs from $q_\theta$ toward $p^\alpha / q^{\alpha-1}$ using HMC or Metropolis transitions.
+2. Samples and log-weights are stored in a prioritised replay buffer.
+3. Multiple gradient steps are taken per AIS call using buffered samples.
+4. Log-weights are adjusted in the buffer to account for flow parameter updates.
 
-## Generating MD data
+#### Optional: overlap penalty
 
-MD simulations to generate training/validation data are run using OpenMM.
+`Trainer` and `TrainerLJ` support an auxiliary clash penalty on flow samples to discourage atom overlaps (`overlap_penalty` in config). For the real molecular system this is a SO2/water-specific pairwise penalty; for LJ systems it is a generic solute-solvent and solvent-solvent penalty.
 
-For real molecular systems:
-```bash
-python ./data_generation/md_data.py --config-name make_md_data.yaml
-```
+#### Optional: MD mixing
 
-For LJ systems:
-```bash
-python ./data_generation/md_data_LJ.py --config-name make_md_data_LJ.yaml
-```
+When using a reverse-KL or FAB loss, a fraction `mixing` of each batch can be drawn from MD data and trained with likelihood loss simultaneously.
 
-Output is saved as `.h5` files containing a `coordinates` dataset of shape `(n_frames, dim)`, in nanometres.
+### Running experiments
 
----
+All experiments use [Hydra](https://hydra.cc/). Run from `boltzmann_generators_3d/`:
 
-## Running experiments
-
-All experiments use [Hydra](https://hydra.cc/) configs. Commands should be run from the repository root with the conda environment active.
-
-### Node configuration
-
-Machine-specific paths (data directories, output directories) are defined in `config/node/`. The default node is `desktop`. Create your own node file and update the `defaults` in the relevant config to use it automatically. Alternatively, override on the command line:
-
-```bash
-python experiments/solvation/run_LJ.py --config-name LJ.yaml node=snellius
-```
-
-You can also set the `MAIN_DIR` environment variable to the root of the repository so that Hydra can locate the `config/` directory:
-
-```bash
-export MAIN_DIR=/path/to/fab-torch
-```
-
-### Real molecular system (H2O or SO2 in water)
-
+**Real molecular system (SO2 or H2O in water):**
 ```bash
 python experiments/solvation/run.py --config-name SoluteInSolvent.yaml
 ```
 
-Key config options in `SoluteInSolvent.yaml`:
-
-| Option | Description |
-|---|---|
-| `target.solute_name` | Name of the solute (e.g. `water`, `so2`). Must match a `.pdb` (and optionally `.xml`) file in the data directory. |
-| `target.num_solvent_molecules` | Number of water molecules |
-| `target.boundary_condition` | `droplet` or `pbc` |
-| `target.transform.version` | Coordinate transform: `LGT` (default), `GPT`, `GPR`, `SFIC`, `SFIC-T` |
-| `target.temperature` | Temperature in Kelvin |
-| `target.train_samples_path` | Path to MD training data (`.h5` or `.pt`) |
-| `target.val_samples_path` | Path to MD validation data |
-
-### 3D LJ system
-
+**LJ system:**
 ```bash
 python experiments/solvation/run_LJ.py --config-name LJ.yaml
 ```
 
-Key config options in `LJ.yaml`:
-
-| Option | Description |
-|---|---|
-| `target.n_solvent` | Number of LJ solvent particles |
-| `target.solute_positions_nm` | List of fixed solute positions `[[x,y,z], ...]` |
-| `target.solvent_sigma_nm` | Solvent LJ sigma (nm) |
-| `target.solvent_epsilon_kjmol` | Solvent LJ epsilon (kJ/mol) |
-| `target.solute_sigma_nm` | Solute LJ sigma (nm) |
-| `target.box_length_nm` | Cubic box side length (nm) |
-| `target.transform_version` | Coordinate transform: `v1` (default), `v2`, `v3`, `v4` |
-| `target.temperature` | Temperature (reduced units: K) |
-| `target.base_state` / `target.target_state` | Labels for base/target MD simulation versions |
-
-### 2D LJ system
-
+**On a cluster (e.g. Snellius):**
 ```bash
-python experiments/solvation/run_LJ_2D.py --config-name LJ.yaml
-```
-
-Operates in 2D: particles have $(x, y)$ coordinates. The energy is computed directly in PyTorch (no OpenMM), making this lightweight for debugging. Only `transform_version: v4` is supported.
-
-### On a cluster (e.g. Snellius)
-
-Set `PYTHONPATH` and `LD_LIBRARY_PATH` if needed:
-
-```bash
-PYTHONPATH="/path/to/fab-torch" \
+PYTHONPATH="/path/to/fab-torch/boltzmann_generators_3d" \
 LD_LIBRARY_PATH="/path/to/conda/envs/bgsol/lib" \
 /path/to/conda/envs/bgsol/bin/python \
   experiments/solvation/run_LJ.py --config-name LJ.yaml node=snellius
 ```
 
+Machine-specific paths live in `config/node/`. Override on the command line with `node=<name>`.
+
+### Notebooks
+
+**`visualize_models.ipynb`** — loads saved checkpoints and generates evaluation plots: radial distribution functions, energy histograms, position densities, and marginal distributions.
+
 ---
 
-## Evaluation metrics
+## Evaluation metrics (3D)
 
-At each evaluation step (controlled by `evaluation.n_eval` in config), the following metrics are computed and logged:
+At each evaluation step (controlled by `n_eval` in config):
 
 | Metric | Description |
 |---|---|
 | `flow_test_log_prob` | Mean log probability of MD validation data under the flow |
 | `flow_test_log_prob_per_dim` | Same, normalised per internal coordinate dimension |
-| `eval_ess_flow` | Effective Sample Size of flow samples under the target |
-| `flow_frac_clipped` | Fraction of flow samples with clipped (high) energies |
-| `mean_forward_kl_marginals` | Mean per-dimension forward KL estimated from marginal histograms |
-| `mean_reverse_kl_marginals` | Mean per-dimension reverse KL estimated from marginal histograms |
-
-Metrics are saved to `{hydra.run.dir}/metrics/metrics_{iteration}.json`.
+| `eval_ess_flow` | Effective sample size of flow samples reweighted to target |
+| `flow_frac_clipped` | Fraction of flow samples with energy above `energy_cut` |
+| `mean_forward_kl_marginals` | Mean per-dimension forward KL from marginal histograms |
+| `mean_reverse_kl_marginals` | Mean per-dimension reverse KL from marginal histograms |
 
 ---
 
-## Logging
+## Logging (3D)
 
-We recommend [Weights & Biases](https://wandb.ai) for logging. Configure it in the config:
+Configure [Weights & Biases](https://wandb.ai) in the config:
 
 ```yaml
 logger:
@@ -294,39 +396,47 @@ logger:
     entity: my_wandb_entity
 ```
 
-Output is also stored on disk in the `hydra.run.dir` directory:
+Output saved to `{hydra.run.dir}/`:
 
 ```
 {hydra.run.dir}/
-├── plots/                  # Saved figures
-├── metrics/                # JSON files with evaluation metrics
-├── model_checkpoints/      # Model checkpoint files
-└── wandb/                  # W&B run files (config, logs, media)
+├── plots/              # Saved figures
+├── model_checkpoints/  # Checkpoints (model + optimizer state)
+└── wandb/              # W&B run files
 ```
 
 ---
 
-## Code conventions
+## Code conventions (3D)
 
-- **log_p** refers to the log probability of the Boltzmann target $p$.
-- **log_q** refers to the log probability of the flow $q_\theta$.
-- **I** = internal coordinates (flow space); **X** = Cartesian coordinates.
+- `log_p` — log probability of the Boltzmann target $p$.
+- `log_q` — log probability of the flow $q_\theta$.
+- `I` = internal coordinates (flow space); `X` = Cartesian coordinates.
 - `transform.forward(i)` maps $I \to X$; `transform.inverse(x)` maps $X \to I$.
 - All coordinates are in **nanometres**.
-- `energy_cut` / `energy_max`: energies above `energy_cut` are handled with a soft log regularisation; above `energy_max` they are clamped. Set `target.n_threads = 1` to simplify debugging.
+- `train_data_i` / `train_logdet_xi` — MD data transformed to internal coordinates, stored on the target distribution object.
+- `energy_cut` / `energy_max` — energies above `energy_cut` are regularised with a soft log; above `energy_max` they are clamped.
 
 ---
 
 ## Good starting hyperparameters
 
-For likelihood training on the LJ system:
+**2D system — FAB spline:**
+- Pretrain with ML + KL for 200 epochs before FAB
+- FAB: temperature curriculum T = 5 → 3 → 2 → 1, ~600 iterations at T=1
+- Adam, LR `5e-5`, gradient clipping norm 5.0
+
+**3D system — forward KL on LJ:**
 - 50 000 iterations, batch size 1024
-- Learning rate `7e-5`, weight decay `1e-5`, cosine LR schedule
-- 36 flow layers, hidden dimension 256, 8 spline bins
+- Learning rate `7e-5`, cosine schedule
+- 36 flow layers, hidden dim 256, 8 spline bins, tail bound 4.0
 
-For likelihood training on the molecular system:
-- 5 000 iterations is enough to check overfitting on 100–1000 MD samples
+**3D system — forward KL on real molecular system:**
+- 5 000 iterations to detect overfitting on 100–1000 MD samples
 - Learning rate `5e-4`, weight decay `1e-5`
-- 12 flow layers, hidden dimension 256, 8 spline bins
+- 12 flow layers, hidden dim 256, 8 spline bins
 
-FAB training is significantly slower than likelihood training. Use FAB only once likelihood training is working.
+**3D system — FAB:**
+- Start with forward KL pre-training until the flow has reasonable coverage.
+- Then switch to FAB (`fab_alpha_div`, α=2) with a prioritised buffer.
+- FAB is significantly slower per iteration than likelihood training.
